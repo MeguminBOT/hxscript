@@ -224,8 +224,11 @@ class Module {
 	 */
 	public function start(?environment:Environment):Void {
 		try {
-			if (decls.length == 0)
-				throw 'Module is uninitialized';
+			// A body entirely inside an unmet `#if` legitimately parses to nothing.
+			if (decls.length == 0) {
+				started = true;
+				return;
+			}
 
 			starting = true;
 

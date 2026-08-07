@@ -96,7 +96,10 @@ class TypeCollection {
 		var t = types.byPath.get(path);
 
 		if (t == null && moduleCheck) {
-			var name = path.substring(path.lastIndexOf('.'));
+			// A dotless path has no name to take, and `substring(-1)` would return the whole string.
+			var at:Int = path.lastIndexOf('.');
+			var name:String = at < 0 ? '.$path' : path.substring(at);
+
 			return fromPath(path + name, false);
 		}
 

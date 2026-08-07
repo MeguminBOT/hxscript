@@ -85,6 +85,17 @@ class ScriptedMacro {
 		 * @param t The type to convert.
 		 * @return The equivalent complex type.
 		 */
+		/**
+		 * A type's readable path, without repeating the module when the type is its main one.
+		 *
+		 * @param module The module path.
+		 * @param name The type's own name.
+		 * @return `pack.Module` or `pack.Module.Name`.
+		 */
+		function typePath(module:String, name:String):String {
+			return (module == name || module.endsWith('.$name')) ? module : '$module.$name';
+		}
+
 		function toCT(t:Type):ComplexType {
 			/**
 			 * Builds a path from a type's MODULE rather than its package, so a sub-module type keeps its
@@ -268,6 +279,198 @@ class ScriptedMacro {
 				}
 
 				/**
+				 * Repairs the three things `Context.getTypedExpr` cannot round-trip.
+				 *
+				 * Re-emitting a native constructor means taking a body the typer has already lowered and
+				 * asking the typer to accept it again somewhere else. Three constructs do not survive
+				 * that, and each one reports from inside the original library's source, naming neither
+				 * the bridge nor the base that asked for it:
+				 *
+				 * - a **sub-module type** loses its qualifier, so `new FlxButtonEvent()` re-emits
+				 *   unqualified and fails with `Type not found: FlxButtonEvent`;
+				 * - a **compiler temporary** from inlined code is named with a backtick, which is not a
+				 *   variable name (`"`" is not a valid variable name`).
+				 *
+				 * The typed form still knows the qualifiers, so it is walked first to collect them and
+				 * the emitted syntax is rewritten against that.
+				 *
+				 * - an **abstract's implementation class** is named directly, so reading an enum
+				 *   abstract's constant comes back as `FlxButtonState_Impl_.NORMAL`
+				 *   (`has no field FlxButtonState_Impl_`).
+				 *
+				 * The last one is only repairable for a genuine static. An abstract's *instance* members
+				 * are compiled to statics on the same class and marked `@:impl`, and those have no
+				 * spelling that works from outside; `reemittableConstructor` refuses those instead of
+				 * guessing.
+				 *
+				 * @param typed The expression as the typer left it.
+				 * @param e The same expression re-emitted as syntax.
+				 * @return The syntax, repaired.
+				 */
+				function requalify(typed:TypedExpr, e:Expr):Expr {
+					var qualified:Map<String, TypePath> = [];
+					var abstractOf:Map<String, Array<String>> = [];
+
+					function collect(t:TypedExpr):Void {
+						if (t == null)
+							return;
+
+						switch (t.expr) {
+							case TNew(c, _, _):
+								var cls:ClassType = c.get();
+								var parts:Array<String> = cls.module.split('.');
+								var moduleName:String = parts.pop();
+
+								// An abstract is constructed through an impl class that cannot be named.
+								var name:String = cls.name.endsWith('_Impl_') ? cls.name.substr(0, cls.name.length - 6) : cls.name;
+
+								if (!qualified.exists(cls.name))
+									qualified.set(cls.name, {pack: parts, name: moduleName, sub: (moduleName == name ? null : name)});
+
+							case TField(_, FStatic(c, _)) | TTypeExpr(TClassDecl(c)):
+								var cls:ClassType = c.get();
+
+								if (cls.name.endsWith('_Impl_') && !abstractOf.exists(cls.name)) {
+									switch (cls.kind) {
+										case KAbstractImpl(a):
+											var ab:AbstractType = a.get();
+											var parts:Array<String> = ab.module.split('.');
+
+											if (parts[parts.length - 1] != ab.name)
+												parts.push(ab.name);
+
+											abstractOf.set(cls.name, parts);
+										default:
+									}
+								}
+
+							default:
+						}
+
+						haxe.macro.TypedExprTools.iter(t, collect);
+					}
+
+					collect(typed);
+
+					function implName(x:Expr):Null<String> {
+						return switch (x.expr) {
+							case EField(_, name, _) if (name.endsWith('_Impl_')): name;
+							case EConst(CIdent(name)) if (name.endsWith('_Impl_')): name;
+							default: null;
+						}
+					}
+
+					function fix(x:Expr):Expr {
+						return switch (x.expr) {
+							case ENew(t, params) if (t.pack.length == 0 && t.sub == null && qualified.exists(t.name)):
+								var q:TypePath = qualified.get(t.name);
+								{pos: x.pos, expr: ENew({pack: q.pack, name: q.name, sub: q.sub, params: t.params}, [for (p in params) fix(p)])};
+
+							case EField(owner, member, kind) if (implName(owner) != null && abstractOf.exists(implName(owner))):
+								{pos: x.pos, expr: EField(macro $p{abstractOf.get(implName(owner))}, member, kind)};
+
+							case EConst(CIdent(name)) if (name.indexOf('`') >= 0):
+								{pos: x.pos, expr: EConst(CIdent(name.replace('`', '_')))};
+
+							case EVars(vars):
+								{
+									pos: x.pos,
+									expr: EVars([
+										for (v in vars)
+											{
+												name: v.name.replace('`', '_'),
+												type: v.type,
+												expr: v.expr == null ? null : fix(v.expr),
+												isFinal: v.isFinal,
+												isStatic: v.isStatic,
+												meta: v.meta
+											}
+									])
+								};
+
+							default:
+								x.map(fix);
+						}
+					}
+
+					return fix(e);
+				}
+
+				/**
+				 * Why a native constructor cannot be rebuilt in the bridge, or null when it can.
+				 *
+				 * A bridge rebuilds the base's constructor so a script's `new` can drive it. That means
+				 * re-typing a body the typer has already lowered, and two things in a lowered body can
+				 * never be re-typed anywhere else: a `private` type, which the bridge is not allowed to
+				 * name, and an abstract's implementation class, whose members do not exist under any
+				 * spelling reachable from outside.
+				 *
+				 * Without this the build fails anyway -- with a handful of errors reported inside the
+				 * library's own source, naming neither the bridge nor the base that pulled it in. That
+				 * is the failure this turns into a sentence.
+				 *
+				 * @param e The typed constructor body.
+				 * @return The reason, or null if the body is re-emittable.
+				 */
+				function reemittableConstructor(e:TypedExpr):Null<String> {
+					if (e == null)
+						return null;
+
+					var reason:Null<String> = null;
+
+					// `_Impl_` classes are private, and each position reaching one is handled by name below.
+					function why(cls:ClassType, verb:String):Null<String> {
+						if (cls.name.endsWith('_Impl_'))
+							return null;
+						if (cls.isPrivate)
+							return 'it $verb ${typePath(cls.module, cls.name)}, which is private';
+						return null;
+					}
+
+					function look(t:TypedExpr):Void {
+						if (t == null || reason != null)
+							return;
+
+						switch (t.expr) {
+							case TNew(c, _, _):
+								reason = why(c.get(), 'constructs');
+
+							case TTypeExpr(TClassDecl(c)):
+								var cls:ClassType = c.get();
+
+								if (cls.name.endsWith('_Impl_'))
+									reason = 'it names the implementation of abstract ${cls.module}, which is reachable under no name';
+								else
+									reason = why(cls, 'names');
+
+							case TField(_, FStatic(c, cf)):
+								var cls:ClassType = c.get();
+
+								if (cls.name.endsWith('_Impl_')) {
+									// Returns without descending; the type expression under it would re-trip the rule above.
+									if (cf.get().meta.has(':impl'))
+										reason = 'it calls ${cf.get().name} on abstract ${cls.module}, which has no form reachable from outside';
+
+									return;
+								}
+
+								reason = why(cls, 'reads a static of');
+
+							case TBinop(OpAssign | OpAssignOp(_), {expr: TLocal(v)}, _) if (v.name == 'this'):
+								reason = 'it inlines an abstract\'s constructor, which assigns to `this`';
+
+							default:
+						}
+
+						if (reason == null)
+							haxe.macro.TypedExprTools.iter(t, look);
+					}
+
+					look(e);
+					return reason;
+				}
+
+				/**
 				 * Whether a typed initializer references `this` anywhere.
 				 *
 				 * Such an initializer cannot be re-emitted into the constructor: either it reads instance
@@ -392,7 +595,14 @@ class ScriptedMacro {
 							}
 					}
 
-					var expr = Context.getTypedExpr(constr.expr());
+					var typedConstr:TypedExpr = constr.expr();
+
+					var refusal:Null<String> = reemittableConstructor(typedConstr);
+					if (refusal != null)
+						Context.error('${cls.name}: ${typePath(type.module, type.name)} cannot be extended for scripting, because $refusal. Remove it from the bridged bases; scripts can still import and construct it.',
+							pos);
+
+					var expr = requalify(typedConstr, Context.getTypedExpr(typedConstr));
 					switch (expr.expr) {
 						default:
 						case EFunction(_, fun):

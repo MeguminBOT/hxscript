@@ -223,6 +223,15 @@ class ExposeMacro {
 							if (meta.length == 0)
 								continue;
 
+							switch (field.kind) {
+								case FVar(AccCall, _) if (!field.meta.has(':isVar')):
+									Context.warning(':scriptStatic on ${field.name} exposes a property with no backing field, so scripts read null. Expose a function instead, or add @:isVar.',
+										field.pos);
+								case FVar(AccNever | AccNo, _):
+									Context.warning(':scriptStatic on ${field.name} exposes a static that cannot be read, so scripts read null.', field.pos);
+								default:
+							}
+
 							var name:String = field.name;
 							if (meta[0].params != null && meta[0].params.length > 0) {
 								switch (meta[0].params[0].expr) {
