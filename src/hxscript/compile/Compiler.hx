@@ -144,12 +144,35 @@ class Compiler {
 
 			var started:Float = haxe.Timer.stamp();
 
-			// Classes already compiled for another world are outside this batch, and a module naming
-			// one has to stay interpreted: cppia links a class either inside the module being loaded
-			// or as a host class, and this is neither.
+			// Anything scripted that this batch does not itself declare is outside it, and a module
+			// naming one has to stay interpreted: cppia links a class either inside the module being
+			// loaded or as a host class, and a scripted class elsewhere is neither.
+			//
+			// Two sources, and the second is easy to miss. Classes already compiled for another world
+			// are obviously outside. So is every other module of *this* world when only a subset was
+			// offered, which is the normal case: a state re-entered later brings its own batch, and
+			// the classes it was written beside are not in it. Leaving those out does not make them
+			// reachable, it only stops the compiler knowing they are not, so instead of refusing the
+			// module it emits a direct link that resolves to nothing and rejects the whole batch at
+			// load with a bad link naming a class that plainly exists.
 			var outside:Array<String> = [];
 			for (path in built.keys())
 				outside.push(path);
+
+			var mine:Map<String, Bool> = new Map();
+			for (input in inputs)
+				for (path in Cppia.declaredPaths(input.decls))
+					mine.set(path, true);
+
+			for (module in env.modules) {
+				if (module == null || module.decls == null)
+					continue;
+
+				for (path in Cppia.declaredPaths(module.decls)) {
+					if (!mine.exists(path) && outside.indexOf(path) < 0)
+						outside.push(path);
+				}
+			}
 
 			var result:CppiaResult = Cppia.compile(inputs, ambient, outside, statics);
 			report.ms = (haxe.Timer.stamp() - started) * 1000;
