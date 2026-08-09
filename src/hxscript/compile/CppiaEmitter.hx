@@ -1044,10 +1044,27 @@ class CppiaEmitter {
 						w.token('!');
 					case '~':
 						w.token('~');
-					case '++':
-						w.token(prefix ? '++' : '+++');
-					case '--':
-						w.token(prefix ? '--' : '---');
+					case '++' | '--':
+						// Postfix must yield the value from before the change, so correct by one.
+						if (repeatableField(inner)) {
+							var step:String = op == '++' ? '+' : '-';
+							var back:String = op == '++' ? '-' : '+';
+							var one:Expr = {e: EConst(CInt(1)), pos: e.pos};
+
+							var changed:Expr = {
+								e: EBinop('=', inner, {e: EBinop(step, inner, one), pos: e.pos}),
+								pos: e.pos
+							};
+
+							if (prefix) {
+								expr(changed);
+							} else {
+								expr({e: EBinop(back, {e: EParent(changed), pos: e.pos}, one), pos: e.pos});
+							}
+							return;
+						}
+
+						w.token(op == '++' ? (prefix ? '++' : '+++') : (prefix ? '--' : '---'));
 					default:
 						throw new CppiaUnsupported('unary operator ' + op, e.pos);
 				}
@@ -1195,7 +1212,7 @@ class CppiaEmitter {
 	function emitBlockBody(list:Array<Expr>, pos:Position):Void {
 		var out:Array<Expr> = [];
 		for (item in list)
-			out.push(item);
+			out.push(discardedIncrement(item));
 
 		w.int(out.length);
 		w.newline();
@@ -1375,6 +1392,13 @@ class CppiaEmitter {
 		}
 
 		if (ASSIGN_OPS.indexOf(op) >= 0) {
+			// cppia has no settable target for a field reached through anything but `this`, so write
+			// the compound form out long-hand.
+			if (repeatableField(e1)) {
+				emitBinop('=', e1, {e: EBinop(op.substr(0, op.length - 1), e1, e2), pos: pos}, pos);
+				return;
+			}
+
 			w.pos(line);
 			w.token(op);
 			expr(e1);
@@ -2993,6 +3017,53 @@ class CppiaEmitter {
 		w.type(target.substr(0, split));
 		w.str(target.substr(split + 2));
 		return true;
+	}
+
+	/** Whether a field target can be evaluated twice, which the long-hand rewrite needs. */
+	function repeatableField(e:Expr):Bool {
+		switch (e.e) {
+			case EField(obj, _, maybe):
+				if (maybe == true || obj.e.match(EIdent('this'))) {
+					return false;
+				}
+				return sideEffectFree(obj);
+
+			case _:
+				return false;
+		}
+	}
+
+	/** Whether an expression can be evaluated again without changing anything. */
+	function sideEffectFree(e:Expr):Bool {
+		switch (e.e) {
+			case EIdent(_):
+				return true;
+
+			case EConst(_):
+				return true;
+
+			case EField(obj, _, maybe):
+				return maybe != true && sideEffectFree(obj);
+
+			case EParent(inner):
+				return sideEffectFree(inner);
+
+			case _:
+				return false;
+		}
+	}
+
+	/** Turns a discarded `a.b++` into an assignment; only valid where the result is unused. */
+	function discardedIncrement(e:Expr):Expr {
+		switch (e.e) {
+			case EUnop(op, _, inner) if ((op == '++' || op == '--') && repeatableField(inner)):
+				var one:Expr = {e: EConst(CInt(1)), pos: e.pos};
+				var sum:Expr = {e: EBinop(op == '++' ? '+' : '-', inner, one), pos: e.pos};
+				return {e: EBinop('=', inner, sum), pos: e.pos};
+
+			case _:
+				return e;
+		}
 	}
 
 	/** Classes from this batch that the emitted code names. */
