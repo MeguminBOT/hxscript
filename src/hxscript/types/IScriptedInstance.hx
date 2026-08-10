@@ -11,9 +11,9 @@ using hxscript.types.TypeCollection;
 /**
  * The interface a generated bridge class implements so a native instance can behave as a scripted
  * one: it carries the scripted class, the instance's interpreter and variables, safe-mode flags, and
- * the constructor entry point. Built automatically by `ScriptedMacro` on any implementor.
+ * the constructor entry point. Built automatically by `Scripted` on any implementor.
  */
-@:autoBuild(hxscript.macro.ScriptedMacro.build())
+@:autoBuild(hxscript.macro.Scripted.build())
 interface IScriptedInstance extends ICustomReflection extends ICustomClassType {
 	/** The scripted class this instance is an instance of. */
 	private var __base:ScriptedClass;
@@ -39,5 +39,5 @@ interface IScriptedInstance extends ICustomReflection extends ICustomClassType {
 	 * @param base The scripted class being instantiated.
 	 * @param arguments Constructor arguments.
 	 */
-	private function __construct(base:ScriptedClass, arguments:Array<Dynamic>):Void;
+	private function __scriptConstruct(base:ScriptedClass, arguments:Array<Dynamic>):Void;
 }

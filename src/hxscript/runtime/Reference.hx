@@ -7,16 +7,16 @@ import hxscript.runtime.Variable;
  * It lets a bare name stand for something that is not a plain value: a super call, a property, or an
  * enum constructor.
  */
-enum Mirror {
+enum Reference {
 	/** A `super` reference carrying the captured locals and constructor to invoke. */
-	MSuper(?locals:Map<String, Variable>, ?constructor:Dynamic);
+	RSuper(?locals:Map<String, Variable>, ?constructor:Dynamic);
 
 	/** A property `f` on target `t`, resolved through getters/setters on access. */
-	MProperty(t:Dynamic, f:String);
+	RProperty(t:Dynamic, f:String);
 
 	/** Enum `t`'s constructor at index `i`, materialized to the value (or a builder) on use. */
-	MEnumValue(t:Dynamic, i:Int);
+	REnumValue(t:Dynamic, i:Int);
 
 	/** Enum-abstract `t`'s constant at index `i`. */
-	MAbstractEnumValue(t:Dynamic, i:Int);
+	RAbstractEnumValue(t:Dynamic, i:Int);
 }

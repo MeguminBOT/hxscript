@@ -1,9 +1,9 @@
 package hxscript;
 
-#if (!macro) import hxscript.tools.Defines; #end
+#if (!macro) import hxscript.setup.Defines; #end
 import hxscript.syntax.Expr;
 import hxscript.proxy.*;
-#if hl import hxscript.proxy.HLMath; #end
+#if (hl || python) import hxscript.proxy.MathProxy; #end
 
 /**
  * Global, process-wide interpreter configuration: which interpreter class to instantiate, access
@@ -16,37 +16,25 @@ class Config {
 	public static var interpClass:Class<hxscript.runtime.Interp> = hxscript.runtime.Interp;
 
 	/**
-	 * Enforces `private` on script-declared members: reading or writing one from
-	 * outside the declaring class (or a subclass) errors instead of succeeding.
-	 * Only explicit `private` counts -- scripts treat unmarked members as public,
-	 * unlike Haxe, because every existing script relies on that.
-	 *
-	 * This flag is not the only way enforcement turns on: `checkAccess` runs when
-	 * EITHER this or `typedMode` is set, and `typedMode` defaults on. Leaving this
-	 * `false` therefore does not disable the check; both have to be off for that.
-	 * An access can still be waived at the call site with `@:privateAccess`.
+	 * Enforces `private` on script-declared members: reading or writing one from outside the declaring class
+	 * (or a subclass) errors instead of succeeding. Only explicit `private` counts. Scripts treat
+	 * unmarked members as public, unlike Haxe, because every existing script relies on that.
 	 */
 	public static var strictAccess:Bool = false;
 
 	/**
-	 * Runtime type enforcement. When on, declared types on variables, function parameters, function
-	 * returns, and `cast(x, T)` are checked against the value: assignable ones pass (with `Int`->`Float`
-	 * widening), and an incompatible value throws, the way typed Haxe would reject it. When off, type
-	 * annotations are ignored and everything stays dynamic (only abstract `from`/`to` casts apply).
-	 *
-	 * Defaults to on; `-D hxscript_dynamic` flips the default off, and a host may set it per script world
-	 * at runtime. Numeric result typing (`Int` vs `Float`) is unconditional and not gated by this flag.
+	 * Runtime type enforcement. When on, declared types on variables, function parameters, function returns,
+	 * and `cast(x, T)` are checked against the value: assignable ones pass (with `Int`->`Float` widening),
+	 * and an incompatible value throws, the way typed Haxe would reject it. When off, type annotations are
+	 * ignored and everything stays dynamic (only abstract `from`/`to` casts apply).
 	 */
 	public static var typedMode:Bool = #if hxscript_dynamic false #else true #end;
 
 	/**
-	 * Emulation shims for methods that have NO runtime representation and so can't be reflected on --
-	 * notably `inline extern` overloads, which compiled Haxe inlines at the call site but a script can
-	 * only reach reflectively (and gets null). A shim is a real compiled closure that performs the
-	 * call; it is keyed by the owner's fully-qualified class name + `.` + method (e.g.
-	 * `some.pack.Owner.method`). When `obj.method(args)` finds no runtime method, the interpreter looks
-	 * up a shim for the object's class (walking up its superclasses) before failing. The closure
-	 * receives the receiver and the call arguments.
+	 * Emulation shims for methods that have NO runtime representation and so can't be reflected on,
+	 * notably `inline extern` overloads, which compiled Haxe inlines at the call site but a script can only reach
+	 * reflectively (and gets null). A shim is a real compiled closure that performs the call; it is keyed by
+	 * the owner's fully-qualified class name + `.` + method (e.g. `some.pack.Owner.method`).
 	 */
 	public static var callShims:Map<String, (o:Dynamic, args:Array<Dynamic>) -> Dynamic> = new Map();
 
@@ -67,13 +55,18 @@ class Config {
 		'Bool' => CoreType.CTBool
 	];
 
+	/**
+	 * Bare names that stand for a host static, as `owner.path::field`, read afresh for each interpreter.
+	 */
+	public static var globalStatics:Map<String, String> = [];
+
 	/** Imports applied to every interpreter by default (the root package, wildcard-imported). */
 	public static var globalImports:Map<String, ImportMode> = ['' => IAll];
 
 	/** Maps a native type name a script might reference to the proxy class that stands in for it. */
 	@:unreflective public static var typeProxy:Map<String, Dynamic> = [
-		#if hl
-		'Math' => HLMath,
+		#if (hl || python)
+		'Math' => MathProxy,
 		#end
 		'Reflect' => ReflectProxy,
 		'Type' => TypeProxy,

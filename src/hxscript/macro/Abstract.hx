@@ -19,7 +19,7 @@ using haxe.macro.ComplexTypeTools;
  * `from`/`to` conversions (and, for an `enum abstract`, its constants) in a reflectable form.
  * Standard-library and core-type abstracts are left untouched.
  */
-class AbstractMacro {
+class Abstract {
 	/**
 	 * Generates the runtime wrapper for the abstract being built.
 	 *
@@ -74,8 +74,6 @@ class AbstractMacro {
 			kind: FProp('default', 'never', macro :Bool, macro $v{isEnum})
 		});
 
-		// The generated wrapper extends AbstractValue and calls AbstractTools; these used to live in one
-		// module, so both must be imported explicitly now that they are separate.
 		for (dep in ['hxscript.types.AbstractValue', 'hxscript.types.AbstractTools']) {
 			imports.push({
 				path: [for (v in dep.split('.')) {name: v, pos: pos}],
@@ -191,7 +189,7 @@ class AbstractMacro {
 				case TEnum(r, p): stuff(r, p);
 				case TAbstract(r, p): stuff(r, p);
 				case TDynamic(_): macro :Dynamic;
-				default: macro :Dynamic; // throw 'Invalid $t'; TODO tfun??
+				default: macro :Dynamic;
 			}
 		}
 		/**
@@ -324,16 +322,9 @@ class AbstractMacro {
 			}
 		}
 
-		// `@:op(A + B)` methods are reachable by name already; record which operator each one serves so
-		// the interpreter can dispatch `a + b` to it.
 		var opMap:Map<String, String> = [];
 		var opPrinter = new haxe.macro.Printer();
 
-		// Members that get NO field on the wrapper: an `overload` set is skipped below, and an `extern`
-		// one has no runtime field to dispatch to in the first place. That matters because a re-emitted
-		// body (a property setter) can call one by name, and in the wrapper that name resolves to
-		// nothing -- `flixel.math.FlxPoint`'s `set_length` calls its `overload extern inline set(x, y)`
-		// and the generated class failed to compile on it.
 		var dropped:Map<String, Bool> = new Map();
 		for (field in fields) {
 			if (field.access == null)
@@ -342,9 +333,6 @@ class AbstractMacro {
 				dropped.set(field.name, true);
 		}
 
-		// What the underlying value offers, so a dropped member can be reached through it. An abstract's
-		// `overload extern inline` members are forwarders onto exactly this, which is why redirecting
-		// there reproduces what the abstract itself would have done.
 		var underlying:Map<String, Bool> = new Map();
 		switch (Context.follow(ab.type)) {
 			case TInst(r, _):
@@ -357,13 +345,26 @@ class AbstractMacro {
 			default:
 		}
 
+		var methodNames:Map<String, Bool> = [];
+		for (field in fields) {
+			switch (field.kind) {
+				case FFun(_):
+					methodNames.set(field.name.toUpperCase(), true);
+				case FProp(get, set, _, _):
+					if (get == 'get')
+						methodNames.set('GET_' + field.name.toUpperCase(), true);
+					if (set == 'set')
+						methodNames.set('SET_' + field.name.toUpperCase(), true);
+				default:
+			}
+		}
+
 		for (field in fields) {
 			var name = field.name;
 			if (name == '__init__')
 				continue;
 
 			if (field.access.contains(AOverload)) {
-				// TODO: OPERATOR OVERLOAD
 				continue;
 			}
 			if (field.access.contains(AStatic)) {
@@ -400,7 +401,7 @@ class AbstractMacro {
 						var stuff = [];
 						for (i => arg in f.args) {
 							if (i == 0 && props.contains(name))
-								continue; // remove "this"
+								continue;
 
 							args.push({
 								value: arg.value,
@@ -460,24 +461,33 @@ class AbstractMacro {
 							}
 						}
 
-						cls.fields.push({
-							name: name,
-							pos: pos,
-							access: [AStatic, APublic],
-							kind: FProp(typeIsMe ? 'get' : 'default', 'never', typeIsMe ? TPath(abstractT) : macro :Dynamic, typeIsMe ? null : e?.map(mapIdent))
-						});
-
-						if (typeIsMe) {
+						if (typeIsMe && methodNames.exists('GET_' + name.toUpperCase())) {
 							cls.fields.push({
-								name: 'get_$name',
+								name: name,
 								pos: pos,
-								access: [AStatic],
-								kind: FFun({
-									args: [],
-									ret: TPath(abstractT),
-									expr: macro return new $abstractT($e)
-								})
+								access: [AStatic, APublic],
+								kind: FVar(TPath(abstractT), macro new $abstractT($e))
 							});
+						} else {
+							cls.fields.push({
+								name: name,
+								pos: pos,
+								access: [AStatic, APublic],
+								kind: FProp(typeIsMe ? 'get' : 'default', 'never', typeIsMe ? TPath(abstractT) : macro :Dynamic, typeIsMe ? null : e?.map(mapIdent))
+							});
+
+							if (typeIsMe) {
+								cls.fields.push({
+									name: 'get_$name',
+									pos: pos,
+									access: [AStatic],
+									kind: FFun({
+										args: [],
+										ret: TPath(abstractT),
+										expr: macro return new $abstractT($e)
+									})
+								});
+							}
 						}
 
 					default:
@@ -488,7 +498,6 @@ class AbstractMacro {
 						var to = false;
 						for (meta in field.meta) {
 							if (meta.name == ':arrayAccess') {
-								// One argument reads, two write, matching how Haxe picks them.
 								opMap.set(f.args.length > 1 ? '[]=' : '[]', name);
 								continue;
 							}
@@ -498,7 +507,6 @@ class AbstractMacro {
 										case EBinop(binop, _, _):
 											opMap.set(opPrinter.printBinop(binop), name);
 										case EUnop(unop, _, _):
-											// Keyed apart from the binary operators, which share the symbols.
 											opMap.set('u' + opPrinter.printUnop(unop), name);
 										default:
 									}
@@ -567,9 +575,6 @@ class AbstractMacro {
 										case EConst(CIdent('this')):
 											{expr: EConst(CIdent('__a')), pos: expr.pos};
 										case EConst(CIdent(f)) if (dropped.exists(f) && underlying.exists(f)):
-											// No wrapper field for this one, so go through the value it
-											// forwards to. A call lands here through its own callee
-											// ident, so `set(x, y)` becomes `__a.set(x, y)`.
 											{expr: EField({expr: EConst(CIdent('__a')), pos: expr.pos}, f), pos: expr.pos};
 										default:
 											ExprTools.map(expr, transformThis);
@@ -613,18 +618,27 @@ class AbstractMacro {
 							enumMap.set(name, enumI++);
 							enumIndex.push(e);
 
-							cls.fields.push({
-								name: name,
-								pos: pos,
-								access: [APublic, AStatic],
-								kind: FProp('get', 'never', TPath(abstractT))
-							});
-							cls.fields.push({
-								name: 'get_$name',
-								pos: pos,
-								access: [APublic, AStatic],
-								kind: FFun({args: [], ret: TPath(abstractT), expr: macro return new $abstractT($e)})
-							});
+							if (methodNames.exists('GET_' + name.toUpperCase())) {
+								cls.fields.push({
+									name: name,
+									pos: pos,
+									access: [APublic, AStatic],
+									kind: FVar(TPath(abstractT), macro new $abstractT($e))
+								});
+							} else {
+								cls.fields.push({
+									name: name,
+									pos: pos,
+									access: [APublic, AStatic],
+									kind: FProp('get', 'never', TPath(abstractT))
+								});
+								cls.fields.push({
+									name: 'get_$name',
+									pos: pos,
+									access: [APublic, AStatic],
+									kind: FFun({args: [], ret: TPath(abstractT), expr: macro return new $abstractT($e)})
+								});
+							}
 						}
 
 					default:
@@ -669,8 +683,6 @@ class AbstractMacro {
 			})
 		});
 
-		// `@:forward` on the abstract itself: the fields of the boxed value that should be reachable
-		// through it. Recorded rather than generated, so the interpreter can fall back to the value.
 		var forwardAll:Bool = false;
 		var forwards:Array<String> = [];
 

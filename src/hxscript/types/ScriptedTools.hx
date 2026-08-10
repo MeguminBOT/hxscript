@@ -10,7 +10,25 @@ using hxscript.types.TypeCollection;
 /** Helpers for resolving the types a scripted class extends or implements. */
 class ScriptedTools {
 	/** Every native class that has a generated scripting bridge, keyed by class name. */
-	public static var scriptedClasses(default, never):Map<String, Class<IScriptedInstance>> = hxscript.macro.ScriptedMacro.listScriptedClasses();
+	public static var scriptedClasses(get, never):Map<String, Class<IScriptedInstance>>;
+
+	static var bridgesByBase:Map<String, Class<IScriptedInstance>> = null;
+
+	/**
+	 * Builds the bridge table on first use rather than in a static initializer.
+	 *
+	 * The table is read out of `haxe.rtti.Meta`, and on python a static initializer runs before
+	 * `python.Boot` has its own statics, so building it eagerly returned null for every lookup and
+	 * left the library installed and inert.
+	 *
+	 * @return Bridge classes keyed by the base class each one extends.
+	 */
+	static function get_scriptedClasses():Map<String, Class<IScriptedInstance>> {
+		if (bridgesByBase == null)
+			bridgesByBase = hxscript.macro.Scripted.listScriptedClasses();
+
+		return bridgesByBase;
+	}
 
 	/**
 	 * Resolves an `extends`/`implements` type reference against the declaring module's
@@ -27,7 +45,7 @@ class ScriptedTools {
 			case CTPath(path, _):
 				var p:String = path.join('.');
 
-				var type = (module?.interp.imports.get(p) ?? interp?.imports.get(p) ?? Tools.resolve(p, interp?.environment));
+				var type = (module?.interp.imports.get(p) ?? interp?.imports.get(p) ?? TypeTools.resolve(p, interp?.environment));
 				if (type == null)
 					throw 'Type not found: $p';
 
@@ -41,10 +59,10 @@ class ScriptedTools {
 	}
 
 	/**
-	 * Like `resolveType`, but for `implements` entries. A native interface that the
-	 * runtime can't hand back as a value still names a valid contract -- the generated
-	 * bridge is what satisfies it -- so a known-but-unresolvable interface returns null
-	 * instead of throwing. An outright unknown name still throws.
+	 * Like `resolveType`, but for `implements` entries. A native interface the runtime cannot hand
+	 * back as a value still names a valid contract, and the generated bridge is what satisfies it, so
+	 * a known-but-unresolvable interface returns null instead of throwing. An outright unknown name
+	 * still throws.
 	 *
 	 * @param t The interface reference to resolve.
 	 * @param module The declaring module whose imports take priority, if any.
@@ -58,7 +76,7 @@ class ScriptedTools {
 			default: throw 'Invalid interface $t';
 		}
 
-		var type = (module?.interp.imports.get(p) ?? interp?.imports.get(p) ?? Tools.resolve(p, interp?.environment));
+		var type = (module?.interp.imports.get(p) ?? interp?.imports.get(p) ?? TypeTools.resolve(p, interp?.environment));
 		if (type != null)
 			return type;
 

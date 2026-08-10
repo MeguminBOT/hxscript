@@ -86,7 +86,7 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 		this.module = module;
 		this.decl = decl;
 
-		path = Tools.pathToString(name, pack);
+		path = TypeTools.pathToString(name, pack);
 
 		interp = Type.createInstance(Config.interpClass, []);
 		interp.canDefer = true;
@@ -129,7 +129,7 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 					interp.variables.set(k, v);
 		}
 
-		interp.pushStack(hxscript.runtime.CallStack.StackItem.SModule(module?.path ?? name));
+		interp.pushStack(hxscript.runtime.ScriptStack.StackItem.SModule(module?.path ?? name));
 
 		safe = false;
 		snapshotAll = false;
@@ -147,7 +147,7 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 			if (f == 'new')
 				continue;
 
-			if (hxscript.macro.ScriptedMacro.ignoreFields.contains(f)) {
+			if (hxscript.macro.Scripted.ignoreFields.contains(f)) {
 				throw 'Field $f reserved for internal use!!! - hxScript';
 			} else if (knownFields.contains(f)) {
 				throw 'Duplicate class field declaration: $name.$f';
@@ -276,7 +276,7 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 				var unexposedFields:Array<String> = cls.unexposedFields;
 
 				for (field in instanceFields) {
-					if (hxscript.macro.ScriptedMacro.ignoreFields.contains(field))
+					if (hxscript.macro.Scripted.ignoreFields.contains(field))
 						continue;
 
 					if (!inheritedFields.contains(field))
@@ -297,9 +297,7 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 				}
 			}
 		}
-		// A declared `new` that never reaches the native constructor would leave the
-		// instance half-built, so hold it to the same rule Haxe does.
-		if (decl.extend != null && instanceClass != DummyClass) {
+		if (decl.extend != null && instanceClass != ScriptedObject) {
 			for (field in decl.fields) {
 				if (field.name != 'new')
 					continue;
@@ -427,7 +425,7 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 				case ECall({e: EIdent('super')}, _):
 					found = true;
 				default:
-					Tools.iter(e, walk);
+					ExprTools.iter(e, walk);
 			}
 		}
 		walk(e);
@@ -474,7 +472,7 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 		if (extending is ScriptedClass) {
 			return cast(extending, ScriptedClass).instanceClass;
 		} else if (extending == null) {
-			return DummyClass;
+			return ScriptedObject;
 		} else {
 			return extending;
 		}
@@ -499,8 +497,11 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 		if (!initialized)
 			throw 'Type $path is not initialized';
 
+		if (hxscript.debug.Metrics.on)
+			hxscript.debug.Metrics.instances++;
+
 		var inst:IScriptedInstance = Type.createEmptyInstance(instanceClass);
-		inst.__construct(this, arguments);
+		inst.__scriptConstruct(this, arguments);
 		return inst;
 	}
 
@@ -556,7 +557,7 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 				}
 			} else if (c is Class) {
 				for (f in Type.getInstanceFields(c)) {
-					if (!fields.contains(f) && !hxscript.macro.ScriptedMacro.ignoreFields.contains(f))
+					if (!fields.contains(f) && !hxscript.macro.Scripted.ignoreFields.contains(f))
 						fields.push(f);
 				}
 			}
@@ -604,7 +605,6 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 		return (__vars.exists(property) ? interp.setLocal(property, value, __vars) : null);
 	}
 
-	/** @return The static field names. */
 	/**
 	 * Evaluates a field's initializer and binds it the way a local `var` is bound.
 	 *
@@ -628,11 +628,6 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 
 	/**
 	 * The declared type of a static method's first parameter, for static-extension resolution.
-	 *
-	 * A `using` is otherwise matched by method NAME alone, so `(5).twice()` would reach a `String`
-	 * extension. A script-declared extension still carries its parameter types at runtime, so the
-	 * receiver can be checked against this before the call. Compiled extensions have no such
-	 * information -- see the parity document.
 	 *
 	 * @param name The static method's name.
 	 * @return The first parameter's declared type, or null when it is absent, unannotated, or not a
@@ -686,7 +681,7 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 	 *
 	 * `Script` and `Module` report program failures with `haxe.Exception.details()`, which includes
 	 * the frames; these two hooks interpolated the value instead, so an error inside a field
-	 * initializer or a method arrived with no stack at all -- the least debuggable place to lose it.
+	 * initializer or a method arrived with no stack at all, the least debuggable place to lose it.
 	 *
 	 * @param error The thrown value.
 	 * @return The rendered error, with frames when available.

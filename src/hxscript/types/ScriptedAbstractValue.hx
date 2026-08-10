@@ -2,11 +2,6 @@ package hxscript.types;
 
 /**
  * A value boxed by a script-declared abstract.
- *
- * It extends `AbstractValue` so that everything the interpreter already knows about abstracts (the
- * operator dispatch, the equality and comparison fallbacks, the variable-slot bookkeeping) applies
- * to scripted ones without a second code path. What a compiled abstract carries in macro-generated
- * statics, this carries in its `owner`.
  */
 class ScriptedAbstractValue extends AbstractValue {
 	/** The abstract that declares this value's behavior. */

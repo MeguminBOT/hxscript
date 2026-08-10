@@ -1,4 +1,6 @@
-package hxscript;
+package hxscript.runtime;
+
+import hxscript.Module;
 
 /**
  * A shared "prelude" module whose declarations are folded into any module that imports it. Unlike a
@@ -46,7 +48,7 @@ class ImportModule extends Module {
 	 */
 	public override function start(?environment) {
 		if (attempted)
-			return; // run a shared prelude only once, no matter how many modules import it
+			return;
 		attempted = true;
 
 		try {

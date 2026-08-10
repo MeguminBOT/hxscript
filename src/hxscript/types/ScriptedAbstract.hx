@@ -9,13 +9,8 @@ import hxscript.syntax.Expr;
 using hxscript.types.TypeCollection;
 
 /**
- * A script-declared `abstract`. The abstract boxes a value of its underlying type; its methods run
- * against that value rather than against an object.
- *
- * The implementation follows what Haxe itself does: every method becomes a static taking the boxed
- * value as its first argument, named `this`. That makes `this` an ordinary parameter inside the
- * body, so the whole existing call machinery (argument binding, scoping, `return`) applies
- * unchanged, and a constructor's `this = v` is simply a write to that parameter.
+ * A script-declared `abstract`. The abstract boxes a value of its underlying type; its methods run against
+ * that value rather than against an object.
  */
 @:access(hxscript.runtime.Interp)
 class ScriptedAbstract implements IScriptedType {
@@ -89,7 +84,7 @@ class ScriptedAbstract implements IScriptedType {
 		this.module = module;
 		this.decl = decl;
 
-		path = Tools.pathToString(name, pack);
+		path = TypeTools.pathToString(name, pack);
 	}
 
 	/**
@@ -132,8 +127,6 @@ class ScriptedAbstract implements IScriptedType {
 		impl.init(env, baseInterp, restore);
 		impl.initialized = true;
 
-		// The abstract has to be visible inside its own methods, so `new Meters(...)` works in the
-		// body that defines it. The implementation class is a separate type under the same name.
 		if (impl.interp != null)
 			impl.interp.imports.set(name, this);
 	}
@@ -156,7 +149,7 @@ class ScriptedAbstract implements IScriptedType {
 			}
 
 			for (p in m.params)
-				switch (Tools.expr(p)) {
+				switch (ExprTools.expr(p)) {
 					case EIdent(n):
 						forwarded.push(n);
 					default:
@@ -198,7 +191,7 @@ class ScriptedAbstract implements IScriptedType {
 			if (m.name != ':op' || m.params == null || m.params.length == 0)
 				continue;
 
-			switch (Tools.expr(m.params[0])) {
+			switch (ExprTools.expr(m.params[0])) {
 				case EBinop(op, _, _):
 					ops.set(op, f.name);
 				case EUnop(op, _, _):
@@ -273,11 +266,6 @@ class ScriptedAbstract implements IScriptedType {
 	/**
 	 * The implementation form of one of an abstract's fields, independent of any instance.
 	 *
-	 * Shared with the runtime compiler, which has to produce the same shape from the same
-	 * declaration or the two would disagree about what a method is. Every method becomes a static
-	 * taking the boxed value as a leading `this`, a parameter of the abstract's own type becomes its
-	 * underlying type, and a constructor is renamed and made to return what it built.
-	 *
 	 * @param f The declared field.
 	 * @param name The abstract's own name, for spotting self-typed parameters.
 	 * @param underlying The type the abstract boxes.
@@ -305,8 +293,6 @@ class ScriptedAbstract implements IScriptedType {
 				var body:Expr = fn.expr;
 
 				if (f.name == 'new') {
-					// The constructor assigns `this`; appending it makes the built value the result,
-					// which is what the caller boxes.
 					var self:Expr = {e: EIdent('this'), pos: body.pos};
 					body = {e: EBlock([fn.expr, self]), pos: body.pos};
 				}
@@ -351,7 +337,6 @@ class ScriptedAbstract implements IScriptedType {
 		if (ctor == null)
 			return new ScriptedAbstractValue(args[0], this);
 
-		// `this` starts out null; the constructor body assigns it and the appended `this` returns it.
 		return new ScriptedAbstractValue(ReflectProxy.callMethod(null, ctor, [null].concat(args)), this);
 	}
 
@@ -396,7 +381,6 @@ class ScriptedAbstract implements IScriptedType {
 		if (f != null && ReflectProxy.isFunction(f))
 			return ReflectProxy.makeVarArgs(function(args:Array<Dynamic>):Dynamic return callField(value, field, args));
 
-		// `@:forward` exposes the underlying value's own fields through the abstract.
 		if (f == null && !impl.reflectHasField(field) && forwards(field))
 			return ReflectProxy.getProperty(value, field);
 

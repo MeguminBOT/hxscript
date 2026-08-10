@@ -33,6 +33,12 @@ class AbstractTools {
 	 * @return The type name, or `'unknown'` if it can't be determined.
 	 */
 	public static function resolveName(v:Dynamic):String {
+		if (v is ScriptedAbstractValue) {
+			var owner:ScriptedAbstract = (cast v : ScriptedAbstractValue).owner;
+			if (owner != null)
+				return owner.path;
+		}
+
 		var vv:Dynamic = v;
 		switch (Type.typeof(v)) {
 			case TInt:
@@ -52,11 +58,14 @@ class AbstractTools {
 				return 'unknown';
 		}
 
-		if (vv is Class) {
-			if (Type.getSuperClass(vv) == AbstractValue) {
-				return (vv.impl ?? 'unknown');
-			} else {
-				return Type.getClassName(vv);
+		if (vv != null) {
+			var name:String = Type.getClassName(vv);
+
+			if (name != null) {
+				if (Type.getSuperClass(vv) == AbstractValue)
+					return (Reflect.field(vv, 'impl') ?? 'unknown');
+
+				return name;
 			}
 		}
 
@@ -127,7 +136,6 @@ class AbstractTools {
 		if (!(v is AbstractValue))
 			return null;
 
-		// A scripted abstract carries its operator table on the declaration, not on a generated class.
 		if (v is ScriptedAbstractValue)
 			return (cast v : ScriptedAbstractValue).owner.ops.get(op);
 

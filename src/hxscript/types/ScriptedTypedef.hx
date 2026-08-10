@@ -71,7 +71,7 @@ class ScriptedTypedef implements IScriptedType {
 		this.module = module;
 		this.decl = decl;
 
-		path = Tools.pathToString(name, pack);
+		path = TypeTools.pathToString(name, pack);
 	}
 
 	/**
@@ -91,9 +91,9 @@ class ScriptedTypedef implements IScriptedType {
 			case hxscript.syntax.Expr.CType.CTPath(path, params):
 				var fullPath:String = path.join('.');
 
-				if (fullPath == 'Map') { // infer from parameters
+				if (fullPath == 'Map') {
 					if (params == null || params.length < 2)
-						throw 'Not enough type parameters for Map'; // we dont really care about the value type , but whatever
+						throw 'Not enough type parameters for Map';
 					else if (params.length > 2)
 						throw 'Too many type parameters for Map';
 
@@ -109,11 +109,11 @@ class ScriptedTypedef implements IScriptedType {
 								alias = haxe.ds.IntMap;
 							} else {
 								var type:TypeInfo = null;
-								var r = (Tools.resolve(fullPath, env) ?? baseInterp.imports.get(fullPath));
+								var r = (TypeTools.resolve(fullPath, env) ?? baseInterp.imports.get(fullPath));
 								if (r is Class) {
 									type = TypeCollection.main.fromCompilePath(TypeProxy.getClassName(r))[0];
 								} else if (r == null) {
-									throw Printer.errorToString(EUnknownType(fullPath));
+									throw hxscript.error.Printer.errorToString(EUnknownType(fullPath));
 								}
 
 								if (type?.kind == 'class') {
@@ -132,28 +132,23 @@ class ScriptedTypedef implements IScriptedType {
 				}
 
 				if (alias == null)
-					throw Printer.errorToString(EUnknownType(fullPath));
+					throw hxscript.error.Printer.errorToString(EUnknownType(fullPath));
 
 			case CTAnon(fields):
-				// Anonymous-structure typedef: no runtime class, matched by field shape.
 				structural = true;
 				structFields = [for (f in fields) f.name];
 				structFieldTypes = fields;
 				checker = baseInterp;
 
 			default:
-				// Function (and other) structural typedefs have no matchable shape; they erase.
 				structural = true;
 		}
 	}
 
 	/**
-	 * Whether a value satisfies this typedef's structure: it has every field the typedef requires,
-	 * each one matching its annotation. Optional fields (`?x:Int` or `@:optional`) may be absent.
-	 * Only meaningful for an anonymous-structure typedef (`structFields` non-null).
-	 *
-	 * Without the interpreter that resolved this typedef there is nothing to resolve field types
-	 * against, so the check falls back to field presence alone.
+	 * Whether a value satisfies this typedef's structure: it has every field the typedef requires, each one
+	 * matching its annotation. Optional fields (`?x:Int` or `@:optional`) may be absent. Only meaningful for
+	 * an anonymous-structure typedef (`structFields` non-null).
 	 *
 	 * @param value The value to test.
 	 * @return True if `value` satisfies the structure.
@@ -171,7 +166,7 @@ class ScriptedTypedef implements IScriptedType {
 
 		for (f in structFieldTypes) {
 			if (!ReflectProxy.hasField(value, f.name)) {
-				if (Tools.isOptionalField(f))
+				if (ExprTools.isOptionalField(f))
 					continue;
 				return false;
 			}

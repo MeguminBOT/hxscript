@@ -17,17 +17,12 @@ import hxscript.types.TypeCollection;
  * deserializes it into an indexed `TypeMap`. This is what lets scripts name any compiled type
  * without extra reflection cost.
  */
-class TypeCollectionMacro {
+class Index {
 	/** This macro class's own fully-qualified name (used to stash the serialized type table). */
-	static var _name:String = 'hxscript.macro.TypeCollectionMacro';
+	static var _name:String = 'hxscript.macro.Index';
 
 	/**
 	 * Records a class's constructor shape, which the runtime compiler needs to pad a call.
-	 *
-	 * Only the counts: how many arguments it declares and how many a caller must supply.
-	 * The types are not wanted here and the defaults cannot be carried across the
-	 * serialization boundary, so a padded argument is passed as null and the callee's own
-	 * default handling takes it from there.
 	 *
 	 * @param info The entry being filled.
 	 * @param d The class being described.

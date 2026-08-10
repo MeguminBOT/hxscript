@@ -13,14 +13,13 @@ using haxe.macro.ComplexTypeTools;
 #end
 
 /**
- * The heart of the scripting bridge. Applied (via `@:autoBuild` on `IScriptedInstance`) to a
- * generated bridge class, it makes a native base class scriptable: it overrides each inherited,
- * non-inline, non-final method to route through the instance's interpreter when the script defines
- * an override, records which fields are inlined/unexposed, reconstructs the native constructor as
- * `__constructSuper`, and implements the reflection hooks. It also keeps a registry of every native
- * class that has a bridge, exposed by `listScriptedClasses`.
+ * The heart of the scripting bridge. Applied (via `@:autoBuild` on `IScriptedInstance`) to a generated bridge
+ * class, it makes a native base class scriptable: it overrides each inherited, non-inline, non-final method
+ * to route through the instance's interpreter when the script defines an override, records which fields are
+ * inlined/unexposed, reconstructs the native constructor as `__constructSuper`, and implements the reflection
+ * hooks. It also keeps a registry of every native class that has a bridge, exposed by `listScriptedClasses`.
  */
-class ScriptedMacro {
+class Scripted {
 	/** Field names reserved by the bridge machinery; a script may not declare them. */
 	public static var ignoreFields:Array<String> = [
 		'reflectHasField',
@@ -34,7 +33,7 @@ class ScriptedMacro {
 		'typeGetClassFields',
 		'typeCreateEmptyInstance',
 		'typeGetInstanceFields',
-		'__construct',
+		'__scriptConstruct',
 		'__constructSuper',
 		'__interp',
 		'__base',
@@ -50,7 +49,7 @@ class ScriptedMacro {
 	];
 
 	/** This macro class's own fully-qualified name (used to stash the scripted-class registry). */
-	static var _name:String = 'hxscript.macro.ScriptedMacro';
+	static var _name:String = 'hxscript.macro.Scripted';
 
 	/**
 	 * Generates the scripting bridge for the class being built: overrides inherited methods to defer
@@ -76,16 +75,6 @@ class ScriptedMacro {
 		var omittedFields:Array<String> = [];
 
 		/**
-		 * Converts a typed `Type` to the `ComplexType` the bridge declares.
-		 *
-		 * `Type.toComplexType()` renders a sub-module type as `pack.SubType`, dropping the module that
-		 * actually holds it (`pack.Module.SubType`), which then fails to resolve. Paths are rebuilt
-		 * from the module so `sub` is filled in, recursing through type parameters.
-		 *
-		 * @param t The type to convert.
-		 * @return The equivalent complex type.
-		 */
-		/**
 		 * A type's readable path, without repeating the module when the type is its main one.
 		 *
 		 * @param module The module path.
@@ -96,6 +85,16 @@ class ScriptedMacro {
 			return (module == name || module.endsWith('.$name')) ? module : '$module.$name';
 		}
 
+		/**
+		 * Converts a typed `Type` to the `ComplexType` the bridge declares.
+		 *
+		 * `Type.toComplexType()` renders a sub-module type as `pack.SubType`, dropping the module that
+		 * actually holds it (`pack.Module.SubType`), which then fails to resolve. Paths are rebuilt
+		 * from the module so `sub` is filled in, recursing through type parameters.
+		 *
+		 * @param t The type to convert.
+		 * @return The equivalent complex type.
+		 */
 		function toCT(t:Type):ComplexType {
 			/**
 			 * Builds a path from a type's MODULE rather than its package, so a sub-module type keeps its
@@ -122,7 +121,6 @@ class ScriptedMacro {
 			return switch (t) {
 				case TInst(r, params):
 					var c = r.get();
-					// Type parameters keep the plain form mapGeneric recognises.
 					switch (c.kind) {
 						case KTypeParameter(_): t.toComplexType();
 						default: fromModule(c.pack, c.module, c.name, params);
@@ -163,7 +161,7 @@ class ScriptedMacro {
 				case TType(r, params): !r.get().isPrivate && !params.exists(function(p) return !typeAccessible(p));
 				case TFun(fargs, fret): typeAccessible(fret) && !fargs.exists(function(a) return !typeAccessible(a.t));
 				case TLazy(f): typeAccessible(f());
-				default: true; // TAnonymous / TDynamic / TMono erase harmlessly
+				default: true;
 			}
 		}
 
@@ -234,8 +232,6 @@ class ScriptedMacro {
 						case TNew(c, tp, params):
 							var c = c.get();
 
-							// Built from the module so sub-module types keep their qualifier
-							// (`flixel.group.FlxGroup.FlxTypedGroup`, not `flixel.group.FlxTypedGroup`).
 							var parts:Array<String> = c.module.split('.');
 							var moduleName:String = parts.pop();
 							var n:String = c.name;
@@ -264,10 +260,6 @@ class ScriptedMacro {
 									}
 								])
 							};
-						// A static-factory call like `FlxRect.get(...)` -- rebuild it at the SOURCE
-						// level (path + method + args) rather than via getTypedExpr, whose inlined
-						// form of an abstract's static drags in the abstract's internal `this = ...`
-						// and fails to re-type.
 						case TCall({expr: TField(_, FStatic(c, cf))}, params):
 							{
 								pos: pos,
@@ -280,28 +272,6 @@ class ScriptedMacro {
 
 				/**
 				 * Repairs the three things `Context.getTypedExpr` cannot round-trip.
-				 *
-				 * Re-emitting a native constructor means taking a body the typer has already lowered and
-				 * asking the typer to accept it again somewhere else. Three constructs do not survive
-				 * that, and each one reports from inside the original library's source, naming neither
-				 * the bridge nor the base that asked for it:
-				 *
-				 * - a **sub-module type** loses its qualifier, so `new FlxButtonEvent()` re-emits
-				 *   unqualified and fails with `Type not found: FlxButtonEvent`;
-				 * - a **compiler temporary** from inlined code is named with a backtick, which is not a
-				 *   variable name (`"`" is not a valid variable name`).
-				 *
-				 * The typed form still knows the qualifiers, so it is walked first to collect them and
-				 * the emitted syntax is rewritten against that.
-				 *
-				 * - an **abstract's implementation class** is named directly, so reading an enum
-				 *   abstract's constant comes back as `FlxButtonState_Impl_.NORMAL`
-				 *   (`has no field FlxButtonState_Impl_`).
-				 *
-				 * The last one is only repairable for a genuine static. An abstract's *instance* members
-				 * are compiled to statics on the same class and marked `@:impl`, and those have no
-				 * spelling that works from outside; `reemittableConstructor` refuses those instead of
-				 * guessing.
 				 *
 				 * @param typed The expression as the typer left it.
 				 * @param e The same expression re-emitted as syntax.
@@ -321,7 +291,6 @@ class ScriptedMacro {
 								var parts:Array<String> = cls.module.split('.');
 								var moduleName:String = parts.pop();
 
-								// An abstract is constructed through an impl class that cannot be named.
 								var name:String = cls.name.endsWith('_Impl_') ? cls.name.substr(0, cls.name.length - 6) : cls.name;
 
 								if (!qualified.exists(cls.name))
@@ -399,16 +368,6 @@ class ScriptedMacro {
 				/**
 				 * Why a native constructor cannot be rebuilt in the bridge, or null when it can.
 				 *
-				 * A bridge rebuilds the base's constructor so a script's `new` can drive it. That means
-				 * re-typing a body the typer has already lowered, and two things in a lowered body can
-				 * never be re-typed anywhere else: a `private` type, which the bridge is not allowed to
-				 * name, and an abstract's implementation class, whose members do not exist under any
-				 * spelling reachable from outside.
-				 *
-				 * Without this the build fails anyway -- with a handful of errors reported inside the
-				 * library's own source, naming neither the bridge nor the base that pulled it in. That
-				 * is the failure this turns into a sentence.
-				 *
 				 * @param e The typed constructor body.
 				 * @return The reason, or null if the body is re-emittable.
 				 */
@@ -418,7 +377,6 @@ class ScriptedMacro {
 
 					var reason:Null<String> = null;
 
-					// `_Impl_` classes are private, and each position reaching one is handled by name below.
 					function why(cls:ClassType, verb:String):Null<String> {
 						if (cls.name.endsWith('_Impl_'))
 							return null;
@@ -447,7 +405,6 @@ class ScriptedMacro {
 								var cls:ClassType = c.get();
 
 								if (cls.name.endsWith('_Impl_')) {
-									// Returns without descending; the type expression under it would re-trip the rule above.
 									if (cf.get().meta.has(':impl'))
 										reason = 'it calls ${cf.get().name} on abstract ${cls.module}, which has no form reachable from outside';
 
@@ -487,8 +444,6 @@ class ScriptedMacro {
 					switch (e.expr) {
 						case TConst(TThis):
 							return true;
-						// Inside an inlined abstract method (FlxPoint.get / copyFrom), `this` is the
-						// underlying value carried as a local literally named "this".
 						case TLocal(v) if (v.name == 'this'):
 							return true;
 						default:
@@ -526,8 +481,6 @@ class ScriptedMacro {
 				function fieldInits(type:ClassType):Array<Expr> {
 					var inits:Array<Expr> = [];
 
-					// `cls` is mid-build here, so its own field list isn't readable yet.
-					// Scriptable bridges are empty by construction, so nothing is lost.
 					if (type == cls)
 						return inits;
 
@@ -544,8 +497,6 @@ class ScriptedMacro {
 								if (!reemittable(e))
 									continue;
 
-								// @:privateAccess so an inlined pool factory's private helpers
-								// (e.g. FlxRect.getPooled) are reachable from the re-emitted init.
 								var value:Expr = mapTyped(e);
 								inits.push(macro Reflect.setField(this, $v{field.name}, @:privateAccess $value));
 						}
@@ -561,9 +512,6 @@ class ScriptedMacro {
 				 * @return The constructor as a function expression.
 				 */
 				function mapConstructor(type:ClassType):Expr {
-					// A class with no `new` of its own still owns member initializers, and its native
-					// init continues in the superclass. Emit both, otherwise the chain breaks at any
-					// constructor-less link and everything above it stays uninitialized.
 					if (type.constructor == null) {
 						var inits:Array<Expr> = fieldInits(type);
 
@@ -623,7 +571,6 @@ class ScriptedMacro {
 								for (param in params) {
 									switch (param.expr) {
 										case EConst(CIdent('null')):
-											// todo check dynamic params ? this could get ugly
 										default:
 											newParams.push(param);
 									}
@@ -642,7 +589,6 @@ class ScriptedMacro {
 								for (param in params) {
 									switch (param.expr) {
 										case EConst(CIdent('null')):
-											// todo check dynamic params ? this could get ugly
 										default:
 											newParams.push(param);
 									}
@@ -739,15 +685,11 @@ class ScriptedMacro {
 						if (omittedFields.contains(field.name))
 							continue;
 
-						// @:generic builds one real field per specialization, so there is no
-						// single method to override.
 						if (field.meta.has(':generic')) {
 							omittedFields.push(field.name);
 							continue;
 						}
 
-						// `super.f()` is illegal for a dynamic method, so it can't be wrapped.
-						// Scripts reassign these at runtime instead.
 						if (kind.match(MethDynamic)) {
 							omittedFields.push(field.name);
 							continue;
@@ -797,9 +739,6 @@ class ScriptedMacro {
 							for (arg in args)
 								argsArray.push(macro cast $i{arg.name});
 
-							// The super call keeps the declared types: `cast` would erase a
-							// method's own type parameters and leave them uninferrable
-							// (e.g. FlxTypedSpriteGroup.transformChildren<V>).
 							var superArgs:Array<Expr> = [for (arg in args) macro $i{arg.name}];
 
 							var isVoid:Bool = switch (ret) {
@@ -811,7 +750,7 @@ class ScriptedMacro {
 								var fname:String = $v{f};
 								if (__interp != null && __func != fname && __interp.locals.exists(fname)) {
 									var prevFunc:String = __func;
-									__func = fname; // prevent loop
+									__func = fname;
 									var r:Dynamic;
 									if (__safe) {
 										__interp.inTry = true;
@@ -850,9 +789,6 @@ class ScriptedMacro {
 								if (field.isAbstract)
 									access.push(AAbstract);
 
-								// Type parameters the METHOD itself declares stay as-is: an override
-								// has to repeat them verbatim. Only class-level parameters that
-								// couldn't be substituted make a field unoverridable.
 								var ownParams:Array<TypeParamDecl> = [
 									for (p in field.params) {
 										var constraints:Array<ComplexType> = switch (p.t) {
@@ -864,9 +800,6 @@ class ScriptedMacro {
 											default: [];
 										}
 
-										// Reported qualified by its owner (`transformChildren.V`);
-										// re-declaring it under that name makes Haxe mangle it into
-										// a field name instead of a type parameter.
 										{name: p.name.substr(p.name.lastIndexOf('.') + 1), constraints: constraints};
 									}
 								];
@@ -882,9 +815,6 @@ class ScriptedMacro {
 								function mapGeneric(t:ComplexType) {
 									switch (t) {
 										case TPath(p):
-											// A type parameter renders qualified by whatever declares it
-											// (`transformChildren.V`, `FlxTypedGroup.T`), so match on the
-											// trailing segment.
 											var short:String = p.name.substr(p.name.lastIndexOf('.') + 1);
 
 											if (generics.exists(p.name)) {
@@ -892,8 +822,6 @@ class ScriptedMacro {
 											} else if (generics.exists(short) && p.name != short) {
 												return generics.get(short);
 											} else if (ownParamNames.indexOf(short) >= 0) {
-												// Re-qualifying it would bind the override to the PARENT's
-												// parameter; bind it to the one re-declared here instead.
 												return TPath({pack: [], name: short, params: p.params});
 											} else if (short.length == 1) {
 												cantInfer = true;
@@ -921,8 +849,6 @@ class ScriptedMacro {
 									}
 								}
 
-								// A signature mentioning a private/inaccessible type can't be
-								// reproduced here; leave the native method in place (super).
 								var accessible:Bool = typeAccessible(ret);
 								for (arg in args)
 									if (!typeAccessible(arg.t))
@@ -1030,11 +956,8 @@ class ScriptedMacro {
 			__safe = base.safe;
 			__interp = Type.createInstance(hxscript.Config.interpClass, [base.interp.environment, this]);
 			__interp.ownerClass = base;
-			__interp.pushStack(hxscript.runtime.CallStack.StackItem.SModule(base.module?.path ?? base.name));
+			__interp.pushStack(hxscript.runtime.ScriptStack.StackItem.SModule(base.module?.path ?? base.name));
 
-			// Without the Config seeding: the class's own interpreter already holds it, and its
-			// imports and variables are copied over the top a few lines down, so seeding here only
-			// resolved the default wildcard import a second time to throw the result away.
 			__interp.setDefaults(true, false);
 			__interp.variables.set('this', this);
 			__interp.variables.set('interp', __interp);
@@ -1047,18 +970,10 @@ class ScriptedMacro {
 				if (!__interp.variables.exists(k))
 					__interp.variables.set(k, v);
 
-			// A class's statics live on the CLASS interpreter. `setFields` below merges them into the
-			// scope it builds methods with, so a method could always reach them -- but a field
-			// INITIALIZER is evaluated against this interpreter instead, so `var state:Int = WAITING;`
-			// failed as an unknown identifier while `state = WAITING` inside a method worked. Shared by
-			// reference, so a static stays one value for the class rather than being snapshotted per
-			// instance.
 			for (k => v in base.__vars)
 				if (!__interp.locals.exists(k))
 					__interp.locals.set(k, v);
 
-			// Let a class name itself, so `MyClass.STATIC` resolves from inside `MyClass` the way it does
-			// from anywhere else. Without this the only way in was the unqualified name.
 			if (base.name != null && !__interp.variables.exists(base.name))
 				__interp.variables.set(base.name, base);
 
@@ -1078,18 +993,18 @@ class ScriptedMacro {
 				var superLocals:Map<String, hxscript.runtime.Variable> = __interp.duplicate(__interp.locals);
 
 				for (field in instanceFields) {
-					if (hxscript.macro.ScriptedMacro.ignoreFields.contains(field))
+					if (hxscript.macro.Scripted.ignoreFields.contains(field))
 						continue;
 
 					if (!__interp.variables.exists(field))
-						__interp.variables.set(field, hxscript.runtime.Mirror.MProperty(this, field));
+						__interp.variables.set(field, hxscript.runtime.Reference.RProperty(this, field));
 
 					var f = Reflect.field(this, field);
 					if (Reflect.isFunction(f))
 						superLocals.set(field, {r: f});
 				}
 
-				__interp.locals.set('super', {r: hxscript.runtime.Mirror.MSuper(superLocals, __constructSuper)});
+				__interp.locals.set('super', {r: hxscript.runtime.Reference.RSuper(superLocals, __constructSuper)});
 			}
 			/**
 			 * Binds a scripted class's own fields as interpreter locals.
@@ -1135,11 +1050,11 @@ class ScriptedMacro {
 				var instanceFields:Array<String> = t.extending?.instanceFields;
 				if (instanceFields != null) {
 					for (field in instanceFields) {
-						if (hxscript.macro.ScriptedMacro.ignoreFields.contains(field))
+						if (hxscript.macro.Scripted.ignoreFields.contains(field))
 							continue;
 
 						if (!__interp.variables.exists(field))
-							__interp.variables.set(field, hxscript.runtime.Mirror.MProperty(this, field));
+							__interp.variables.set(field, hxscript.runtime.Reference.RProperty(this, field));
 
 						var f = Reflect.field(this, field);
 						if (Reflect.isFunction(f))
@@ -1166,8 +1081,6 @@ class ScriptedMacro {
 
 						case KVar(v):
 							if (__interp.locals.exists(f)) {
-								// Bound the way a local `var` is, so an abstract-typed field boxes and
-								// records its type instead of storing the bare underlying value.
 								var __value:Dynamic = (v.expr == null) ? null : __interp.exprReturn(v.expr, v.type);
 								var __slot:hxscript.runtime.Variable = __interp.locals.get(f);
 								var __bound:hxscript.runtime.Variable = __interp.bindDeclared(__value, v.type);
@@ -1182,10 +1095,8 @@ class ScriptedMacro {
 					superLocals.set(f, __interp.locals.get(f));
 				}
 
-				// A scripted parent that declares no `new` inherits the native one, so
-				// `super(...)` from below must still reach __constructSuper.
 				if (isSuper)
-					__interp.locals.set('super', {r: hxscript.runtime.Mirror.MSuper(superLocals, constructor ?? __constructSuper)});
+					__interp.locals.set('super', {r: hxscript.runtime.Reference.RSuper(superLocals, constructor ?? __constructSuper)});
 			}
 
 			/**
@@ -1210,8 +1121,6 @@ class ScriptedMacro {
 			setSuperFields(base.extending);
 			setFields(base);
 
-			// No `new` anywhere in the scripted chain means the native constructor is
-			// inherited as-is, so the arguments go straight to it.
 			var entry:Dynamic = (constructor ?? __constructSuper);
 
 			if (__safe) {
@@ -1226,7 +1135,7 @@ class ScriptedMacro {
 		};
 		fields.push({
 			pos: pos,
-			name: '__construct',
+			name: '__scriptConstruct',
 			kind: FFun({
 				args: [
 					{name: 'base', type: macro :hxscript.types.ScriptedClass},
@@ -1314,7 +1223,7 @@ class ScriptedMacro {
 				kind: FFun({
 					args: [{name: 'field', type: macro :String}],
 					expr: macro {
-						if (hxscript.macro.ScriptedMacro.ignoreFields.contains(field))
+						if (hxscript.macro.Scripted.ignoreFields.contains(field))
 							return false;
 						return (instanceFields.contains(field) || Reflect.hasField(this, field) || __vars.exists(field));
 					},
@@ -1328,7 +1237,7 @@ class ScriptedMacro {
 				kind: FFun({
 					args: [{name: 'field', type: macro :String}],
 					expr: macro {
-						if (hxscript.macro.ScriptedMacro.ignoreFields.contains(field))
+						if (hxscript.macro.Scripted.ignoreFields.contains(field))
 							return null;
 						if (instanceFields.contains(field) || Reflect.hasField(this, field)) {
 							return Reflect.field(this, field);
@@ -1347,7 +1256,7 @@ class ScriptedMacro {
 				kind: FFun({
 					args: [{name: 'field', type: macro :String}, {name: 'value', type: macro :Dynamic}],
 					expr: macro {
-						if (hxscript.macro.ScriptedMacro.ignoreFields.contains(field))
+						if (hxscript.macro.Scripted.ignoreFields.contains(field))
 							return null;
 						if (instanceFields.contains(field) || Reflect.hasField(this, field)) {
 							Reflect.setField(this, field, value);
@@ -1360,14 +1269,14 @@ class ScriptedMacro {
 					ret: macro :Dynamic
 				})
 			},
-			{ // TODO
+			{
 				pos: pos,
 				access: [APublic],
 				name: 'reflectGetProperty',
 				kind: FFun({
 					args: [{name: 'property', type: macro :String}],
 					expr: macro {
-						if (hxscript.macro.ScriptedMacro.ignoreFields.contains(property))
+						if (hxscript.macro.Scripted.ignoreFields.contains(property))
 							return null;
 						if (instanceFields.contains(property) || Reflect.hasField(this, property)) {
 							return Reflect.getProperty(this, property);
@@ -1379,14 +1288,14 @@ class ScriptedMacro {
 					ret: macro :Dynamic
 				})
 			},
-			{ // TODO
+			{
 				pos: pos,
 				access: [APublic],
 				name: 'reflectSetProperty',
 				kind: FFun({
 					args: [{name: 'property', type: macro :String}, {name: 'value', type: macro :Dynamic}],
 					expr: macro {
-						if (hxscript.macro.ScriptedMacro.ignoreFields.contains(property))
+						if (hxscript.macro.Scripted.ignoreFields.contains(property))
 							return null;
 						if (instanceFields.contains(property) || Reflect.hasField(this, property)) {
 							Reflect.setProperty(this, property, value);
@@ -1408,10 +1317,10 @@ class ScriptedMacro {
 					expr: macro {
 						var fields = [
 							for (f in Reflect.fields(this))
-								if (!hxscript.macro.ScriptedMacro.ignoreFields.contains(f)) f
+								if (!hxscript.macro.Scripted.ignoreFields.contains(f)) f
 						];
 						for (f in __vars.keys()) {
-							if (!hxscript.macro.ScriptedMacro.ignoreFields.contains(f) && !fields.contains(f))
+							if (!hxscript.macro.Scripted.ignoreFields.contains(f) && !fields.contains(f))
 								fields.push(f);
 						}
 						return fields;

@@ -59,8 +59,6 @@ class ScriptedEnumValue implements ICustomEnumValueType {
 			return false;
 
 		var o:ScriptedEnumValue = cast o;
-		// Same instance, or two instances of the same enum path (one can be a reload of the
-		// other); either way equal constructors compare equal.
 		if (o.base == base || (o.base != null && base != null && o.base.path == base.path)) {
 			if (index != o.index)
 				return false;

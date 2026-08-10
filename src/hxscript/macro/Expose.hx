@@ -30,60 +30,10 @@ import haxe.macro.TypeTools;
 
 /**
  * Compile-time builder of what the compiler needs to know about the host.
- *
- * The interpreter needs none of this: it resolves a name against the global `TypeCollection`, which
- * `TypeCollectionMacro` fills with everything in the build, and it reads whatever `Config` injected
- * into it. Compiled code has neither. It has no interpreter to be injected into, and it links
- * against real classes and real statics, so every bare name a script may use has to be written down
- * as a full path before a module is emitted.
- *
- * Written down by hand that is two lists to maintain, one of which -- the `name=owner::field` form
- * for host statics -- is easy to get subtly wrong and fails at compile time with a message about an
- * identifier rather than about the list. This collects both from the build instead, the same way the
- * interpreter's table is collected.
- *
- * Mark what scripts may reach:
- *
- * ```haxe
- * @:scriptAmbient
- * class Player {
- *     @:scriptStatic('player')       // a script writing `player` gets this
- *     public static var current:Player;
- * }
- * ```
- *
- * Then hand it all over once, at startup:
- *
- * ```haxe
- * ExposeMacro.apply();
- * ```
- *
- * That fills both sides from the same marks: `Config.globalVariables` so an interpreted script can
- * write `player`, and `Compiler.ambient`/`Compiler.statics` so a compiled one resolves the same name
- * to the same static. Marking a thing once and having it work either way is the point -- filling
- * only one side gives a script that runs until the day it is compiled, or the reverse.
- *
- * The two lists are also readable on their own, for a host that wants to add to them:
- *
- * ```haxe
- * Compiler.ambient = ExposeMacro.ambient().concat(['extra.Type']);
- * Compiler.statics = ExposeMacro.statics();
- * ```
- *
- * Whole packages can be exposed without touching their types, for a host whose API is already
- * grouped:
- *
- * ```
- * --macro hxscript.macro.ExposeMacro.expose(['game', 'engine.api'])
- * ```
- *
- * Neither list changes what a script is *allowed* to touch -- `Config` still decides that, and still
- * decides it for interpreted and compiled code alike. This only tells the emitter where the things
- * it already accepts actually live.
  */
-class ExposeMacro {
+class Expose {
 	/** This macro class's own path, under which the collected lists are stashed. */
-	static var _name:String = 'hxscript.macro.ExposeMacro';
+	static var _name:String = 'hxscript.macro.Expose';
 
 	#if macro
 	/** Packages named by `expose`, whose every type becomes ambient. */
@@ -115,12 +65,6 @@ class ExposeMacro {
 	/**
 	 * Fills in both sides from what the build marked.
 	 *
-	 * Sets `Compiler.ambient` and `Compiler.statics` for compiled code, and adds every
-	 * `@:scriptStatic` to `Config.globalVariables` for interpreted code, so a bare name means the
-	 * same thing whichever way a script ends up running.
-	 *
-	 * Existing entries are kept: a name already in `globalVariables` is left as the host set it.
-	 *
 	 * @return The code that fills them in, run where the call appears.
 	 */
 	public static macro function apply():haxe.macro.Expr {
@@ -129,8 +73,8 @@ class ExposeMacro {
 		#end
 
 		return macro {
-			var exposedTypes:Array<String> = hxscript.macro.ExposeMacro.ambient();
-			var exposedStatics:Array<String> = hxscript.macro.ExposeMacro.statics();
+			var exposedTypes:Array<String> = hxscript.macro.Expose.ambient();
+			var exposedStatics:Array<String> = hxscript.macro.Expose.statics();
 
 			#if hxscript_cppia
 			hxscript.compile.Compiler.ambient = exposedTypes;
@@ -143,16 +87,7 @@ class ExposeMacro {
 				if (split < 0 || owner < split)
 					continue;
 
-				var name:String = binding.substr(0, split);
-				if (hxscript.Config.globalVariables.exists(name))
-					continue;
-
-				var path:String = binding.substring(split + 1, owner);
-				var field:String = binding.substr(owner + 2);
-				var cls:Dynamic = Type.resolveClass(path);
-
-				if (cls != null)
-					hxscript.Config.globalVariables.set(name, Reflect.field(cls, field));
+				hxscript.Config.globalStatics.set(binding.substr(0, split), binding.substr(split + 1));
 			}
 		}
 	}

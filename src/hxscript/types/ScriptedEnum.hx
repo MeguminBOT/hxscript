@@ -62,7 +62,7 @@ class ScriptedEnum implements IScriptedType implements ICustomReflection impleme
 		this.module = module;
 		this.decl = decl;
 
-		path = Tools.pathToString(name, pack);
+		path = TypeTools.pathToString(name, pack);
 	}
 
 	/**

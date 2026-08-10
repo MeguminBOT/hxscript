@@ -59,7 +59,7 @@ class ScriptedInterface implements IScriptedType implements ICustomReflection {
 		this.module = module;
 		this.decl = decl;
 
-		path = Tools.pathToString(name, pack);
+		path = TypeTools.pathToString(name, pack);
 
 		interp = Type.createInstance(Config.interpClass, []);
 	}

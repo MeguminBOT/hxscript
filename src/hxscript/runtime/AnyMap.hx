@@ -9,22 +9,12 @@ import Reflect as HaxeReflect;
 
 /**
  * The map a bare `new Map()` produces, where the key type was never written.
- *
- * `Map` is a multi-type abstract with no runtime class of its own: the compiler reads the key type
- * and constructs a `StringMap`, `IntMap`, `EnumValueMap` or `ObjectMap` in its place. A script that
- * writes the key type gets that same choice made for it while parsing. One that does not has nothing
- * to decide from until a key actually arrives, so this holds the decision open, picks on the first
- * write, and is a plain delegate from then on.
- *
- * Every read before that first write answers as an empty map, which is what it is.
- *
- * The delegate is the real map, so a script may hand one of these to host code typed against
- * `Map` or `IMap` and it behaves; only `Std.isOfType(m, StringMap)` can tell the difference.
  */
 class AnyMap implements IMap<Dynamic, Dynamic> {
 	/** The real map, chosen from the first key written and null until then. */
 	var inner:IMap<Dynamic, Dynamic>;
 
+	/** Creates an empty map whose kind is decided by the first key written to it. */
 	public function new() {}
 
 	/**

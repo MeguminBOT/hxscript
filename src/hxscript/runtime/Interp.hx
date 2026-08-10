@@ -23,11 +23,12 @@
 package hxscript.runtime;
 
 import hxscript.syntax.Expr;
-import hxscript.runtime.Mirror;
+import hxscript.runtime.Reference;
 import hxscript.runtime.Stop;
 import hxscript.types.Defer;
-import hxscript.runtime.InterpException;
-import hxscript.runtime.CallStack;
+import hxscript.error.InterpException;
+import hxscript.error.ErrorKind;
+import hxscript.runtime.ScriptStack;
 import hxscript.types.*;
 import haxe.PosInfos;
 import haxe.Constraints.IMap;
@@ -39,23 +40,21 @@ import hxscript.proxy.TypeProxy as Type;
 import hxscript.proxy.StdProxy as Std;
 
 using StringTools;
-using hxscript.tools.Tools;
+using hxscript.syntax.ExprTools;
+using hxscript.types.TypeTools;
 using hxscript.types.TypeCollection;
 using hxscript.types.AbstractValue;
 
 /**
- * The tree-walking interpreter: it evaluates parsed expressions against a scope of variables,
- * imports, and `using`s. One interpreter backs each `Script`, `Module`, and scripted type; nested
- * scopes (blocks, function calls) push and pop frames on an internal `CallStack`.
- *
- * Inside this class `Type`, `Reflect`, and `Std` are aliased to the `hxScript*` proxies (see the
- * imports), so reflection transparently understands scripted types as well as native ones.
+ * The tree-walking interpreter: it evaluates parsed expressions against a scope of variables, imports, and
+ * `using`s. One interpreter backs each `Script`, `Module`, and scripted type; nested scopes (blocks, function
+ * calls) push and pop frames on an internal `ScriptStack`.
  */
 class Interp {
 	/** Active `using` extension classes, searched for extension methods on field access. */
 	public var usings:Array<Dynamic>;
 
-	/** Imported names -> the type, value, or `Mirror` they resolve to. */
+	/** Imported names -> the type, value, or `Reference` they resolve to. */
 	public var imports:Map<String, Dynamic>;
 
 	/** Top-level (module/script) variables. */
@@ -92,16 +91,10 @@ class Interp {
 	public var callStackDepth:Int = 200;
 
 	/** The interpreter's own call stack (frames with their locals). */
-	var stack:CallStack;
+	var stack:ScriptStack;
 
 	/**
 	 * The innermost frame's scope, kept in step with `stack` rather than fetched from it.
-	 *
-	 * `locals` is read for every variable read, write and declaration, and reaching it meant loading
-	 * the call stack, loading its array, indexing it and null-checking the frame. The frames only
-	 * change in `pushStack`, `shiftStack` and `execute`, so holding the answer costs three
-	 * assignments and saves four loads on the interpreter's busiest path. Null exactly when there is
-	 * no frame, which is what the entry guard in `expr` tests.
 	 */
 	var frameLocals:Map<String, Variable> = null;
 
@@ -117,28 +110,12 @@ class Interp {
 	/** Captured variables for the closure currently being built. */
 	var captures:Map<String, Dynamic>;
 
-	/**
-	 * Whether `captures` currently holds anything.
-	 *
-	 * Capture variables exist only while a `switch` case with pattern bindings is being evaluated,
-	 * which is a sliver of what an interpreter runs, yet every identifier read consulted the map
-	 * anyway. Conservative on purpose: `clear` resets it and a single `remove` leaves it set, so the
-	 * flag can cost a lookup that was not needed but can never skip one that was.
-	 */
+	/** Whether `captures` currently holds anything. */
 	var hasCaptures:Bool = false;
 
-	/** Variables declared in the current scope, with their shadowed previous bindings, for restoration. */
 	/**
-	 * Held as two parallel arrays rather than one array of `{n, old}` pairs.
-	 *
-	 * An entry is pushed for every variable declaration, every function parameter and every caught
-	 * exception, which makes this one of the most frequently written structures in the interpreter.
-	 * A pair object meant an allocation per binding; two typed arrays mean none at all.
-	 *
-	 * A `@:structInit` class was tried here first and measured 3.1% SLOWER than the anonymous
-	 * structure, because these entries are written once and read once, so there is no repeated
-	 * field access to win back the allocation. Removing the object entirely is the version that
-	 * pays. The two arrays are always pushed and popped together and so always have equal length.
+	 * Names shadowed in the current scope, held as two parallel arrays rather than one array of
+	 * `{n, old}` pairs.
 	 */
 	var declaredNames:Array<String>;
 
@@ -176,21 +153,6 @@ class Interp {
 
 	/**
 	 * Whether anything in the process declares a property with a `null` accessor.
-	 *
-	 * `accessingInterp` exists for one purpose: `readLocal` and `writeLocal` compare it against the
-	 * slot's owning interpreter to reject reads and writes of `(null, _)` and `(_, null)` properties
-	 * from outside their class. Those two comparisons are its only readers.
-	 *
-	 * Keeping it current is not free. Every scripted class builds its own interpreter, so a call
-	 * into another class rewrites this static going in and again coming back -- two writes per
-	 * call, each with hxcpp's write barrier, measured at about 205ns apiece and accounting for the
-	 * whole 19% gap between a same-class and a cross-class call.
-	 *
-	 * Almost no script declares a `null` accessor, so almost no script needs any of it. Tracking
-	 * stays off until one is actually declared, at which point the guarded write resumes and the
-	 * checks behave exactly as before. A slot can only be read after the class declaring it has
-	 * been initialised, and initialisation evaluates expressions, so the static is always current
-	 * by the time either reader can run.
 	 */
 	static var trackAccess:Bool = false;
 
@@ -203,12 +165,6 @@ class Interp {
 
 	/**
 	 * Counts how often evaluation crosses from one interpreter to another.
-	 *
-	 * Every scripted class builds its own `Interp`, so a call into another class flips this static
-	 * on the way in and again on the way back, and each flip is a static write with the write
-	 * barrier that implies. This counter is here to confirm that the flips actually track the gap
-	 * between same-class and cross-class call costs before anything is restructured around that
-	 * theory. Compiled out unless `-D hxscript_profile` is set.
 	 */
 	#if hxscript_profile
 	public static var interpSwitches:Int = 0;
@@ -235,14 +191,6 @@ class Interp {
 	/**
 	 * Creates an interpreter with its operator table but WITHOUT the `Config` defaults.
 	 *
-	 * Call `setDefaults` before running anything in a bare interpreter. `Script`, `Module`,
-	 * `ImportModule` and every scripted type already do, which is why the constructor no longer does
-	 * it: all five construction sites in this library called `setDefaults` again immediately
-	 * afterwards, either wiping what the constructor had just seeded or seeding it a second time, so
-	 * the constructor's copy never had a surviving consumer. Applying the default wildcard import is
-	 * most of what an interpreter costs to build, so doing it twice was most of what building one
-	 * cost.
-	 *
 	 * @param environment The world to resolve types against, if any.
 	 * @param parent The owning object bound as context, if any.
 	 */
@@ -250,7 +198,7 @@ class Interp {
 		this.environment = environment;
 		this.parent = parent;
 
-		stack = new CallStack();
+		stack = new ScriptStack();
 
 		imports = new Map();
 		usings = new Array();
@@ -279,6 +227,19 @@ class Interp {
 		if (includeConfig) {
 			for (k => v in Config.globalVariables)
 				variables.set(k, v);
+
+			for (name => binding in Config.globalStatics) {
+				if (Config.globalVariables.exists(name))
+					continue;
+
+				var owner:Int = binding.indexOf('::');
+				if (owner < 0)
+					continue;
+
+				var cls:Dynamic = Type.resolveClass(binding.substr(0, owner));
+				if (cls != null)
+					variables.set(name, Reflect.field(cls, binding.substr(owner + 2)));
+			}
 
 			for (k => v in Config.globalImports)
 				importPath(k.split('.'), v);
@@ -324,12 +285,9 @@ class Interp {
 	}
 
 	/**
-	 * Evaluates `a op b` where an operand is a wrapped abstract: through the abstract's `@:op` method
-	 * when it declares one for this operator, otherwise on the values the operands box, which matches
-	 * what an abstract with an implicit cast to its underlying type does in Haxe.
-	 *
-	 * The left operand is tried first, and the right one only for commutative operators, so a
-	 * non-commutative operator can never be applied the wrong way round.
+	 * Evaluates `a op b` where an operand is a wrapped abstract: through the abstract's `@:op` method when it
+	 * declares one for this operator, otherwise on the values the operands box, which matches what an
+	 * abstract with an implicit cast to its underlying type does in Haxe.
 	 *
 	 * @param op The operator symbol.
 	 * @param a The left operand.
@@ -341,8 +299,6 @@ class Interp {
 		if (m != null)
 			return fcall(a, m, [b]);
 
-		// `1 + vec`: for a commutative operator the method may be declared on the right-hand operand
-		// instead. Doing this for `-`, `/` or `%` would apply them the wrong way round.
 		if (op == "+" || op == "*") {
 			m = AbstractTools.opMethod(b, op);
 			if (m != null)
@@ -454,25 +410,11 @@ class Interp {
 	 * Adds two values with Haxe semantics: String concatenation when either side is a String,
 	 * otherwise numeric addition promoted like `numArith` (`Int + Int` stays `Int`).
 	 *
-	 * The sum is worked out both ways and the narrow one is only handed back if it agrees, which is
-	 * how a running total declared `Float` survives passing two billion. On hxcpp a `Dynamic` cannot
-	 * tell a whole `Float` from an `Int` -- `3.0` answers true to `is Int`, reports `TInt` from
-	 * `Type.typeof`, and carries the same internal tag as `3` -- so a value the script declared
-	 * `Float` arrives here indistinguishable from an `Int`, and adding it as one wraps into a negative
-	 * number with nothing to say it happened.
-	 *
-	 * Comparing the two results is used rather than the usual sign trick because the operands are not
-	 * always numbers: a boxed abstract can satisfy `is Int` while having no bitwise operators at all,
-	 * and it must come out of here exactly as it went in.
-	 *
 	 * @param a The left operand.
 	 * @param b The right operand.
 	 * @return The concatenated string or the promoted numeric sum.
 	 */
 	inline function numAdd(a:Dynamic, b:Dynamic):Dynamic {
-		// Int first. The result is the same whichever order these are tested in -- an operand cannot
-		// be both an Int and a String -- and integer addition is what a script actually spends its
-		// time on, so it should not pay two string checks to get there.
 		if (a is Int && b is Int) {
 			var wide:Float = (a : Float) + (b : Float);
 			var narrow:Int = (a : Int) + (b : Int);
@@ -505,12 +447,6 @@ class Interp {
 
 	/**
 	 * Multiplies with Haxe numeric promotion.
-	 *
-	 * Unlike `+` and `-` this keeps wrapping when two `Int`s overflow, which is deliberate. Wrapping
-	 * multiplication is an idiom -- every hash and seeded random generator is built on it -- and
-	 * promoting would break them for good: a `Float` carries 53 bits of mantissa, so a product past
-	 * that has already lost the low bits the following mask wanted, and no later `&` can recover them.
-	 * Addition cannot lose bits that way, which is why it can afford to promote and this cannot.
 	 *
 	 * @param a The left operand.
 	 * @param b The right operand.
@@ -624,9 +560,9 @@ class Interp {
 
 		var iv = imports.get(name);
 		if (iv != null) {
-			if (iv is Mirror) {
+			if (iv is Reference) {
 				switch (iv) {
-					case MProperty(t, f):
+					case RProperty(t, f):
 						if (curAccess == f) {
 							Reflect.setField(t, f, v);
 						} else {
@@ -642,9 +578,9 @@ class Interp {
 
 		if (variables.exists(name)) {
 			var vv = variables.get(name);
-			if (vv is Mirror) {
+			if (vv is Reference) {
 				switch (vv) {
-					case MProperty(t, f):
+					case RProperty(t, f):
 						if (curAccess == f) {
 							Reflect.setField(t, f, v);
 						} else {
@@ -657,7 +593,7 @@ class Interp {
 
 			variables.set(name, v);
 		} else {
-			if (stack.length <= 1 && defineGlobals) { // global scope
+			if (stack.length <= 1 && defineGlobals) {
 				variables.set(name, v);
 				return v;
 			}
@@ -677,10 +613,8 @@ class Interp {
 	 */
 	function assign(e1:Expr, e2:Expr):Dynamic {
 		var v = expr(e2);
-		switch (Tools.expr(e1)) {
+		switch (ExprTools.expr(e1)) {
 			case EIdent(id):
-				// One map read for the slot, then write it directly -- `exists` followed by `setLocal`
-				// hashed the name twice for every assignment.
 				var l:Variable = locals.get(id);
 				if (l != null) {
 					writeLocal(l, id, v);
@@ -727,11 +661,8 @@ class Interp {
 	 */
 	function evalAssignOp(op, fop, e1, e2):Dynamic {
 		var v;
-		switch (Tools.expr(e1)) {
+		switch (ExprTools.expr(e1)) {
 			case EIdent(id):
-				// `x op= y` reads and writes the same slot, so resolve it once and use it for both.
-				// Only when there are no captures, because `expr(EIdent)` consults those first and a
-				// capture of the same name has to keep winning.
 				var l:Variable = hasCaptures ? null : locals.get(id);
 				if (l != null) {
 					v = fop(readLocal(l, id), expr(e2));
@@ -787,11 +718,6 @@ class Interp {
 
 	/**
 	 * Reads an already-resolved slot, honouring its property accessor.
-	 *
-	 * Split out of `getLocal` so a caller that has just looked the slot up does not look it up again,
-	 * and so the accessor dispatch can be skipped outright: a plain variable has no accessor, which
-	 * is nearly every read, and testing one field beats falling through a switch over five string
-	 * constants to reach the same answer.
 	 *
 	 * @param l The slot.
 	 * @param id Its name, for the accessor call and for error reporting.
@@ -849,8 +775,6 @@ class Interp {
 		if (l.t != null)
 			v = tryCast(v, l.t);
 
-		// Only a slot that already holds an abstract needs the box kept in step, and testing the slot
-		// is a field read where testing the value would be a type check on every single write.
 		if (l.a != null)
 			return storeBoxed(l, v);
 
@@ -898,8 +822,8 @@ class Interp {
 	 * Writes an already-resolved slot, honouring finality, method rebinding and its accessor.
 	 *
 	 * The write-side counterpart of `readLocal`, split out for the same two reasons: a caller holding
-	 * the slot should not look it up a second time, and a plain variable -- which is nearly every
-	 * write -- should not fall through a switch over five string constants to reach `store`.
+	 * the slot should not look it up a second time, and a plain variable, which is nearly every
+	 * write, should not fall through a switch over five string constants to reach `store`.
 	 *
 	 * @param l The slot.
 	 * @param id Its name, for the accessor call and for error reporting.
@@ -963,9 +887,6 @@ class Interp {
 
 		switch (e) {
 			case EIdent(id):
-				// One map read, held across the read and the write: this is `i++`, so it runs on every
-				// iteration of every counted loop. It used to be a membership test plus a lookup inside
-				// `getLocal` plus another inside `setLocal`, hashing the name three times.
 				var l:Variable = locals.get(id);
 				if (l == null) {
 					var v:Dynamic = resolve(id);
@@ -1109,8 +1030,6 @@ class Interp {
 	 * @param locals The frame's local map; defaults to a fresh duplicate of the current scope.
 	 */
 	function pushStack(?item:StackItem, ?locals:Map<String, Variable>) {
-		// Stamp the caller's frame in place: rebuilding it (shift + new frame + unshift) allocated
-		// twice and shifted the whole stack on every call.
 		var last:StackFrame = stack.stack[0];
 
 		if (last != null) {
@@ -1157,9 +1076,6 @@ class Interp {
 		if (localsPool.length > 0) {
 			var locals:Map<String, Variable> = localsPool.pop();
 
-			// A recycled map still holds the entries of the frame it came from, so it has to be cleared
-			// whether or not there is anything to copy in. Returning it dirty leaked one frame's locals
-			// into an unrelated new scope, including into a freshly-built interpreter's first frame.
 			locals.clear();
 
 			if (h != null) {
@@ -1198,10 +1114,10 @@ class Interp {
 	 * @param rethrow Whether to rethrow (preserving the native trace) rather than throw fresh.
 	 * @return Never returns normally; typed `Dynamic` so it can stand in an expression.
 	 */
-	function error(e:Error, rethrow = false):Dynamic {
+	function error(e:ErrorKind, rethrow = false):Dynamic {
 		pushStack();
 
-		var exception:InterpException = new InterpException(stack, Printer.errorToString(e));
+		var exception:InterpException = new InterpException(stack, hxscript.error.Printer.errorToString(e), null, e);
 		if (rethrow)
 			this.rethrow(exception)
 		else
@@ -1225,13 +1141,6 @@ class Interp {
 
 	/**
 	 * Constructs an enum value by constructor index.
-	 *
-	 * `t` and the return are typed `Dynamic`, not `Enum<Dynamic>`/`EnumValue`: a scripted enum is an
-	 * `ScriptedEnum` class instance and its values are `ScriptedEnumValue` instances --
-	 * neither is a native enum, so an `Enum<Dynamic>`/`EnumValue`-typed boundary makes hxcpp coerce the
-	 * argument (and result) with a native-enum cast that yields null, breaking bare enum constructors on
-	 * the C++ target. `Type` is the `TypeProxy` proxy, which dispatches scripted and native enums
-	 * alike from a `Dynamic`.
 	 *
 	 * @param t The scripted or native enum.
 	 * @param i The constructor index.
@@ -1282,7 +1191,7 @@ class Interp {
 	}
 
 	/**
-	 * Returns the live instance of a scripted enum. A `Mirror.MEnumValue` can outlive the enum
+	 * Returns the live instance of a scripted enum. A `Reference.REnumValue` can outlive the enum
 	 * instance it captured (e.g. a module reloaded under it), leaving `values`/`decl` null; the
 	 * environment always maps the enum's path to the current one, so swap to that when the held
 	 * instance looks dead. Non-scripted and healthy instances pass straight through.
@@ -1332,7 +1241,7 @@ class Interp {
 	}
 
 	/**
-	 * Materializes a bare enum constructor `Mirror.MEnumValue`. Re-resolves the enum to its live
+	 * Materializes a bare enum constructor `Reference.REnumValue`. Re-resolves the enum to its live
 	 * instance first (a cached import can outlive a reloaded module), so a bare `Foo` builds
 	 * against the current type exactly like qualified `Enum.Foo`. A parameterized constructor
 	 * yields a varargs builder; a parameterless one yields the value itself so it matches `case Foo`.
@@ -1372,26 +1281,26 @@ class Interp {
 	}
 
 	/**
-	 * Materializes a stored value: a `Mirror` (property, enum constructor, or enum-abstract constant)
+	 * Materializes a stored value: a `Reference` (property, enum constructor, or enum-abstract constant)
 	 * is turned into its live value; anything else is returned unchanged.
 	 *
 	 * @param v The stored value or mirror.
 	 * @return The materialized value.
 	 */
 	inline function resolveMirror(v:Dynamic):Dynamic {
-		if (v is Mirror) {
+		if (v is Reference) {
 			switch (v) {
 				default:
 					return v;
-				case MProperty(t, f):
+				case RProperty(t, f):
 					if (curAccess == f) {
 						return Reflect.field(t, f);
 					} else {
 						return Reflect.getProperty(t, f);
 					}
-				case MEnumValue(t, i):
+				case REnumValue(t, i):
 					return resolveEnumValue(t, i);
-				case MAbstractEnumValue(t, i):
+				case RAbstractEnumValue(t, i):
 					return createAbstractEnum(t, i);
 			}
 		} else {
@@ -1408,9 +1317,6 @@ class Interp {
 	 * @throws InterpException If the identifier is unknown.
 	 */
 	public function resolve(id:String):Dynamic {
-		// One map read per table on the hit, with the membership test kept only for the case it is
-		// actually needed for -- telling "bound to null" apart from "not bound". `exists` then `get`
-		// doubled the hashing on every identifier that was not a local.
 		var v:Dynamic = imports.get(id);
 		if (v != null)
 			return resolveMirror(v);
@@ -1459,7 +1365,7 @@ class Interp {
 			if (td.alias != null)
 				imports.set(name, td.alias);
 			else if (td.structural)
-				imports.set(name, td); // structural: keep the typedef so `is`/`cast` can check its shape
+				imports.set(name, td);
 		} else if (t is ScriptedEnum) {
 			imports.set(name, t);
 
@@ -1470,7 +1376,7 @@ class Interp {
 		} else if (t is Class) {
 			if (Type.getSuperClass(t) == AbstractValue && t.isEnum) {
 				for (i => construct in AbstractTools.getEnumConstructs(t))
-					imports.set(construct, MAbstractEnumValue(t, i));
+					imports.set(construct, RAbstractEnumValue(t, i));
 				imports.set(name, t);
 				return;
 			}
@@ -1481,19 +1387,21 @@ class Interp {
 
 			if (enumValueImport)
 				importEnumValues(t);
+		} else if (t != null && Type.getClassName(cast t) != null) {
+			imports.set(name, t);
 		} else {
 			throw 'Invalid import type $t';
 		}
 	}
 
 	/**
-	 * Exposes an enum's constructors unqualified, each as a `Mirror.MEnumValue`.
+	 * Exposes an enum's constructors unqualified, each as a `Reference.REnumValue`.
 	 *
 	 * @param t The enum whose constructors to import.
 	 */
 	function importEnumValues(t:Dynamic) {
 		for (i => v in Type.getEnumConstructs(t))
-			imports.set(v, MEnumValue(t, i));
+			imports.set(v, REnumValue(t, i));
 	}
 
 	/**
@@ -1507,14 +1415,11 @@ class Interp {
 		if (mode == IAll) {
 			var fullPath:String = path.join('.');
 
-			// Resolving a package's types is what a wildcard import spends its time on, and the answer
-			// only changes when the world's type index does. Every interpreter re-resolved it, which put
-			// the default `import *` on the critical path of constructing one.
 			var cache:Map<String, Array<ImportEntry>> = (environment != null ? environment.importCache : globalImportCache);
 			var entries:Array<ImportEntry> = cache.get(fullPath);
 
 			if (entries == null) {
-				var types:Array<TypeInfo> = Tools.listTypesEx(fullPath, true, [TypeCollection.main, environment?.types]);
+				var types:Array<TypeInfo> = TypeTools.listTypesEx(fullPath, true, [TypeCollection.main, environment?.types]);
 
 				if (types == null)
 					return;
@@ -1522,7 +1427,7 @@ class Interp {
 				entries = [];
 				for (type in types) {
 					if (type.module != type.name && type.name != 'Main')
-						continue; // only the module's main type, not its sub-types
+						continue;
 					if (type.name.indexOf('_Impl_') > -1 || type.name.startsWith('AbstractValue_'))
 						continue;
 
@@ -1549,7 +1454,7 @@ class Interp {
 			var fullPath:String = path.slice(0, i + 1).join('.');
 
 			if (path[i].isTypeIdentifier()) {
-				var types:Array<TypeInfo> = Tools.listTypesEx(fullPath, [TypeCollection.main, environment?.types]);
+				var types:Array<TypeInfo> = TypeTools.listTypesEx(fullPath, [TypeCollection.main, environment?.types]);
 
 				if (types != null) {
 					var field:String = fields.shift();
@@ -1570,9 +1475,9 @@ class Interp {
 
 								switch (mode) {
 									case IAsName(alias):
-										return imports.set(alias, MProperty(t, field));
+										return imports.set(alias, RProperty(t, field));
 									default:
-										return imports.set(field, MProperty(t, field));
+										return imports.set(field, RProperty(t, field));
 								}
 							}
 						}
@@ -1583,9 +1488,9 @@ class Interp {
 
 							switch (mode) {
 								case IAsName(alias):
-									return imports.set(alias, MProperty(t, field));
+									return imports.set(alias, RProperty(t, field));
 								default:
-									return imports.set(field, MProperty(t, field));
+									return imports.set(field, RProperty(t, field));
 							}
 						} else if (t is Enum || t is ScriptedEnum) {
 							var i:Int = Type.getEnumConstructs(t).indexOf(field);
@@ -1593,9 +1498,9 @@ class Interp {
 							if (i >= 0) {
 								switch (mode) {
 									case IAsName(alias):
-										return imports.set(alias, MEnumValue(t, i));
+										return imports.set(alias, REnumValue(t, i));
 									default:
-										return imports.set(field, MEnumValue(t, i));
+										return imports.set(field, REnumValue(t, i));
 								}
 							} else {
 								error(EUnknownField(path[i], field));
@@ -1631,7 +1536,7 @@ class Interp {
 										imports.set(path[i], t);
 
 									for (field in Reflect.fields(t))
-										imports.set(field, MProperty(t, field));
+										imports.set(field, RProperty(t, field));
 
 									continue;
 								}
@@ -1664,14 +1569,11 @@ class Interp {
 			var fullPath:String = path.slice(0, i + 1).join('.');
 
 			if (path[i].isTypeIdentifier()) {
-				var types:Array<TypeInfo> = Tools.listTypesEx(fullPath, [TypeCollection.main, environment?.types]);
+				var types:Array<TypeInfo> = TypeTools.listTypesEx(fullPath, [TypeCollection.main, environment?.types]);
 
 				if (types != null && types.length > 0) {
 					for (type in types) {
 						var t = type.resolve();
-						// A script-declared class resolves to a `ScriptedClass`, not a `Class`, so gating
-						// on `is Class` alone meant `using` a scripted extension registered nothing and
-						// every call through it failed with `Cannot call`.
 						if ((t is Class || t is ScriptedClass) && !usings.contains(t))
 							usings.push(t);
 						imports.set(type.name, t);
@@ -1736,15 +1638,12 @@ class Interp {
 
 				imports.set(m.name, cls);
 
-				// An enum abstract desugars to a class of static constants, which are reachable
-				// unqualified the way enum constructors are. Importing one does this too; a
-				// script-level declaration used to bind only the type.
 				for (meta in m.meta) {
 					if (meta.name != ':enumAbstract')
 						continue;
 					for (field in m.fields)
 						if (field.access.contains(AStatic))
-							imports.set(field.name, Mirror.MProperty(cls, field.name));
+							imports.set(field.name, Reference.RProperty(cls, field.name));
 					break;
 				}
 
@@ -1768,11 +1667,8 @@ class Interp {
 
 				imports.set(m.name, en);
 
-				// Constructors are also reachable unqualified, the way Haxe exposes them for an enum
-				// declared in the same module. Module.init does this too; a script-level `enum` used
-				// to bind only the type, so `Blue(3)` failed while `Col.Blue(3)` worked.
 				for (i => v in en.constructNames())
-					imports.set(v, Mirror.MEnumValue(en, i));
+					imports.set(v, Reference.REnumValue(en, i));
 
 			case DAbstract(m):
 				if (variables.exists(m.name))
@@ -1795,7 +1691,7 @@ class Interp {
 				if (td.alias != null)
 					imports.set(m.name, td.alias);
 				else if (td.structural)
-					imports.set(m.name, td); // structural: keep the typedef so `is`/`cast` can check its shape
+					imports.set(m.name, td);
 
 			default:
 		}
@@ -1822,14 +1718,6 @@ class Interp {
 
 		/**
 		 * The frame this closure runs in, built once and reused.
-		 *
-		 * Copying the captured scope into a fresh map on every invocation made a call cost O(size of
-		 * the enclosing scope): measured at 3x for twenty captured variables, paid by every local and
-		 * anonymous function in a script whose top level declares anything.
-		 *
-		 * Reuse is safe because a frame is left exactly as it was found. `restore` puts back every
-		 * binding the prologue and the body shadowed, so the map is pristine again by the time the
-		 * call returns -- which is the same guarantee the enclosing scope already relies on.
 		 */
 		var frame:Map<String, Variable> = null;
 
@@ -1881,11 +1769,6 @@ class Interp {
 			}
 			var old = declaredNames.length;
 
-			// A closure is nearly always running one invocation at a time, so it reuses its own frame.
-			// Only re-entry -- recursion, or a callback that calls back into the same closure -- needs a
-			// second scope, and that one is copied as before. `frame` is built on the first call rather
-			// than up front because self-recursive binding adds the function's own name to
-			// `capturedLocals` after this closure has been constructed.
 			var reused:Bool = false;
 			var scope:Map<String, Variable>;
 
@@ -1900,8 +1783,6 @@ class Interp {
 				scope = frame;
 			}
 
-			// Recycling into the shared pool is only ever right for a scope this invocation owns
-			// outright: the reused frame has to survive the call, and a method's fixed map is not ours.
 			var recycle:Bool = functionLocals == null && !reused;
 
 			pushStack(name == null ? SLocalFunction(id) : SMethod(position.origin, name), scope);
@@ -1924,10 +1805,6 @@ class Interp {
 				try {
 					r = tryCast(exprReturn(fexpr), ret);
 				} catch (e:Dynamic) {
-					// Unwind this frame's declarations before leaving, not just the frame. Skipping it
-					// left them on `declared` for an enclosing `restore` to roll back later -- by which
-					// point `locals` is the CALLER's scope, so the callee's parameters were written into
-					// it. A reused frame makes that visible immediately; it was wrong before as well.
 					restore(old);
 
 					if (reused)
@@ -1957,13 +1834,13 @@ class Interp {
 		});
 
 		if (name != null) {
-			if (stack.length > 1) { // function-in-function is a local function
+			if (stack.length > 1) {
 				declaredNames.push(name);
 				declaredOld.push(locals.get(name));
 				var ref:Variable = {r: f};
 				locals.set(name, ref);
-				capturedLocals.set(name, ref); // allow self-recursion
-			} else { // global function
+				capturedLocals.set(name, ref);
+			} else {
 				if (defineGlobals) {
 					variables.set(name, f);
 				} else {
@@ -1985,8 +1862,6 @@ class Interp {
 	function evalArrayDecl(arr:Array<Expr>, t:Null<CType>):Dynamic {
 		var compr:Dynamic = null;
 
-		// `compr` cannot answer this on its own: one that yields nothing leaves it null, which reads
-		// the same as never having been a comprehension.
 		var ranComprehension:Bool = false;
 
 		var exprCompr:(e:Expr, ?inFor:Bool) -> Dynamic = null;
@@ -2029,7 +1904,7 @@ class Interp {
 		}
 
 		exprCompr = function(e:Expr, inFor:Bool = false):Dynamic {
-			return switch (Tools.expr(e)) {
+			return switch (ExprTools.expr(e)) {
 				case EBlock(e):
 					var v = Interp.void;
 
@@ -2052,7 +1927,7 @@ class Interp {
 
 				case EForGen(it, e):
 					ranComprehension = true;
-					Tools.getKeyIterator(it, function(vk, vv, it) {
+					ExprTools.getKeyIterator(it, function(vk, vv, it) {
 						if (vk == null) {
 							position = it.pos;
 							error(ECustom('Invalid for expression'));
@@ -2069,11 +1944,11 @@ class Interp {
 			}
 		}
 
-		if (arr.length > 0 && Tools.expr(arr[0]).match(EBinop("=>", _))) { // infer from keys ...
+		if (arr.length > 0 && ExprTools.expr(arr[0]).match(EBinop("=>", _))) {
 			var keys = [];
 			var values = [];
 			for (e in arr) {
-				switch (Tools.expr(e)) {
+				switch (ExprTools.expr(e)) {
 					case EBinop("=>", eKey, eValue):
 						keys.push(expr(eKey));
 						values.push(expr(eValue));
@@ -2083,7 +1958,7 @@ class Interp {
 				}
 			}
 			return makeMap(keys, values);
-		} else { // infer from type declaration ... (empty map)
+		} else {
 			if (arr.length == 1) {
 				exprCompr(arr[0]);
 
@@ -2095,9 +1970,9 @@ class Interp {
 				case CTPath(path, params):
 					var fullPath:String = path.join('.');
 
-					if (fullPath == 'Map') { // infer from parameters
+					if (fullPath == 'Map') {
 						if (params == null || params.length < 2)
-							error(ECustom('Not enough type parameters for Map')); // we dont really care about the value type , but whatever
+							error(ECustom('Not enough type parameters for Map'));
 						else if (params.length > 2)
 							error(ECustom('Too many type parameters for Map'));
 
@@ -2113,14 +1988,14 @@ class Interp {
 									return new Map<Int, Dynamic>();
 								} else {
 									var type:TypeInfo = null;
-									var r = (Tools.resolve(fullPath, environment) ?? imports.get(fullPath));
+									var r = (TypeTools.resolve(fullPath, environment) ?? imports.get(fullPath));
 									if (r is Class) {
 										type = TypeCollection.main.fromCompilePath(Type.getClassName(r))[0];
 									} else if (r == null) {
 										error(EUnknownType(fullPath));
 									}
 
-									if (/*Reflect.isEnumValue(r)*/ false) { // todo resolve enum values??
+									if (/*Reflect.isEnumValue(r)*/ false) {
 										return new haxe.ds.EnumValueMap<Dynamic, Dynamic>();
 									} else if (type?.kind == 'class') {
 										return new haxe.ds.ObjectMap<Dynamic, Dynamic>();
@@ -2132,9 +2007,6 @@ class Interp {
 						var p = new Printer();
 						error(ECustom('Map of type <${p.typeToString(params[0])}, ${p.typeToString(params[1])}> is not accepted'));
 					} else if (isResolvable(fullPath)) {
-						// Guarded because this is only looking for a map type to build empty, so an
-						// annotation naming anything else is not an error: `var a:Dynamic = [9]` was
-						// rejected here for naming a type with no runtime identity.
 						var t:Dynamic = resolve(fullPath);
 
 						if (t is haxe.ds.IntMap || t is haxe.ds.StringMap || t is haxe.ds.ObjectMap || t is haxe.ds.EnumValueMap)
@@ -2145,8 +2017,6 @@ class Interp {
 
 			var a = new Array();
 
-			// `arr` holds the comprehension itself when a loop drove this, so evaluating it would put
-			// the loop's own value in the array. An empty comprehension is an empty array.
 			if (!ranComprehension) {
 				for (e in arr)
 					a.push(expr(e));
@@ -2310,8 +2180,6 @@ class Interp {
 
 				captures.remove('_');
 
-				// Only a pattern that matched has its capture variables bound, so a guard on a case that
-				// did not match must not run: it would resolve names that were never set.
 				if (match && c.guard != null && !expr(c.guard))
 					match = false;
 
@@ -2335,12 +2203,6 @@ class Interp {
 
 	/**
 	 * Evaluates a `try`/`catch`, kept out of `expr` deliberately.
-	 *
-	 * `expr` is size-bound on hxcpp: it is one enormous switch, and every line inside it competes
-	 * for registers and instruction cache with the handful of node kinds that actually run in a
-	 * loop. This was the largest cold body still inline, and it also declared a closure, which
-	 * costs the enclosing function further. Moving it out shrinks the hot path without changing
-	 * a single thing about what it does.
 	 */
 	@:noinline function evalTry(e:Expr, n:String, t:Null<CType>, ecatch:Expr, extra:Array<{v:String, t:Null<CType>, expr:Expr}>):Dynamic {
 		var old = declaredNames.length;
@@ -2357,9 +2219,6 @@ class Interp {
 		} catch (err:Dynamic) {
 			restore(old);
 			inTry = oldTry;
-			// A thrown non-exception value arrives wrapped in a haxe.ValueException; unwrap
-			// to the original so a typed clause matches its real type and the catch var
-			// binds that value. Real exceptions pass through unchanged.
 			var raw:Dynamic = (err is haxe.ValueException) ? (cast(err, haxe.ValueException)).value : err;
 			/**
 			 * Runs one `catch` clause with its exception variable bound, restoring the scope afterwards.
@@ -2396,16 +2255,13 @@ class Interp {
 	 * instruction cache with the node kinds that do.
 	 */
 	@:noinline function evalMeta(meta:String, args:Array<Expr>, e:Expr):Dynamic {
-		// A script-level declaration carries its metadata as a wrapper, since the expression
-		// parser reaches the `@` before the keyword. Hand it to the declaration, which is where
-		// `@:forward`, `@:keep` and the rest are read from.
-		switch (Tools.expr(e)) {
+		switch (ExprTools.expr(e)) {
 			case EDecl(decl):
 				attachMeta(decl, {name: meta, params: args});
 			default:
 		}
 
-		var r:Dynamic, old = metas.length;
+		var r:Dynamic = null, old = metas.length;
 		metas.push({name: meta, params: args});
 
 		try {
@@ -2435,10 +2291,6 @@ class Interp {
 	 * @return The value it evaluates to.
 	 */
 	public function expr(e:Expr, ?t:CType, void:Bool = false, mapCompr:Bool = false):Dynamic {
-		// Both of these are already what they need to be for every node after the first, and both are
-		// statics holding object references, so an unconditional store pays hxcpp's write barrier on
-		// every node evaluated. A load and a compare do not. They stay separate tests because
-		// `environment` is a public field a host can reassign under a running interpreter.
 		if (trackAccess && accessingInterp != this) {
 			accessingInterp = this;
 			#if hxscript_profile
@@ -2451,8 +2303,6 @@ class Interp {
 		position = e.pos;
 		var e = e.e;
 
-		// `frameLocals` is null exactly when there is no frame, so this is one field load where it
-		// used to be a walk from the call stack into its array to ask for the length.
 		if (frameLocals == null)
 			pushStack(SScript(position.origin));
 
@@ -2473,9 +2323,6 @@ class Interp {
 			case EIdent(id):
 				if (hasCaptures && captures.exists(id))
 					return captures.get(id);
-				// One map read, not `exists` then `get`. `locals` is a property backed by a call into
-				// the call stack, so the old pair cost two of those on top of two hash lookups, on the
-				// single most frequently evaluated node there is.
 				var l:Variable = locals.get(id);
 				if (l != null)
 					return readLocal(l, id);
@@ -2502,10 +2349,6 @@ class Interp {
 			case EParent(e):
 				return expr(e, void, mapCompr);
 			case EBlock(exprs):
-				// `restore` is already a no-op when the block declared nothing, so it is called
-				// unconditionally. Guarding it on whether the scope held any locals meant allocating a
-				// map iterator on entry to every block, function body and loop body, and it also let a
-				// block declared in an empty scope leak its variables out of the block.
 				var old = declaredNames.length;
 				var v = null;
 				for (e in exprs) {
@@ -2549,7 +2392,7 @@ class Interp {
 				for (p in params)
 					args.push(expr(p));
 
-				switch (Tools.expr(e)) {
+				switch (ExprTools.expr(e)) {
 					case EField(e, f, m):
 						var obj = expr(e);
 						if (obj == null) {
@@ -2573,7 +2416,7 @@ class Interp {
 				forLoop(v, it, expr.bind(e));
 				return null;
 			case EForGen(it, e):
-				Tools.getKeyIterator(it, function(vk, vv, it) {
+				ExprTools.getKeyIterator(it, function(vk, vv, it) {
 					if (vk == null) {
 						position = it.pos;
 						error(ECustom("Invalid for expression"));
@@ -2610,8 +2453,6 @@ class Interp {
 					a.push(expr(e));
 				return cnew(cl, a);
 			case EThrow(e):
-				// Throw the raw value so a typed `catch` can see its real type. Haxe wraps a
-				// non-exception value in haxe.Exception; the catch handler unwraps it back.
 				throw expr(e);
 			case ETry(e, n, t, ecatch, extra):
 				return evalTry(e, n, t, ecatch, extra);
@@ -2648,14 +2489,8 @@ class Interp {
 	function resolveField(e:Expr, f:String, m:Bool = false):Dynamic {
 		final canResolve = (resolveFields.length == 0);
 
-		// Fast path: `value.field`, which is nearly every field access there is. Everything below
-		// exists to recognise a dotted TYPE path (`pack.Type.field`), and to do it builds an array,
-		// two enum values and a joined string per access -- none of which is needed once the base is
-		// known to be a value. Resolution order matches the general path exactly, and a base that
-		// does not resolve to a value falls straight through to it, which is precisely when a type
-		// path is still on the table.
 		if (canResolve) {
-			switch (Tools.expr(e)) {
+			switch (ExprTools.expr(e)) {
 				case EIdent(id):
 					var base:Dynamic = null;
 					if (hasCaptures && captures.exists(id)) {
@@ -2665,11 +2500,6 @@ class Interp {
 						if (l != null) {
 							base = readLocal(l, id);
 						} else {
-							// One read per table, not `exists` on both followed by `get` on both.
-							// `isResolvable` and `resolve` ask the same two maps the same question, so
-							// every qualified name was hashed four times to learn what two lookups
-							// settle. A name that really is absent leaves `base` null and falls through
-							// to the general path below, which is where its error belongs anyway.
 							var found:Dynamic = imports.get(id);
 							if (found == null)
 								found = variables.get(id);
@@ -2685,7 +2515,7 @@ class Interp {
 		}
 
 		resolveFields.unshift(m ? RMaybe(f) : RNormal(f));
-		switch (Tools.expr(e)) {
+		switch (ExprTools.expr(e)) {
 			case EIdent(id):
 				resolveFields.unshift(RNormal(id));
 			case EField(_, _, _):
@@ -2826,7 +2656,7 @@ class Interp {
 					return true;
 				for (f in fields) {
 					if (!Reflect.hasField(v, f.name)) {
-						if (Tools.isOptionalField(f))
+						if (ExprTools.isOptionalField(f))
 							continue;
 						return false;
 					}
@@ -2864,7 +2694,6 @@ class Interp {
 						rt = info[0].compilePath().resolve();
 				}
 
-				// Type parameters resolve to nothing; they erase, so anything satisfies them.
 				if (rt == null)
 					return true;
 
@@ -2899,7 +2728,7 @@ class Interp {
 				return error(ECustom('${AbstractTools.resolveName(e)} should be Int'));
 			case 'Float':
 				if (Std.isOfType(e, Int))
-					return (e : Int) + 0.0; // widen to a real Float value (retagging via `(e : Float)` is a no-op on eval)
+					return (e : Int) + 0.0;
 				if (Std.isOfType(e, Float))
 					return e;
 				return error(ECustom('${AbstractTools.resolveName(e)} should be Float'));
@@ -2912,7 +2741,6 @@ class Interp {
 					return e;
 				return error(ECustom('${AbstractTools.resolveName(e)} should be String'));
 			default:
-				// `Map` is an abstract over `IMap`, so it never resolves to a checkable class.
 				if (e is IMap)
 					return e;
 				return error(ECustom('${AbstractTools.resolveName(e)} should be Map'));
@@ -2920,12 +2748,8 @@ class Interp {
 	}
 
 	/**
-	 * Builds the slot for an annotated binding: applies the declared type, boxes an abstract, and
-	 * records the type so later writes are checked against it.
-	 *
-	 * Shared by local `var` declarations and by class/static field initialisation. They used to
-	 * differ -- a field assigned its value straight into `r`, so a field declared with an abstract
-	 * type never boxed and its methods and operators were unreachable, while the identical local did.
+	 * Builds the slot for an annotated binding: applies the declared type, boxes an abstract, and records the
+	 * type so later writes are checked against it.
 	 *
 	 * @param v The evaluated initial value.
 	 * @param t The declared type, or null when the binding is unannotated.
@@ -2943,11 +2767,6 @@ class Interp {
 
 	/**
 	 * Whether a value satisfies a declared type, without throwing.
-	 *
-	 * Deliberately implemented ON `tryCast` rather than as a parallel matcher: the check used to
-	 * SELECT a static extension and the check used to ENFORCE an annotation have to agree, and two
-	 * implementations of the same rules drift. Only reached on the extension-resolution path, which
-	 * is already the fallback taken after a direct field lookup failed.
 	 *
 	 * @param v The value to test.
 	 * @param t The declared type, or null (which matches anything).
@@ -2985,17 +2804,10 @@ class Interp {
 			case CTPath(['Null'], params) if (params != null && params.length > 0):
 				return (e == null) ? e : tryCast(e, params[0]);
 			case CTPath(p, _):
-				// An unqualified annotation is the overwhelmingly common one, and joining a one-element
-				// path allocated a string on every write, argument and return that carried a type.
 				var path = (p.length == 1 ? p[0] : p.join('.'));
 				var t = imports.get(path);
 
 				if (t == null) {
-					// A core type resolves to nothing in the type index and cannot be a script-declared
-					// type (a name the script did import is already in `t`), so the index lookup and the
-					// abstract handling below have nothing to contribute. Skipping straight to the check
-					// keeps `:Int` and `:String`, which is most annotations, off the resolution path.
-					// A boxed abstract still goes the long way round, since it may convert.
 					if (!(e is AbstractValue)) {
 						switch (path) {
 							case 'Dynamic' | 'Any' | 'Void' | 'Class' | 'Enum':
@@ -3014,7 +2826,7 @@ class Interp {
 				if (e != null && t is ScriptedAbstract)
 					return (cast t : ScriptedAbstract).fromValue(e);
 
-				if (e != null && t != null && (t is Class)) {
+				if (e != null && TypeTools.isClass(t)) {
 					if (Type.getSuperClass(t) == AbstractValue)
 						return Type.createInstance(t, [e]);
 					if (e is AbstractValue) {
@@ -3034,7 +2846,6 @@ class Interp {
 					case 'Int' | 'Float' | 'Bool' | 'String' | 'Map' | 'IMap':
 						return castCoreType(e, path);
 					default:
-						// Type parameters resolve to null here; they erase, so pass through.
 						if (t == null)
 							return e;
 						if (t is ScriptedTypedef) {
@@ -3052,13 +2863,11 @@ class Interp {
 						return e;
 				}
 			case CTAnon(fields):
-				// An inline anonymous-structure annotation (`var p:{x:Int}`): require every field that
-				// is not optional, and require each one present to match its own annotation.
 				if (!Config.typedMode || e == null)
 					return e;
 				for (f in fields) {
 					if (!Reflect.hasField(e, f.name)) {
-						if (Tools.isOptionalField(f))
+						if (ExprTools.isOptionalField(f))
 							continue;
 						return error(ECustom('${AbstractTools.resolveName(e)} should have field ${f.name}'));
 					}
@@ -3067,8 +2876,6 @@ class Interp {
 				}
 				return e;
 			case CTFun(_, _):
-				// A function-type annotation (`f:Int->Void`): the signature can't be checked at runtime,
-				// only that the value is callable.
 				if (!Config.typedMode || e == null || Reflect.isFunction(e))
 					return e;
 				return error(ECustom('${AbstractTools.resolveName(e)} should be a function'));
@@ -3118,21 +2925,14 @@ class Interp {
 		if (v is Array)
 			return (v : Array<Dynamic>).iterator();
 
-		// `a...b` builds an IntIterator, whose hasNext/next are `inline` and so have no runtime
-		// representation to reflect on. Bind it through its static type instead, which gives a real
-		// iterator object.
 		if (v is IntIterator) {
 			var range:Iterator<Int> = (v : IntIterator);
 			return cast range;
 		}
 
 		var iter = Reflect.field(v, 'iterator');
-		#if hl
 		if (iter != null)
 			v = Reflect.callMethod(v, iter, []);
-		#else
-		v = (iter != null ? iter() : v);
-		#end
 
 		if (Reflect.field(v, 'hasNext') == null || Reflect.field(v, 'next') == null)
 			error(EInvalidIterator(v));
@@ -3155,12 +2955,8 @@ class Interp {
 		}
 
 		var iter = Reflect.field(v, 'keyValueIterator');
-		#if hl
 		if (iter != null)
 			v = Reflect.callMethod(v, iter, []);
-		#else
-		v = (iter != null ? iter() : v);
-		#end
 
 		if (Reflect.field(v, 'hasNext') == null || Reflect.field(v, 'next') == null)
 			error(EInvalidIterator(v));
@@ -3181,11 +2977,9 @@ class Interp {
 		declaredOld.push(locals.get(n));
 
 		var it = makeIterator(expr(it));
-		var next = Reflect.field(it, 'next'),
-			hasNext = Reflect.field(it, 'hasNext');
 
-		while (hasNext()) {
-			locals.set(n, {r: next()});
+		while (it.hasNext()) {
+			locals.set(n, {r: it.next()});
 
 			if (!loopRun(ef))
 				break;
@@ -3210,11 +3004,9 @@ class Interp {
 		declaredOld.push(locals.get(vv));
 
 		var it = makeKeyValueIterator(expr(it));
-		var next = Reflect.field(it, 'next'),
-			hasNext = Reflect.field(it, 'hasNext');
 
-		while (hasNext()) {
-			var v = next();
+		while (it.hasNext()) {
+			var v = it.next();
 
 			if (v.key == null)
 				error(EUnknownField(v, 'key'));
@@ -3240,13 +3032,13 @@ class Interp {
 	inline function loopRun(f:Void->Void) {
 		var cont = true;
 		f();
-		if (continuing) // consumed here: `continue` only affects the innermost loop
+		if (continuing)
 			continuing = false;
 		if (breaking) {
 			breaking = false;
 			cont = false;
 		}
-		if (returning) // a `return` keeps unwinding past this loop
+		if (returning)
 			cont = false;
 		return cont;
 	}
@@ -3388,16 +3180,14 @@ class Interp {
 
 		o = staticHost(o);
 
-		// A scripted abstract's fields are statics taking the boxed value as their `this`, so reading
-		// one has to go through the abstract rather than through the box object.
 		if (o is ScriptedAbstractValue) {
 			var box:ScriptedAbstractValue = cast o;
 			return box.owner.getField(box.boxed, f);
 		}
 
-		if (o is Mirror) {
-			switch (cast(o, Mirror)) {
-				case MSuper(locals, _):
+		if (o is Reference) {
+			switch (cast(o, Reference)) {
+				case RSuper(locals, _):
 					if (locals == null) {
 						error(EHasNoSuper);
 					} else if (locals.exists(f)) {
@@ -3414,7 +3204,6 @@ class Interp {
 			Reflect.field(o, f);
 		} else {
 			#if php
-			// https://github.com/HaxeFoundation/haxe/issues/4915
 			try {
 				Reflect.getProperty(o, f);
 			} catch (e:Dynamic) {
@@ -3425,18 +3214,15 @@ class Interp {
 			#end
 		});
 
-		// An abstract's statics live on its implementation class, which reflection cannot see from the
-		// abstract itself. Guarded by the null test that is already computed, so ordinary field access
-		// never reaches the type check.
-		// `@:forward` on a compiled abstract: the field lives on the value the wrapper boxes.
 		if (prop == null && o is AbstractValue && AbstractTools.forwards(o, f)) {
 			var boxed:Dynamic = AbstractTools.underlying(o);
 			var forwarded:Dynamic = Reflect.getProperty(boxed, f);
 
-			// A method has to be bound to the boxed value: the caller invokes it with the wrapper as
-			// the receiver, which on hxcpp runs it against the wrapper instead of what it holds.
 			if (Reflect.isFunction(forwarded))
 				return Reflect.makeVarArgs(function(args:Array<Dynamic>):Dynamic return Reflect.callMethod(boxed, forwarded, args));
+
+			if (forwarded == null && resolveCallShim(boxed, f) != null)
+				return Reflect.makeVarArgs(function(args:Array<Dynamic>):Dynamic return fcall(boxed, f, args));
 
 			return forwarded;
 		}
@@ -3450,7 +3236,37 @@ class Interp {
 				return (bypassAccessor ? Reflect.field(fields, f) : Reflect.getProperty(fields, f));
 		}
 
-		return prop;
+		if (hxscript.debug.Metrics.on)
+			hxscript.debug.Metrics.reads++;
+
+		return boolean(o, f, prop);
+	}
+
+	/**
+	 * Restores a `Bool` that compiled code handed back as an `Int`.
+	 *
+	 * @param o The receiver the value came from, either a compiled class or an instance of one.
+	 * @param f The member it came from.
+	 * @param v The value as reflection produced it.
+	 * @return The value, as a `Bool` when that is what it was declared.
+	 */
+	function boolean(o:Dynamic, f:String, v:Dynamic):Dynamic {
+		#if hxscript_cppia
+		if (!Std.isOfType(v, Int) || environment == null || !environment.substituting)
+			return v;
+
+		var cls:Dynamic = (o is Class) ? o : HaxeType.getClass(o);
+
+		while (cls != null) {
+			var name:String = HaxeType.getClassName(cls);
+			if (name != null && environment.booleansOf(name).exists(f))
+				return (v : Int) != 0;
+
+			cls = HaxeType.getSuperClass(cls);
+		}
+		#end
+
+		return v;
 	}
 
 	/**
@@ -3463,6 +3279,9 @@ class Interp {
 	 * @return The stored value.
 	 */
 	function set(o:Dynamic, f:String, v:Dynamic):Dynamic {
+		if (hxscript.debug.Metrics.on)
+			hxscript.debug.Metrics.writes++;
+
 		if (o == null)
 			error(EInvalidAccess(f));
 
@@ -3529,7 +3348,7 @@ class Interp {
 		var pack = path.substr(0, path.lastIndexOf('.') + 1);
 		var name = path.substr(path.lastIndexOf('.') + 1);
 
-		return Tools.resolve('${pack}_$name.${name}_Fields_', environment);
+		return TypeTools.resolve('${pack}_$name.${name}_Fields_', environment);
 	}
 
 	/**
@@ -3573,10 +3392,15 @@ class Interp {
 
 		var fun:Dynamic = get(o, f);
 
-		// Std.string must keep abstract wrappers so their custom toString runs; unwrap for everything else.
 		if (o != Std || f != 'string') {
 			for (i => arg in args)
 				args[i] = (AbstractTools.isAbstract(arg) ? arg.__a : arg);
+		}
+
+		if (o is Class) {
+			var shim = resolveCallShim(o, f);
+			if (shim != null)
+				return shim(o, args);
 		}
 
 		if (!Reflect.isFunction(fun)) {
@@ -3585,9 +3409,6 @@ class Interp {
 				if (!Reflect.isFunction(fun))
 					continue;
 
-				// A script-declared extension still carries its parameter types, so the receiver is checked
-				// against the first one rather than by method name alone. Called outside the guard below,
-				// so an error thrown inside it surfaces.
 				var scripted:ScriptedClass = (t is ScriptedClass) ? cast t : null;
 				if (scripted != null) {
 					var argType:CType = scripted.staticArgType(f);
@@ -3598,8 +3419,6 @@ class Interp {
 					return Reflect.callMethod(t, fun, args);
 				}
 
-				// A compiled extension has no parameter types at runtime, so a mismatch can only be found
-				// by trying. `o` is shifted back on failure, or the next candidate receives it twice.
 				try {
 					args.unshift(o);
 					return Reflect.callMethod(t, fun, args);
@@ -3608,17 +3427,18 @@ class Interp {
 				}
 			}
 
-			// A method with no runtime representation (an `inline extern` overload) reflects to null.
-			// Fall back to a registered emulation shim keyed by the receiver's class before failing,
-			// so such calls still work.
 			var shim = resolveCallShim(o, f);
 			if (shim != null)
 				return shim(o, args);
 
-			error(ECustom('Cannot call $fun'));
+			var members:Array<String> = hxscript.error.Hint.membersOfValue(o);
+			if (members.length > 0 && members.indexOf(f) < 0)
+				error(EUnknownField(o, f));
+
+			error(ECustom('Cannot call ' + hxscript.error.Hint.typeName(o) + '.' + f));
 		}
 
-		return call(o, fun, args);
+		return boolean(o, f, call(o, fun, args));
 	}
 
 	/**
@@ -3632,9 +3452,12 @@ class Interp {
 	 * @throws InterpException If a `super` call is made where none is valid.
 	 */
 	function call(o:Dynamic, f:Dynamic, args:Array<Dynamic>):Dynamic {
-		if (f is Mirror) {
-			switch (cast(f, Mirror)) {
-				case MSuper(locals, constructor):
+		if (hxscript.debug.Metrics.on)
+			hxscript.debug.Metrics.calls++;
+
+		if (f is Reference) {
+			switch (cast(f, Reference)) {
+				case RSuper(locals, constructor):
 					if (constructor == null) {
 						error(EHasNoSuper);
 					} else if (!superConstructorAllowed) {
@@ -3656,12 +3479,6 @@ class Interp {
 
 	/**
 	 * The class that owns a scripted class's statics.
-	 *
-	 * A compiled class carries its own statics, so while a world is only partly compiled there are
-	 * two stores for the same declaration and redirecting to either one strands the other. Once the
-	 * whole world is compiled there is only one store worth using, and every static read, write and
-	 * call has to reach it -- including the ones the host makes on its way in, which would otherwise
-	 * set up a copy that nothing else reads.
 	 *
 	 * @param o The value a field is being read from, written to, or called on.
 	 * @return The compiled class standing in for it, or `o` unchanged.
@@ -3707,11 +3524,9 @@ class Interp {
 	 * @return The new instance.
 	 */
 	function cnew(cl:String, args:Array<Dynamic>):Dynamic {
-		var c = Tools.resolve(cl, environment);
+		var c = TypeTools.resolve(cl, environment);
 
 		if (c == null) {
-			// A written key type already became a concrete map class while parsing, so `Map` reaching
-			// here is the bare form, which has no class to resolve and decides on its first key.
 			if (cl == 'Map' || cl == 'haxe.ds.Map')
 				return new AnyMap();
 

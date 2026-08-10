@@ -9,11 +9,13 @@ using haxe.macro.ExprTools;
 using haxe.macro.TypeTools;
 
 /**
- * Build macro used on HashLink, where `Math` (and similar) have no runtime representation and so
- * can't be reflected on. It re-emits each static field of a source class as a real static
- * property/method that forwards to the original, giving scripts something reflectable to call.
+ * Build macro that re-emits another class's statics as real forwarding members.
+ *
+ * For a class with no runtime representation on some target, such as `Math` on HashLink and on
+ * python, reflection finds nothing to call, so a script gets `module has no field max` against a
+ * member that is plainly there. The forwards give it something reflectable.
  */
-class HLMacro {
+class Statics {
 	/**
 	 * Generates forwarding statics mirroring another class's static fields.
 	 *
@@ -73,17 +75,21 @@ class HLMacro {
 					}
 
 					var defaults:Array<Expr> = [];
-					switch (field.expr().expr) {
-						default:
-						case TFunction(fun):
-							for (arg in fun.args) {
-								if (arg.value == null) {
-									defaults.push(null);
-									continue;
+					var typed:Null<TypedExpr> = field.expr();
+
+					if (typed != null) {
+						switch (typed.expr) {
+							default:
+							case TFunction(fun):
+								for (arg in fun.args) {
+									if (arg.value == null) {
+										defaults.push(null);
+										continue;
+									}
+									var expr = Context.getTypedExpr(arg.value);
+									defaults.push(macro cast $expr);
 								}
-								var expr = Context.getTypedExpr(arg.value);
-								defaults.push(macro cast $expr);
-							}
+						}
 					}
 
 					var argsArray:Array<Expr> = [for (arg in args) macro $i{arg.name}];

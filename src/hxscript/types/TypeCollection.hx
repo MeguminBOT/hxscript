@@ -1,7 +1,7 @@
 package hxscript.types;
 
 #if (!macro)
-import hxscript.macro.TypeCollectionMacro;
+import hxscript.macro.Index;
 import hxscript.Environment;
 #end
 
@@ -33,11 +33,6 @@ typedef TypeInfo = {
 
 	/**
 	 * How many arguments the constructor declares, and how many of those are required.
-	 *
-	 * Recorded because the runtime compiler needs it and has nowhere else to get it. cppia links a
-	 * call by its exact argument count, so a script's `super(a, b)` against a constructor whose third
-	 * argument is optional is a count short -- accepted by the loader and rejected by the runtime.
-	 * Knowing the real shape lets the emitter make up the difference. Only a class has one.
 	 */
 	var ?ctorArgs:Int;
 
@@ -70,7 +65,7 @@ typedef TypeMap = {
 class TypeCollection {
 	#if (!macro)
 	/** The collection of every type in the host build, generated at compile time. */
-	public static var main(default, never):TypeCollection = new TypeCollection(TypeCollectionMacro.build());
+	public static var main(default, never):TypeCollection = new TypeCollection(Index.build());
 
 	/** The backing index. */
 	public var types:TypeMap;
@@ -96,7 +91,6 @@ class TypeCollection {
 		var t = types.byPath.get(path);
 
 		if (t == null && moduleCheck) {
-			// A dotless path has no name to take, and `substring(-1)` would return the whole string.
 			var at:Int = path.lastIndexOf('.');
 			var name:String = at < 0 ? '.$path' : path.substring(at);
 
@@ -167,8 +161,8 @@ class TypeCollection {
 	 */
 	public static function resolve(info:TypeInfo, ?env:Environment):Dynamic {
 		if (info.typedefType != null)
-			return Tools.resolve(compilePath(info.typedefType), env);
-		return Tools.resolve(compilePath(info), env);
+			return TypeTools.resolve(compilePath(info.typedefType), env);
+		return TypeTools.resolve(compilePath(info), env);
 	}
 	#end
 }

@@ -1,20 +1,18 @@
 package hxscript;
 
+import hxscript.runtime.ImportModule;
+
 import hxscript.types.*;
 import hxscript.syntax.Parser;
 import hxscript.runtime.Interp;
 import hxscript.syntax.Expr;
-import hxscript.runtime.Mirror;
-import hxscript.tools.Tools;
+import hxscript.runtime.Reference;
+import hxscript.syntax.ExprTools;
+import hxscript.types.TypeTools;
 
 /**
- * A single parsed source unit: one script string compiled into a set of scripted types (classes,
- * interfaces, enums, typedefs) plus its module-level fields, all sharing one `Interp`.
- *
- * The lifecycle is staged so cross-references between modules can resolve: `new` parses,
- * `init` seeds the interpreter and exposes each type's name, `start` runs the module-level program,
- * and `startType`/`startTypes` initialize the types themselves. An `Environment` drives those stages
- * across every module in a world so imports between them line up.
+ * A single parsed source unit: one script string compiled into a set of scripted types (classes, interfaces,
+ * enums, typedefs) plus its module-level fields, all sharing one `Interp`.
  */
 class Module {
 	/** Per-type-path saved statics, keyed by type path, used to restore `@:snapshot` fields on reload. */
@@ -76,6 +74,8 @@ class Module {
 	 * @param origin Source origin used for error positions (usually the file path).
 	 */
 	public function new(string:String, name:String = 'Module', pack:Array<String>, origin:String = 'hscript'):Void {
+		hxscript.setup.Boot.ensure();
+
 		parser.allowTypes = parser.allowJSON = true;
 		interp = Type.createInstance(Config.interpClass, [null, this]);
 
@@ -97,6 +97,8 @@ class Module {
 		decls.resize(0);
 		types.clear();
 
+		hxscript.error.Sources.remember(origin, string);
+
 		try {
 			var declList:Array<ModuleDecl> = parser.parseModule(string, origin, pack);
 			for (decl in declList) {
@@ -105,9 +107,10 @@ class Module {
 				var type:IScriptedType = loadType(decl);
 
 				if (type != null)
-					types.set(Tools.pathToString(type.name, pack), type);
+					types.set(TypeTools.pathToString(type.name, pack), type);
 			}
 		} catch (e:haxe.Exception) {
+			hxscript.error.Sink.caught(e, PParse);
 			onParsingError(e);
 		}
 
@@ -136,7 +139,7 @@ class Module {
 			case DAbstract(m):
 				new ScriptedAbstract(m, this);
 			case DField(m):
-				var fieldsPath:String = Tools.pathToString('_$name.${name}_Fields_', pack);
+				var fieldsPath:String = TypeTools.pathToString('_$name.${name}_Fields_', pack);
 				var t:ScriptedClass = cast types.get(fieldsPath);
 
 				var d:FieldDecl = {
@@ -146,7 +149,7 @@ class Module {
 					access: (m.isPrivate ? [AStatic, APrivate] : [AStatic, APublic])
 				};
 
-				if (t == null) { // synthesize the host class the first time a top-level field appears
+				if (t == null) {
 					var fieldsModule:ClassDecl = {
 						name: '${name}_Fields_',
 						params: [],
@@ -161,7 +164,7 @@ class Module {
 					var cl = new ScriptedClass(fieldsModule, this);
 					cl.pack = cl.pack.copy();
 					cl.pack.push('_$name');
-					cl.path = Tools.pathToString(cl.name, cl.pack);
+					cl.path = TypeTools.pathToString(cl.name, cl.pack);
 
 					moduleFields = cl;
 
@@ -198,9 +201,8 @@ class Module {
 				var e:ScriptedEnum = cast type;
 
 				for (i => v in e.constructNames())
-					interp.imports.set(v, Mirror.MEnumValue(e, i));
+					interp.imports.set(v, Reference.REnumValue(e, i));
 			} else if (type is ScriptedClass) {
-				// An enum abstract desugars to a class of static constants; expose those the same way.
 				var c:ScriptedClass = cast type;
 				var enumAbstract:Bool = false;
 				for (m in @:privateAccess c.decl.meta)
@@ -210,7 +212,7 @@ class Module {
 				if (enumAbstract) {
 					for (field in @:privateAccess c.decl.fields)
 						if (field.access.contains(AStatic))
-							interp.imports.set(field.name, Mirror.MProperty(c, field.name));
+							interp.imports.set(field.name, Reference.RProperty(c, field.name));
 				}
 			}
 		}
@@ -224,7 +226,6 @@ class Module {
 	 */
 	public function start(?environment:Environment):Void {
 		try {
-			// A body entirely inside an unmet `#if` legitimately parses to nothing.
 			if (decls.length == 0) {
 				started = true;
 				return;
@@ -254,6 +255,7 @@ class Module {
 			starting = false;
 			started = true;
 		} catch (e:haxe.Exception) {
+			hxscript.error.Sink.caught(e, PRun, 'module $path');
 			onProgramError(e);
 		}
 	}
@@ -288,6 +290,7 @@ class Module {
 			type.initialized = false;
 			type.initializing = false;
 
+			hxscript.error.Sink.caught(e, PType, 'type ${type.name} of module $path');
 			onTypeError(e, type);
 		}
 
@@ -306,7 +309,7 @@ class Module {
 			startType(environment, moduleFields);
 
 			for (field in hxscript.proxy.ReflectProxy.fields(moduleFields))
-				interp.imports.set(field, MProperty(moduleFields, field));
+				interp.imports.set(field, RProperty(moduleFields, field));
 		}
 
 		for (type in types)
@@ -335,32 +338,28 @@ class Module {
 	}
 
 	/**
-	 * Overridable hook invoked when parsing fails. Defaults to tracing.
+	 * Overridable hook invoked when parsing fails.
 	 *
 	 * @param e The parse exception.
 	 */
-	public dynamic function onParsingError(e:haxe.Exception):Void {
-		trace('Failed to initialize module program!\n' + e.details());
-	}
+	public dynamic function onParsingError(e:haxe.Exception):Void {}
 
 	/**
-	 * Overridable hook invoked when the module-level program throws. Defaults to tracing.
+	 * Overridable hook invoked when the module-level program throws. See `onParsingError` for why it
+	 * is empty.
 	 *
 	 * @param e The runtime exception.
 	 */
-	public dynamic function onProgramError(e:haxe.Exception):Void {
-		trace('Module program stopped unexpectedly!\n' + e.details());
-	}
+	public dynamic function onProgramError(e:haxe.Exception):Void {}
 
 	/**
-	 * Overridable hook invoked when a type fails to initialize. Defaults to tracing.
+	 * Overridable hook invoked when a type fails to initialize. See `onParsingError` for why it is
+	 * empty.
 	 *
 	 * @param e The exception thrown during initialization.
 	 * @param type The type that failed.
 	 */
-	public dynamic function onTypeError(e:haxe.Exception, type:IScriptedType):Void {
-		trace('Failed to load type ${type.name} for module $path!\n' + e.details());
-	}
+	public dynamic function onTypeError(e:haxe.Exception, type:IScriptedType):Void {}
 
 	/** @return The fully-qualified module path (`pack.name`), or just `name` when the package is empty. */
 	function get_path():String {

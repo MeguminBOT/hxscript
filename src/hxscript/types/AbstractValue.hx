@@ -24,8 +24,6 @@ class AbstractValue {
 		value = v;
 	}
 
-	// The get/set below are placeholders; the abstract-building macro replaces them per abstract.
-
 	/** @return The boxed value. */
 	function get_value():Dynamic {
 		return __a;

@@ -17,7 +17,7 @@ class StackFrame {
 }
 
 /** The interpreter's own call stack, used for scoping locals and rendering script traces. */
-class CallStack {
+class ScriptStack {
 	/** The frames, innermost last. */
 	public var stack:Array<StackFrame>;
 
@@ -60,7 +60,7 @@ class CallStack {
 	 * @param stack The baseline stack to subtract.
 	 * @return This stack, truncated in place.
 	 */
-	public function subtract(stack:CallStack):CallStack {
+	public function subtract(stack:ScriptStack):ScriptStack {
 		var startIndex = -1;
 		var i = -1;
 		while (++i < this.length) {
@@ -84,8 +84,8 @@ class CallStack {
 	}
 
 	/** @return A shallow copy sharing the same frame objects. */
-	public inline function copy():CallStack {
-		var copy:CallStack = new CallStack();
+	public inline function copy():ScriptStack {
+		var copy:ScriptStack = new ScriptStack();
 		copy.stack = stack.copy();
 		return copy;
 	}

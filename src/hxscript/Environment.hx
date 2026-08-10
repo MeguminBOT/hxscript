@@ -32,18 +32,40 @@ class Environment {
 	/** Native classes the host compiled from this world's scripted ones, keyed by scripted path. */
 	public var compiled:Map<String, Class<Dynamic>> = [];
 
+	/** What `booleansOf` has answered so far, including the empty answers. */
+	var booleans:Map<String, Map<String, Bool>> = [];
+
 	/**
 	 * Whether a compiled class may stand in for the scripted one it was built from.
-	 *
-	 * A compiled class carries its own statics and its own identity, so the danger is a class
-	 * existing both ways at once and the two halves disagreeing. What prevents that is not every
-	 * class being compiled -- it is every reference going the same way. With this on, a scripted
-	 * class that has a compiled form is reached through the compiled form from everywhere, including
-	 * from code that is still interpreted, so there is only ever one of it.
-	 *
-	 * It therefore has to be on whenever ANY class here is compiled, not only when all of them are.
 	 */
 	public var substituting:Bool = false;
+
+	/**
+	 * Which members of a class this world declares were written `Bool`.
+	 *
+	 * @param path The class path, as the runtime names it.
+	 * @return Its `Bool` members, empty when this world does not declare that class.
+	 */
+	public function booleansOf(path:String):Map<String, Bool> {
+		var known:Map<String, Bool> = booleans.get(path);
+		if (known != null)
+			return known;
+
+		for (module in modules) {
+			if (!module.types.exists(path))
+				continue;
+
+			for (declared => members in hxscript.compile.Cppia.booleans(module.decls))
+				booleans.set(declared, members);
+
+			break;
+		}
+
+		if (!booleans.exists(path))
+			booleans.set(path, new Map());
+
+		return booleans.get(path);
+	}
 	#end
 
 	/**
@@ -52,6 +74,8 @@ class Environment {
 	 * @param modules Modules to add up front; may be null for an empty world.
 	 */
 	public function new(?modules:Array<Module>) {
+		hxscript.setup.Boot.ensure();
+
 		if (modules != null) {
 			for (module in modules)
 				this.modules.set(module.path, module);
@@ -140,7 +164,6 @@ class Environment {
 	 * @return The freshly built collection (also stored in `types`).
 	 */
 	public function rebuildTypes():TypeCollection {
-		// A wildcard import resolves against this index, so its remembered results die with it.
 		importCache.clear();
 
 		var map:TypeMap = {

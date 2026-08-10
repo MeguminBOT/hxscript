@@ -43,6 +43,8 @@ class Script {
 	 * @param environment An optional world whose variables are shared in at `start`.
 	 */
 	public function new(string:String, name:String = 'hscript', ?environment:Environment):Void {
+		hxscript.setup.Boot.ensure();
+
 		parser.allowTypes = parser.allowJSON = parser.allowMetadata = true;
 		interp = Type.createInstance(Config.interpClass, [environment, this]);
 		interp.defineGlobals = true;
@@ -60,9 +62,12 @@ class Script {
 	 * @return The parsed program, or null on failure.
 	 */
 	public function parse(string:String):Expr {
+		hxscript.error.Sources.remember(name, string);
+
 		try {
 			program = parser.parseScript(string, name);
 		} catch (e:haxe.Exception) {
+			hxscript.error.Sink.caught(e, PParse);
 			onParsingError(e);
 			program = null;
 		}
@@ -93,6 +98,7 @@ class Script {
 
 			return interp.execute(program);
 		} catch (e:haxe.Exception) {
+			hxscript.error.Sink.caught(e, PRun, 'script $name');
 			onProgramError(e);
 			failed = true;
 		}
@@ -131,20 +137,20 @@ class Script {
 	}
 
 	/**
-	 * Overridable hook invoked when parsing fails. Defaults to tracing.
+	 * Overridable hook invoked when parsing fails.
+	 *
+	 * Empty by default, and that is not the same as errors being swallowed: everything reaching here
+	 * has already gone to [`hxscript.error.Sink`](error/Sink.hx), which prints it until a host takes
+	 * over. Overriding this is purely additive.
 	 *
 	 * @param e The parse exception.
 	 */
-	public dynamic function onParsingError(e:haxe.Exception):Void {
-		trace('Failed to initialize script program!\n' + e.details());
-	}
+	public dynamic function onParsingError(e:haxe.Exception):Void {}
 
 	/**
-	 * Overridable hook invoked when the program throws. Defaults to tracing.
+	 * Overridable hook invoked when the program throws. See `onParsingError` for why it is empty.
 	 *
 	 * @param e The runtime exception.
 	 */
-	public dynamic function onProgramError(e:haxe.Exception):Void {
-		trace('Script program stopped unexpectedly!\n' + e.details());
-	}
+	public dynamic function onProgramError(e:haxe.Exception):Void {}
 }
