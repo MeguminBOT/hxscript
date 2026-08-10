@@ -33,9 +33,9 @@ class Keys {
 	/**
 	 * Reads one key, blocking until there is one.
 	 *
-	 * Arrow keys arrive as an escape sequence (`ESC [ A`) on a terminal and as a `0xE0` prefix on a
-	 * Windows console, so both are decoded here. A bare ESC is ambiguous -- it is also the start of
-	 * a sequence -- and is reported as `ESCAPE` only when nothing follows it.
+	 * Arrow keys arrive as an escape sequence (`ESC [ A`) on a terminal and as a `0xE0` prefix on a Windows
+	 * console, so both are decoded here. A bare ESC is ambiguous, since it is also the start of a sequence,
+	 * and is reported as `ESCAPE` only when nothing follows it.
 	 *
 	 * @return The key code.
 	 */

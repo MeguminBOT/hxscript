@@ -1,6 +1,6 @@
 package game;
 
-import hxscript.runtime.Error;
+import hxscript.error.ErrorKind;
 import hxscript.runtime.Interp;
 
 /**
@@ -15,7 +15,7 @@ import hxscript.runtime.Interp;
  *
  * - `resolve` is the read path, and the obvious one.
  * - `setVar` is the write path. Without it `round = 3` fails with `Unknown identifier: round`, since
- *   assigning to a name nothing declared is an error -- the field would be readable but not
+ *   assigning to a name nothing declared is an error, which would leave the field readable but not
  *   writable.
  * - `isResolvable` is the gate in front of MEMBER access. `a.b` checks the base identifier through
  *   it and errors without ever calling `resolve`, so overriding only `resolve` makes the bare name
@@ -111,8 +111,8 @@ class ModInterp extends Interp {
 	 * @return The written value.
 	 */
 	override function setVar(name:String, v:Dynamic):Dynamic {
-		// Only a genuine context field that nothing else already binds. Everything else -- including
-		// the strict error for assigning to an undeclared name -- stays with the base implementation.
+		// Only a genuine context field that nothing else already binds. Everything else, including the
+		// strict error for assigning to an undeclared name, stays with the base implementation.
 		if (!imports.exists(name) && !variables.exists(name) && context != null && fields.exists(name)) {
 			Reflect.setProperty(context, name, v);
 			return v;

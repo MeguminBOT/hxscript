@@ -6,9 +6,9 @@ import blocks.Shapes;
 /**
  * A falling-block game, written entirely as scripts.
  *
- * Nothing about this program is compiled. The host owns a screen, a keyboard and a clock; the well,
- * the pieces, the rotation, the scoring and every pixel of the layout are here and in `blocks/`.
- * Edit any of it and run again -- there is no build step between the two.
+ * Nothing about this program is compiled. The host owns a screen, a keyboard and a clock; the well, the
+ * pieces, the rotation, the scoring and every pixel of the layout are here and in `blocks/`. Edit any of it
+ * and run again, because there is no build step between the two.
  *
  * The game steps once per keypress, which is what a terminal can honestly do: there is no portable
  * non-blocking key poll. Gravity is still real time, so holding a key down drops you faster than
@@ -47,7 +47,7 @@ class BlockDrop extends App {
 	public function new() {
 		super();
 
-		title = 'BlockDrop -- arrows move, up rotates, space drops, q quits';
+		title = 'BlockDrop: arrows move, up rotates, space drops, q quits';
 		width = 46;
 		height = ROWS + 4;
 	}

@@ -6,8 +6,8 @@ import blocks.Shapes;
  * A seven-bag randomiser: every run of seven pieces contains each tetromino exactly once, so the
  * well never starves you of the piece you need for very long.
  *
- * The generator is seeded and written out here rather than using `Std.random`, so a run is
- * reproducible -- which matters when you are iterating on a prototype and want the same game twice.
+ * The generator is seeded and written out here rather than using `Std.random`, so a run is reproducible,
+ * which matters when you are iterating on a prototype and want the same game twice.
  */
 class Bag {
 	/** Current generator state. */

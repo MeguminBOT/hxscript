@@ -1,6 +1,8 @@
 # Examples
 
-Two, because the library gets used two different ways.
+Two, because the library gets used two different ways. The third thing you can do with it, running
+somebody else's projects against a stack of game libraries, is an application rather than an
+example, and lives in [`../apps/sandbox/`](../apps/sandbox).
 
 | | |
 | --- | --- |
@@ -11,8 +13,7 @@ Both run from the repository root with nothing but the compiler.
 
 ```
 haxe -cp src -cp examples/battle -main Main \
-  --macro include('bridges') --macro macros.BridgeMacro.generate() \
-  --macro macros.AbstractsMacro.generate() --macro include('game') --interp
+     --macro include('bridges') --macro macros.BridgeMacro.generate() --interp
 ```
 
 ```
@@ -25,4 +26,7 @@ is the shape a real project takes; its `Project.xml` shows the same wiring as bu
 rather than compiler flags.
 
 Read `battle/game/Mods.hx` first if you are adding scripting to a game that exists, and
-`workbench/README.md` first if you want to write the program itself in script.
+`workbench/README.md` first if you want to write the program itself in script. If the thing in your
+way is a game library your scripts cannot see yet, read
+[`../apps/sandbox/README.md`](../apps/sandbox/README.md) instead, along with the library's own
+[advanced.md §4](../docs/advanced.md#4-adding-a-game-library).

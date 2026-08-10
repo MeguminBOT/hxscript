@@ -55,13 +55,13 @@ class Workbench {
 
 			case 'run':
 				if (target == null)
-					Sys.println('run needs a name -- try `list` first');
+					Sys.println('run needs a name. Try `list` first');
 				else if (load())
 					play(target);
 
 			case 'watch':
 				if (target == null)
-					Sys.println('watch needs a name -- try `list` first');
+					Sys.println('watch needs a name. Try `list` first');
 				else
 					watch(target);
 
@@ -73,8 +73,8 @@ class Workbench {
 	/**
 	 * Reads every script under `ROOT` into a fresh world.
 	 *
-	 * A file's path under `ROOT` becomes its package, so `scripts/blocks/Board.hx` is `blocks.Board`
-	 * and can be imported as such -- the same arrangement a Haxe classpath gives you.
+	 * A file's path under `ROOT` becomes its package, so `scripts/blocks/Board.hx` is `blocks.Board` and can
+	 * be imported as such, which is the same arrangement a Haxe classpath gives you.
 	 *
 	 * @return Whether the world started with something in it.
 	 */
@@ -258,7 +258,7 @@ class Workbench {
 				cls = c;
 
 		if (cls == null) {
-			Sys.println('no script declares `$name` -- try `list`');
+			Sys.println('no script declares `$name`. Try `list`');
 			return;
 		}
 
@@ -321,7 +321,7 @@ class Workbench {
 				if (load())
 					play(name);
 
-				Sys.println('\nwatching -- edit a script to run again, ctrl-c to stop');
+				Sys.println('\nwatching: edit a script to run again, ctrl-c to stop');
 			}
 
 			Sys.sleep(0.25);

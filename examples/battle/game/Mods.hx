@@ -32,7 +32,7 @@ class Mods {
 	 *
 	 * Listed by hand here because the list is four entries and the example is meant to be read. A
 	 * host with a real API surface marks its types `@:scriptAmbient` instead and calls
-	 * `ExposeMacro.apply()`, which fills this in and the compiler's copy of it from the same marks.
+	 * `Expose.apply()`, which fills this in and the compiler's copy of it from the same marks.
 	 */
 	static final GLOBALS:Array<String> = ['game.Entity', 'game.Component', 'game.Battle', 'game.Damage'];
 
@@ -81,7 +81,7 @@ class Mods {
 		world.start();
 
 		// 5. Optional: compile what can be compiled.
-		//    Worth about 20x on a script's own work, and free to leave out -- a build without
+		//    Worth about 20x on a script's own work, and free to leave out, since a build without
 		//    `-D hxscript_cppia` skips this entirely and everything is interpreted as before.
 		compile();
 	}
@@ -90,8 +90,8 @@ class Mods {
 	 * Compiles the world's scripts to bytecode, where this build can.
 	 *
 	 * The whole of it is one call. `Compiler.compile` offers every module, loads what compiled,
-	 * registers the classes against the world and turns substitution on, so the rest of this file --
-	 * `classes()`, `roster()`, everything in `Battle` -- goes on asking the world for a class and
+	 * registers the classes against the world and turns substitution on, so the rest of this file, from
+	 * `classes()` to `roster()` to everything in `Battle`, goes on asking the world for a class and
 	 * getting whichever form exists, without knowing which.
 	 *
 	 * A module the emitter cannot take is reported and left interpreted, so turning this on cannot

@@ -1,10 +1,10 @@
 /**
  * Shared numbers the creature scripts read, kept in one place so a balance change is one edit.
  *
- * A plain class with no host superclass, which is the shape a shared helper takes anyway. It was
- * once the only script here the runtime compiler could accept; the creature scripts extend `Entity`,
- * and extending a host class used to be refused. It no longer is, so all of these compile -- see the
- * report the program prints at startup, and `Mods.compile`.
+ * A plain class with no host superclass, which is the shape a shared helper takes anyway. It was once the
+ * only script here the runtime compiler could accept; the creature scripts extend `Entity`, and extending a
+ * host class used to be refused. It no longer is, so all of these compile. See the report the program prints
+ * at startup, and `Mods.compile`.
  */
 class Tactics {
 	/** Below this fraction of full health, a creature should be looking for a way out. */

@@ -3,10 +3,10 @@ package game;
 /**
  * A damage amount, as a native abstract over `Int`.
  *
- * Note what is NOT on this type: `@:build(hxscript.macro.AbstractMacro.build())`. An abstract has
- * no runtime representation, so a script handed one would see nothing -- no methods, no operators,
- * no `from`/`to`. The build macro emits a reflectable wrapper that gives it one, and it is applied
- * to this type from OUTSIDE, by `macros/AbstractsMacro.hx`.
+ * Note what is NOT on this type: `@:build(hxscript.macro.Abstract.build())`. An abstract has no runtime
+ * representation, so a script handed one would see nothing at all: no methods, no operators, no `from`/`to`.
+ * The build macro emits a reflectable wrapper that gives it one, and it is applied to this type from
+ * OUTSIDE, by `macros/AbstractsMacro.hx`.
  *
  * That is the arrangement worth copying: the abstracts a real host wants scriptable are mostly in
  * libraries it does not own, so it cannot annotate them. Applying the macro externally works the
@@ -14,9 +14,9 @@ package game;
  * anything about scripting.
  *
  * None of these members is `inline`, and that is deliberate. An `inline` method has no runtime
- * representation for the wrapper to expose, so it stays invisible to scripts however the macro
- * is applied -- the call fails with `Cannot call null`. Compiled callers lose the inlining; a
- * member a script has to reach has to exist.
+ * representation for the wrapper to expose, so it stays invisible to scripts however the macro is applied,
+ * and the call fails with `Cannot call null`. Compiled callers lose the inlining; a member a script has to
+ * reach has to exist.
  */
 abstract Damage(Int) from Int to Int {
 	/** @param v The amount. */

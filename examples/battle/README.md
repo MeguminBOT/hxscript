@@ -25,7 +25,7 @@ cd examples/battle && lime test windows
 ```
 
 `Project.xml` is the point of that third one: it shows the wiring in the form a real project uses,
-rather than as compiler flags. Everything a host has to declare is on one page -- the haxelib, the
+rather than as compiler flags. Everything a host has to declare is on one page: the haxelib, the
 two macro flags that keep the scripting bridges in the build, and the scripts shipped as assets so
 they land next to the executable. It needs `lime` and `openfl` installed; the console forms need
 nothing but the compiler.

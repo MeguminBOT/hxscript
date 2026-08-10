@@ -6,9 +6,9 @@ import blocks.Shapes;
 /**
  * A test, written as a script like everything else.
  *
- * `Workbench -- test` finds every scripted class declaring `static function test()` and runs it. A
- * test returns an empty string when it passes and a description of the first failure when it does
- * not, so a red run says what broke rather than only that something did.
+ * `Workbench test` finds every scripted class declaring `static function test()` and runs it. A test returns
+ * an empty string when it passes and a description of the first failure when it does not, so a red run says
+ * what broke rather than only that something did.
  *
  * The point is that the tests live next to the code they cover and reload with it: a rule can be
  * changed and re-checked without a build.

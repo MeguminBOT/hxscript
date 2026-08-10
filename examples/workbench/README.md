@@ -1,7 +1,7 @@
 # Example: a scripting workbench
 
 A coding environment built on the library. Write as many scripts as you like under `scripts/`, then
-list, test, run or watch them -- without rebuilding the host once.
+list, test, run or watch them, without rebuilding the host once.
 
 The point is how far that goes: **the game in `scripts/` is not partly scripted, it is entirely
 scripted.** The host owns a character screen, a keyboard, a clock and this shell. The well, the
@@ -32,7 +32,7 @@ program.
 `list` on the shipped scripts:
 
 ```
-  [run] BlockDrop  BlockDrop -- arrows move, up rotates, space drops, q quits  46x22
+  [run] BlockDrop  BlockDrop: arrows move, up rotates, space drops, q quits  46x22
         Bag
         Board
         Scoring
@@ -56,12 +56,12 @@ program.
 ## How the environment works
 
 **A file's path becomes its package.** `scripts/blocks/Board.hx` loads as `blocks.Board` and is
-imported as `import blocks.Board;` -- the same arrangement a Haxe classpath gives you, so scripts
+imported as `import blocks.Board;`, which is the same arrangement a Haxe classpath gives you, so scripts
 organise into packages instead of one flat folder.
 
 **The host surface is deliberately tiny.** `App` declares six methods and four fields. A bridge
 generates one override per inherited method, so a wide base is expensive; and anything the host
-declares is something the script cannot change without a rebuild. Both push the same way -- give
+declares is something the script cannot change without a rebuild. Both push the same way: give
 scripts a small surface and let them build upward.
 
 **Reloading rebuilds the world.** Each load constructs a fresh `Environment`. Reusing one and
@@ -126,12 +126,12 @@ frame loop would need a platform-specific input layer, which is host work and be
 Gravity is still real time, so holding a key drops you faster than thinking about it does.
 
 If you build this on a real display library instead of a terminal, that constraint disappears and
-nothing else in the arrangement changes -- the host grows a render surface and a frame loop, and the
+nothing else in the arrangement changes. The host grows a render surface and a frame loop, and the
 scripts stay exactly as they are.
 
 ## Where to go next
 
-- [`../battle/`](../battle) -- the other shape: scripts as content inside a game that already exists.
-- [`../../docs/embedding.md`](../../docs/embedding.md) -- what each step of the host is doing.
-- [`../../docs/advanced.md`](../../docs/advanced.md) -- generating bridges instead of writing them,
+- [`../battle/`](../battle) is the other shape: scripts as content inside a game that already exists.
+- [`../../docs/embedding.md`](../../docs/embedding.md) explains what each step of the host is doing.
+- [`../../docs/advanced.md`](../../docs/advanced.md) covers generating bridges instead of writing them,
   and wiring in a real game library.

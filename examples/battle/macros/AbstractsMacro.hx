@@ -9,9 +9,9 @@ import sys.io.File;
 /**
  * Makes the build's abstracts usable from scripts, without touching the abstracts themselves.
  *
- * `hxscript.macro.AbstractMacro` emits the reflectable wrapper an abstract needs to exist at
+ * `hxscript.macro.Abstract` emits the reflectable wrapper an abstract needs to exist at
  * runtime, but it is a `@:build` macro, so something has to apply it. Writing
- * `@:build(hxscript.macro.AbstractMacro.build())` on your own abstract is fine; the abstracts a
+ * `@:build(hxscript.macro.Abstract.build())` on your own abstract is fine; the abstracts a
  * host actually wants scriptable are usually in libraries it does not own, and those cannot be
  * annotated. `Compiler.addMetadata` applies it from outside, which works for both.
  *
@@ -19,7 +19,7 @@ import sys.io.File;
  * is discovered the hard way: a runtime "Unknown identifier" from somebody's script, then a rebuild
  * to add one line.
  *
- * Two shapes are known to break the generator, so a package-wide filter is not an option -- it does
+ * Two shapes are known to break the generator, so a package-wide filter is not an option, because it does
  * not degrade on them, it fails the build:
  *
  * - an `enum abstract` with a value-less constructor (`var Red;` with no `= 0`), and
@@ -29,7 +29,7 @@ import sys.io.File;
  * [docs/advanced.md](../../../docs/advanced.md) for the flixel and openfl lists.
  *
  * Applying the macro is only half of it: the abstract also has to BE in the build. A type nothing
- * compiled references is never typed, and metadata on a type that does not exist does nothing --
+ * compiled references is never typed, and metadata on a type that does not exist does nothing, so
  * the script then fails with `Type not found`, which does not point at the cause. Pair this with
  * an include of the same package.
  *
@@ -81,7 +81,7 @@ class AbstractsMacro {
 				if (EXCLUDE.contains(path))
 					continue;
 
-				Compiler.addMetadata('@:build(hxscript.macro.AbstractMacro.build())', path);
+				Compiler.addMetadata('@:build(hxscript.macro.Abstract.build())', path);
 			}
 		}
 	}

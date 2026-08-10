@@ -3,9 +3,9 @@ package host;
 /**
  * A character grid the scripts draw into, flushed to the terminal once per frame.
  *
- * Deliberately tiny. The workbench is about scripts owning the whole program, so the host provides
- * the smallest surface a game needs -- put a character somewhere, write a string, present -- and
- * nothing that decides how the game looks.
+ * Deliberately tiny. The workbench is about scripts owning the whole program, so the host provides the
+ * smallest surface a game needs, which is putting a character somewhere, writing a string and presenting,
+ * and nothing that decides how the game looks.
  */
 class Screen {
 	/** Grid width in characters. */

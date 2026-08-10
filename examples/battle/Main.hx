@@ -11,10 +11,9 @@ import openfl.text.TextFormat;
 /**
  * The app the library is embedded into: a tiny turn-based battle.
  *
- * The host owns the rules -- health, damage, turn order, who wins -- and knows nothing about what
- * fights in them. It never names a script: it asks the loaded world which classes are entities and
- * which side each one put itself on. Dropping a new file into `scripts/` puts a new creature in the
- * fight without changing a line here.
+ * The host owns the rules, meaning health, damage, turn order and who wins, and knows nothing about what
+ * fights in them. It never names a script: it asks the loaded world which classes are entities and which
+ * side each one put itself on. Dropping a new file into `scripts/` puts a new creature in the fight.
  *
  * Runs either way. As a console program, with nothing but the compiler:
  *
