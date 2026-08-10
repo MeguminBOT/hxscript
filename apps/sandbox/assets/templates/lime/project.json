@@ -1,0 +1,6 @@
+{
+	"title": "Lime lifecycle",
+	"kind": "lime",
+	"entry": "Bars",
+	"description": "A host.Project: no game framework under it, just the frame loop and the input callbacks. lime.ui, lime.system and lime.math are reachable by name from inside them."
+}

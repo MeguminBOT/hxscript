@@ -7,3 +7,7 @@ bin_xbench/
 hxscript.zip
 export_classes.info
 /bin_test/
+
+# apps: build output and the user's own projects
+export/
+apps/*/projects/

@@ -1,0 +1,250 @@
+# hxScript Sandbox
+
+A prototyping app for **lime, openfl and flixel**, where your project is a folder of `.hx` files read
+at runtime rather than code that has to be compiled in.
+
+Drop a folder into `projects/`, pick it in the list, press Run. Edit a script in whatever editor you
+already use, save, and it reloads. No rebuild, no Haxe toolchain, no wiring.
+
+```
+┌─ projects ────┬─ Flixel playground ────────────────┐
+│ ▸ flixel      │ kind      flixel                   │
+│ ▸ lime        │ folder    .../projects/flixel      │
+│ ▸ openfl      │ scripts   2 file(s)                │
+│ ▸ my-thing    │ entry     Playground (a flixel     │
+│               │                       state)      │
+│ [ New project]│ [ Run  F5 ] [ Reload ] [ Rescan ]  │
+├───────────────┴────────────────────────────────────┤
+│ Playground.hx:12: character 9                      │
+│   spr.loadGrafic('x');                             │
+│           ^                                        │
+│ Cannot call FlxSprite.loadGrafic                   │
+│   `FlxSprite` has no `loadGrafic`. Did you mean    │
+│   `loadGraphic`?                                   │
+├────────────────────────────────────────────────────┤
+│ idle · 4 project(s) · compiled 4 classes in 31ms   │
+└────────────────────────────────────────────────────┘
+```
+
+## Building it
+
+```
+./build.sh          # Linux, macOS, or Git Bash on Windows
+build.bat           # cmd, on Windows
+```
+
+Both check the toolchain and the haxelibs first and name anything missing, rather than failing inside
+lime with a stack trace about a file you have never opened. They also point the two dev haxelibs at
+their checkouts, so a fresh clone builds without any setup of its own.
+
+| | |
+| --- | --- |
+| `./build.sh run` | build, then launch |
+| `./build.sh --debug` | debug build |
+| `./build.sh --clean` | wipe `export/` first |
+| `./build.sh linux` | a named target: `windows`, `linux`, `mac` |
+
+[SmiðrUI](https://github.com/MeguminBOT/SmidrUI) is not on haxelib, so clone it beside this
+repository or say where it is:
+
+```
+SMIDR_PATH=/path/to/SmidrUI ./build.sh        # bash
+set SMIDR_PATH=C:\path\to\SmidrUI && build.bat
+```
+
+## Writing a project
+
+```
+projects/
+  my-thing/
+    project.json     optional
+    scripts/         .hx files; the path under scripts/ becomes the package
+    assets/          optional, reachable by path
+```
+
+`project.json` overrides what the folder implies; a project without one still works.
+
+```json
+{
+  "title": "Bouncing things",
+  "kind": "flixel",
+  "entry": "Playground",
+  "description": "one line, shown in the detail pane"
+}
+```
+
+### What a project runs
+
+**A project says what it is by what it declares.** There is no interface to implement and no base
+every project must extend, because each of the three libraries already has the right base, and making
+you extend something of ours instead would be wrapping a library rather than using it.
+
+| declare this | and it runs as |
+| --- | --- |
+| a class extending `flixel.FlxState` | a flixel state, with the whole of flixel's lifecycle |
+| a class extending `openfl.display.Sprite` | a display object, driven by the display list |
+| a class extending `host.Project` | your own loop: `start`, `update(dt)`, `stop`, key and mouse callbacks |
+| a class with `static function main()` | called once, and it owns whatever happens next |
+
+Whichever it is, **it is the library's own class, not a wrapper.** A scripted `FlxState` gets `add`,
+`bgColor`, `update`, `super.update`, cameras and substates; a scripted `FlxSprite` gets `makeGraphic`,
+`velocity` and a real override of `update` that flixel's own loop calls.
+
+`host.Project` is the one that needs explaining. A script **cannot** subclass `lime.app.Application`,
+because that class is the process entry and anything extending it would have had to exist before the
+program started. So the app owns the `Application` and hands the same lifecycle down. `lime.ui`,
+`lime.system` and `lime.math` are all reachable by name from inside it.
+
+When more than one class qualifies, the order is: `entry` in `project.json`, then a class marked
+`public static var entry:Bool = true`, then flixel state, openfl sprite, `host.Project`, `main`.
+
+### The three that ship
+
+`projects/` is created beside the executable on first run and seeded with these, so a fresh build has
+something that runs in it before you have written anything.
+
+| | |
+| --- | --- |
+| `flixel` | a scripted `FlxState` with two dozen scripted `FlxSprite`s, plus a module declaring a scripted enum, a scripted abstract with an operator, and a class |
+| `openfl` | a scripted `openfl.display.Sprite` driving a few dozen more, with `Graphics`, `BlendMode` and a `TextField` |
+| `lime` | a `host.Project`: no framework under it, just the frame loop and `lime.ui.KeyCode` |
+
+### The window
+
+A project runs in a **viewport** between two bars, not over the whole window. It is fitted to the band
+uniformly, so nothing is stretched or cut off, and **never magnified**, because a window bigger than the
+project is extra room around it, not a reason to blow it up, so the percentage in the readout is only
+ever how much was given up to fit. The project is told nothing about any of it: `FlxG.width` and
+`FlxG.height` still describe the space it draws into.
+
+The fitting is a flixel **scale mode**, not a transform applied on top of one, and that distinction is
+the whole correctness argument. A scale mode owns `FlxG.game`'s position and each camera's scale and
+rewrites them on every measure, so a viewport implemented as a second transform is both compounded with
+flixel's and undone by it. It looked right at startup, when both agreed on 1, and went to 133% the
+moment the window went fullscreen. Expressed as a scale mode, the camera scale, the game's position and
+the mouse coordinates all follow from one number. The last of those is the one that would otherwise
+have been quietly wrong: flixel derives the pointer from the scale mode, so a hand-rolled transform
+means clicks land somewhere other than where they look.
+
+The UI is attached to the stage rather than inside the game, which is what lets the bars keep their
+size while the thing between them changes size.
+
+The top bar toggles three windows, and they are draggable, collapsible and closable:
+
+| | |
+| --- | --- |
+| **Script environment** | what was loaded, what the runtime compiler took, and what the interpreter is still doing |
+| **Sandbox** | fps, update and draw milliseconds, draw calls, memory, and the viewport's own size |
+| **Console** | everything printed, including `trace` and `log` from the running project |
+
+**Every number in those two is counted, not estimated**, and the split follows from that. `update` and
+`draw` are bracketed by flixel's own signals, so while a project is the state, that time is honestly
+the project's. Draw calls are flixel's counter, reset per frame by flixel and read after the cameras
+render. Memory is not divisible, since there is one heap, one collector and no way to ask which
+allocation came from a script, so it is reported once, under **Sandbox**, as the process's. The frame rate goes there too,
+for the same reason: there is one frame loop and it belongs to the application.
+
+The interpreted-work counters under **Script environment** need their label read. They count the
+interpreter, and a module the runtime compiler took runs as native bytecode and passes through none of
+it, so **zero there means compiled, not idle**, which is why the compiled/interpreted split sits
+directly above them.
+
+The console is the answer to a real gap rather than a nicety. A script's `trace` went to
+`haxe.Log.trace` and `log()` went to standard output, and a double-clicked application has no console
+attached on any of the three platforms, so the most ordinary way to find out what your code is doing
+produced nothing at all, silently, which looks exactly like the code not running. Both are routed to
+the window now, `trace` keeping its file and line.
+
+### Keys
+
+| | | |
+| --- | --- | --- |
+| Back to shell | `F1` | the only one that competes with a running project |
+| Run selected | `F5` | only read while nothing is running |
+| Reload project | unbound | |
+| Toggle overlay | unbound | |
+
+All four are rebindable in **Settings**, and two of them start with no key at all. That is the rule
+the defaults follow: **a key the shell claims is a key the project never sees**, so it claims one.
+`Escape` is deliberately not it, because a menu closes on it, a prompt cancels on it, a long job offers to
+skip on it, and a shell that took it would end the run instead.
+
+### Settings
+
+Beside the Run buttons, and written to `sandbox.json` beside the executable as you change it.
+
+- **Show the overlay**, described below. Off.
+- **Allow flixel's debugger** is off, and this is the one the rest is here for. flixel binds its
+  debugger to `F2`, backtick and backslash, in release builds as well as debug ones, so a project
+  that binds any of those finds the debugger opening on top of itself from a key it handled, with
+  nothing in its own code to explain it.
+
+### The overlay
+
+A strip of UI that stays above a running project, for the things worth watching *while* it runs.
+It is SmidrUI, so a project reaches it the same way the shell does:
+
+```haxe
+info('speed', player.velocity.x);        // a named line, replaced each time it is set
+infoClear();                             // drop them all
+overlay();                               // a container, for widgets of your own
+overlayShown();                          // whether anyone is looking
+```
+
+`info` is the cheap one and is meant to be called every frame: naming a value means the label is
+built once and only its text changes afterwards. `overlay()` is where a project that has outgrown a
+readout puts a slider that drives a constant or a button that resets what it is testing. Both are
+safe to call when the overlay is off, and everything a project adds is dropped when it stops.
+
+## When something goes wrong
+
+Everything hxScript reports lands in the log pane with its position, the source line, a caret and
+what usually causes it. The distinctions worth knowing about:
+
+- **`Unknown identifier: FlxG`** tells you whether the name is missing from the build or only from
+  the script's scope, and prints the `import` to add if it is the second.
+- **`Cannot call FlxSprite.loadGrafic`** tells you whether the member is misspelled, and suggests the
+  spelling that exists, or whether it is `inline` and so has no runtime form to call.
+- **A construct with no bytecode form** is reported and the module stays interpreted. Normal, not a
+  failure.
+- **A project that throws** is stopped and you are returned here, rather than the app going down.
+
+## Checking a build without a window
+
+```
+haxe console.hxml
+```
+
+Seconds rather than minutes, because it is the same host with no lime, openfl, flixel or window under
+it. It prints what the build wired, then loads every project and says what each would run. That
+answers "is the setup right" separately from "does the app build", which are the two questions that
+otherwise get debugged as one.
+
+## What is actually here
+
+The interesting thing about this app is how little of it there is. The four steps that put six
+libraries within reach of a script, by force-compiling their packages, generating a bridge per class a
+project may extend, giving their abstracts a runtime form, registering the shims for the members that
+have none, are hxScript's, driven by the libraries being in the build. `Project.xml` says nothing
+about any of it.
+
+| | |
+| --- | --- |
+| [`studio/Launcher.hx`](studio/Launcher.hx) | works out what a project runs, runs it, and gets out of the way |
+| [`studio/Projects.hx`](studio/Projects.hx) | finds projects on disk, and writes the templates out |
+| [`studio/Shell.hx`](studio/Shell.hx) | the window |
+| [`host/Project.hx`](host/Project.hx) | the base for a project with no framework under it |
+| [`host/Sandbox.hx`](host/Sandbox.hx) | one project, one world |
+| [`host/Probe.hx`](host/Probe.hx) | asks whether a type or member is really reachable from a script |
+| [`Check.hx`](Check.hx) | the headless check |
+
+Versions this was derived against: lime 8.3.2, openfl 9.5.2, flixel 6.2.0, flixel-addons 4.0.1,
+flixel-ui 2.6.5, SmiðrUI 0.3.0, on Haxe 4.3.7.
+
+## Where to go next
+
+- [`../../docs/embedding.md`](../../docs/embedding.md) covers putting hxScript in your own application.
+- [`../../docs/advanced.md`](../../docs/advanced.md) covers how the setup works, and how to add a library
+  it does not already know.
+- [`../../examples/battle/`](../../examples/battle) is scripts as content inside a game that exists.
+- [`../../examples/workbench/`](../../examples/workbench) is scripts as the whole program.

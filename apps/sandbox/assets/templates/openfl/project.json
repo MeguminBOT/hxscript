@@ -1,0 +1,6 @@
+{
+	"title": "OpenFL shapes",
+	"kind": "openfl",
+	"entry": "Shapes",
+	"description": "A scripted openfl.display.Sprite driving a few dozen more of them. Graphics, BlendMode, TextField and TextFormat are all openfl's own types, constructed from script."
+}

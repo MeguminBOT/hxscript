@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<project>
+	<!--
+		The hxScript sandbox: a prototyping app for lime, openfl and flixel projects, where the
+		projects are scripts read at runtime rather than code that has to be compiled in.
+
+		Build it with the scripts beside this file, which check the toolchain and the haxelibs first
+		and tell you what is missing rather than failing inside lime:
+
+		    ./build.sh          bash, on Linux, macOS, or Git Bash on Windows
+		    build.bat           cmd, on Windows
+
+		Or directly, once the haxelibs are in place:
+
+		    haxelib run lime test windows      (or linux, mac)
+
+		Everything about scripting on this page is one <haxelib> line. The four setup steps, putting
+		these libraries' types within reach of a script, generating a bridge per class a project may
+		extend, giving their abstracts a runtime form, and registering the shims, happen because
+		hxscript is in the build beside them, and are worth noticing precisely because nothing here
+		mentions them.
+	-->
+
+	<meta title="hxScript Sandbox" package="dev.hxscript.sandbox" version="1.0.0" company="hxscript" />
+	<app main="Main" path="export" file="Sandbox" />
+	<window width="1120" height="720" fps="60" background="#16161c" resizable="true" vsync="true" />
+
+	<source path="." />
+
+	<haxelib name="lime" />
+	<haxelib name="openfl" />
+	<haxelib name="flixel" />
+	<haxelib name="flixel-addons" />
+	<haxelib name="flixel-ui" />
+
+	<!-- The UI. openfl-level, with a flixel bridge, so one shell serves both. -->
+	<haxelib name="smidr" />
+
+	<!-- The scripting. Also the setup for all five libraries above. -->
+	<haxelib name="hxscript" />
+
+	<!-- The sandbox's own classes, so @:scriptable and @:scriptAmbient on them mean something. -->
+	<haxedef name="hxscript_host" value="host" />
+
+	<!--
+		The runtime compiler. Scripts are translated to native bytecode while the app runs, with no
+		Haxe toolchain in sight, which is worth around 20x on a project's own logic. `scriptable` is
+		not tuning: cppia resolves the host's classes by name at load time.
+	-->
+	<haxedef name="hxscript_cppia" />
+	<haxedef name="scriptable" />
+
+	<!--
+		Dead code elimination decides what to strip by what the COMPILED code references, and a
+		script references nothing at compile time. hxscript keeps the standard-library types scripts
+		reach by reflection, but a project reaching a member of a library class that nothing in the
+		app happens to call would still find it missing. For an app whose whole purpose is letting
+		somebody reach anything, keeping everything is the right trade.
+	-->
+	<haxeflag name="-dce" value="no" />
+
+	<!--
+		A bridge generates an override of every inherited method, including the deprecated ones, so
+		bridging a library that deprecates anything produces one warning per deprecated method with
+		the generated override as the call site. They are about flixel's API, not about anything here.
+	-->
+	<haxeflag name="-w" value="-WDeprecated" />
+
+	<!--
+		The project templates, written out to `projects/` beside the executable on first run. Assets
+		rather than files copied by the build, because they have to survive being inside a packaged
+		application: on macOS that is a bundle, with no source tree next to the binary to copy from.
+	-->
+	<assets path="assets/templates" rename="assets/templates" />
+
+	<!-- Uncomment to see exactly what the setup wired. Worth it once, and after any upgrade. -->
+	<!-- <haxedef name="hxscript_verbose" /> -->
+</project>

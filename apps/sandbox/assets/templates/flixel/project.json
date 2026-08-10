@@ -1,0 +1,6 @@
+{
+	"title": "Flixel playground",
+	"kind": "flixel",
+	"entry": "Playground",
+	"description": "A scripted FlxState with scripted FlxSprites in it. Nothing here is a wrapper: Playground IS an FlxState and Mote IS an FlxSprite, so add, bgColor, update, makeGraphic, velocity, FlxTween and FlxText are flixel's own, reached by name."
+}
