@@ -5,14 +5,9 @@ import hxscript.Config;
 import Type.ValueType;
 
 /**
- * A drop-in replacement for `haxe.Type`, aliased as `Type` inside the interpreter. Every method
- * dispatches to a scripted type's own implementation when the value implements the matching
- * `ICustom*` interface, and falls back to native `haxe.Type` (through the `Config.typeProxy` and the
- * blacklist) otherwise.
- *
- * Note that scripted types and their values are ordinary class instances, not native `Class`/`Enum`/
- * `EnumValue` runtime objects, so parameters and returns here are `Dynamic`: typing them as the
- * native runtime types would make the target coerce a scripted instance to null at the call boundary.
+ * A drop-in replacement for `haxe.Type`, aliased as `Type` inside the interpreter. Every method dispatches to
+ * a scripted type's own implementation when the value implements the matching `ICustom*` interface, and falls
+ * back to native `haxe.Type` (through the `Config.typeProxy` and the blacklist) otherwise.
  */
 class TypeProxy {
 	/** The world used to resolve scripted types by name; set before interpreting. */

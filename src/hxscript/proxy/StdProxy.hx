@@ -83,14 +83,11 @@ class StdProxy {
 		if (t is ScriptedClass || t is ScriptedInterface) {
 			return matchesScripted(v, t);
 		} else if (t is ScriptedEnum) {
-			// A scripted enum value belongs to `t` when its enum is `t` (compared by path so a
-			// reloaded enum still matches).
 			if (!(v is ICustomEnumValueType))
 				return false;
 			var e:Dynamic = cast(v, ICustomEnumValueType).typeGetEnum();
 			return e == t || (e is ScriptedEnum && (cast(e, ScriptedEnum).path == cast(t, ScriptedEnum).path));
 		} else if (t is ScriptedAbstract) {
-			// A boxed value belongs to `t` when `t` declared it (by path, so a reload still matches).
 			if (!(v is ScriptedAbstractValue))
 				return false;
 			var o:ScriptedAbstract = cast(v, ScriptedAbstractValue).owner;
@@ -147,8 +144,6 @@ class StdProxy {
 	 * @return Its string form.
 	 */
 	public static function string(s:Dynamic):String {
-		// A wrapped abstract is a box the script never asked for: print what it holds, the way
-		// compiled Haxe does, unless the abstract defines a `toString` of its own.
 		if (s is AbstractValue) {
 			var custom:Dynamic = Reflect.field(s, 'toString');
 			if (custom != null && Reflect.isFunction(custom))
