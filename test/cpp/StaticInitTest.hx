@@ -1,8 +1,8 @@
 import hxscript.Environment;
 import hxscript.Module;
 import hxscript.compile.Cppia;
-import hxscript.compile.CppiaInput;
-import hxscript.compile.CppiaResult;
+import hxscript.compile.Unit;
+import hxscript.compile.Result;
 import hxscript.types.ScriptedClass;
 
 /**
@@ -236,7 +236,7 @@ class Reader {
 	}
 
 	static function compileInto(env:Environment, sources:Array<{name:String, pack:Array<String>, code:String}>, wanted:Array<String>):Void {
-		var inputs:Array<CppiaInput> = [];
+		var inputs:Array<Unit> = [];
 		var outside:Array<String> = [];
 
 		for (source in sources) {
@@ -249,7 +249,7 @@ class Reader {
 				outside.push(path);
 		}
 
-		var result:CppiaResult = Cppia.compile(inputs, null, outside, []);
+		var result:Result = Cppia.compile(inputs, null, outside, []);
 		if (result.bytes == null)
 			return;
 

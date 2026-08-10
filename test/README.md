@@ -62,11 +62,11 @@ compilations across the matrix, most of it the library recompiled, against 10 th
 
 `TestCase` counts three things, and the difference between the last two is the point:
 
-- **pass** / **fail** -- an assertion. A failure fails the build.
-- **gap** -- a probe found something missing. Reported, counted, does **not** fail the build. The
+- **pass** / **fail** is an assertion. A failure fails the build.
+- **gap** means a probe found something missing. Reported, counted, does **not** fail the build. The
   probes sweep a broad surface looking for holes; `SweepProbe`'s `regex replace` gap is DCE in the
   probe's own build rather than a defect, and `DceProbe`'s `List (bare)` gap is there because these
-  builds use `-cp src`, so `extraParams.hxml` and its `KeepMacro` never run.
+  builds use `-cp src`, so `extraParams.hxml` and its `Keep` never run.
 
 ## What each test covers
 
@@ -91,7 +91,7 @@ compilations across the matrix, most of it the library recompiled, against 10 th
 | `cpp/CppiaWorldTest` | compiling part of a world, and that the compiled half is what actually runs |
 | `cpp/SweepTest` | the constructs the emitter accepts, both ways, with refusals reported |
 | `cpp/CompilerTest` | the `Compiler` facade: compile, bind, reload, and what `substituting` means |
-| `cpp/ExposeTest` | `ExposeMacro` filling the ambient types and static bindings from build marks |
+| `cpp/ExposeTest` | `Expose` filling the ambient types and static bindings from build marks |
 | `cpp/PropTest` | host properties reached from compiled code through their accessors |
 | `cpp/CatchNative` | catching a native exception in compiled script code |
 | `cpp/DceProbe` | which standard-library members a script can still reach after DCE |

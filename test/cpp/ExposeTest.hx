@@ -1,7 +1,7 @@
 import hxscript.Environment;
 import hxscript.Module;
 import hxscript.compile.Compiler;
-import hxscript.macro.ExposeMacro;
+import hxscript.macro.Expose;
 import hxscript.types.ScriptedClass;
 
 /** A host type a script may name, with statics it may reach by a bare name. */
@@ -40,15 +40,15 @@ class ExposeTest {
 		+ '\t}\n}\n';
 
 	public static function run():Void {
-		var types:Array<String> = ExposeMacro.ambient();
-		var binds:Array<String> = ExposeMacro.statics();
+		var types:Array<String> = Expose.ambient();
+		var binds:Array<String> = Expose.statics();
 
 		Sys.println('ambient (' + types.length + '): ' + types.join(', '));
 		Sys.println('statics (' + binds.length + '): ' + binds.join(', '));
 		Sys.println('Hidden exposed? ' + (types.indexOf('Hidden') >= 0));
 
 		// One call fills the interpreter's globals and the compiler's lists from the same marks.
-		ExposeMacro.apply();
+		Expose.apply();
 
 		var env = new Environment();
 		env.addModule(new Module(SCRIPT, 'Raid', ['s'], 'raid'));

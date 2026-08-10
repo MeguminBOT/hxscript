@@ -1,8 +1,8 @@
 """Collate the per-library benchmark lines into ONE per-case list plus compact summaries.
 
 Deliberately one table of record. An earlier version printed the whole corpus once per scale, plus
-totals, plus averages, plus a chart for each -- eighteen tables and eighteen charts saying a handful
-of things repeatedly, which is a lot to keep consistent by hand when a single number changes. What
+totals, plus averages, plus a chart for each, which came to eighteen tables and eighteen charts saying
+a handful of things repeatedly, which is a lot to keep consistent by hand when a single number changes. What
 comes out now is one list at a reference scale, a summary, and the evidence that the ranking does not
 depend on the scale. Everything else was restatement.
 """
@@ -204,7 +204,7 @@ chart(f"Cost of one call at {REF:,} iterations", "microseconds", [(LABEL[l], avg
 
 # The same averages read as a budget, which is the shape a game actually needs: not "how many
 # microseconds does this cost" but "how much script fits in a frame". A 60Hz frame is 16.667ms, and
-# no game gives scripts all of it -- 2ms is a realistic slice with rendering and physics to pay for.
+# no game gives scripts all of it. 2ms is a realistic slice with rendering and physics to pay for.
 FRAME_US = 1000000.0 / 60.0
 SLICE_MS = 2.0
 
@@ -213,7 +213,7 @@ print(f"The per-operation and per-call averages read as a budget. A 60Hz frame i
 print(f"the second pair is a {SLICE_MS:.0f}ms slice of it, which is a more realistic allowance once")
 print("rendering and physics are paid for. Whole units, rounded down.\n")
 print("**Derived, not measured at this scale.** Timing a frame's worth of work directly is dominated")
-print("by noise -- a few hundred operations is far too short an interval to time on a preemptive OS.")
+print("by noise, because a few hundred operations is far too short an interval to time on a preemptive OS.")
 print(f"These come from the {REF:,}-iteration averages above, which are stable, multiplied back out.")
 print("Read it the other way for a budget you already have in mind:\n")
 print("```")

@@ -1,16 +1,16 @@
 import hxscript.Environment;
 import hxscript.Module;
 import hxscript.compile.Cppia;
-import hxscript.compile.CppiaResult;
+import hxscript.compile.Result;
 import hxscript.types.ScriptedClass;
 
 /**
  * Checks that a property on a host object behaves the same compiled as interpreted.
  *
- * cppia reaches a named field on a host object without going through its accessors, so a property
- * reads as null and a write does nothing -- with no error either way, which is what makes this worth
- * a test of its own rather than trusting it. Every engine object is full of these: a sprite's text,
- * its colour, which cameras it draws to.
+ * cppia reaches a named field on a host object without going through its accessors, so a property reads as
+ * null and a write does nothing, with no error either way, which is what makes this worth a test of its own
+ * rather than trusting it. Every engine object is full of these: a sprite's text, its colour, which cameras
+ * it draws to.
  */
 class PropTest {
 	static var SRC:String = 'package p;
@@ -61,7 +61,7 @@ class T {
 		report('interpreted, batch accessor', Reflect.callMethod(null, cls.reflectGetField('viaAccessor'), []));
 
 		var decls = new hxscript.syntax.Parser().parseModule(SRC, 'T', 0, ['p']);
-		var r:CppiaResult = Cppia.compile([{name: 'p.T', decls: decls}], ['HostSink']);
+		var r:Result = Cppia.compile([{name: 'p.T', decls: decls}], ['HostSink']);
 		if (r.bytes == null) {
 			TestCase.bad('compile', 'refused: ' + r.skipped[0].reason);
 			return;

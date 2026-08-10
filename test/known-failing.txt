@@ -1,21 +1,13 @@
-# Targets that do not currently build, one per line: <target>|<what to expect>
+# Targets that do not currently pass, one per line: <target>|<what to expect>
 #
 # run.sh reports these as `known-fail` rather than `FAIL` and does not fail the run over them. The
-# point is not to excuse them. It is so that a NEW breakage is distinguishable from these five, which
-# a suite that simply went red everywhere could not tell you.
+# point is not to excuse them. It is so that a NEW breakage is distinguishable from the ones already
+# understood, which a suite that simply went red everywhere could not tell you.
 #
 # Delete a line when the cause is fixed. If the target then still fails, run.sh will say so.
 #
-# js and hl are what PR #2 reports and fixes. lua fails from the same cause as js. neko, php and
-# python were found by running this matrix and are not reported anywhere else.
-#
-# python is the one to look at first. The other five fail to compile, which is loud. python compiles
-# and then does not work, which is silent: parsing is fine (PrinterTest and SweepProbe pass in full)
-# and evaluation returns null for everything, so the library looks installed and does nothing.
+# Every target builds, and eval, cpp and cppia pass in full. What is left is on two targets and is
+# the same shape on both: a macro-generated abstract wrapper whose members reflection cannot reach.
 
-js|TypeProxy.hx: the field name 'constructor' is not allowed in JS
-lua|TypeProxy.hx: the field name 'constructor' is not allowed in Lua, same cause as js
-neko|Interp.hx: local variable r used without being initialized
-php|ParserException.hx: redefinition of variable line in subclass
-hl|Config.hx: type not found hxscript.proxy.HL, should be HLMath
-python|compiles, then evaluates to null: ScriptedTools.scriptedClasses reflects through haxe.rtti.Meta in a static initializer, which runs before python.Boot has its own statics (AttributeError: python_Boot has no attribute keywords)
+neko|3 failures, all scripted-abstract forwarding to a native underlying type: `@:to` conversion to String, `@:forward` over an Array, and a forwarded method that mutates. `Type.getClassName` answers for instances as well as classes on neko, so the portable class test used on python cannot be widened here. See `hxscript.types.TypeTools.isClass`, which is deliberately `#if python`.
+python|3 failures and 3 gaps. The failures are `@:forward` over the macro-generated wrapper: `_forwards` reads back null through `Reflect.field` on the wrapper class, so `AbstractTools.forwards` says no and the call never reaches the underlying value. The gaps are `String.fromCharCode` (the interpreter resolves `String` to an anonymous object, not a class, so statics on it are unreachable), `catch order` (a typed `catch (e:Int)` matches a String), and `using ext` (the extension's member is `inline`, so the shim is keyed on the extension type while the call is keyed on the receiver).

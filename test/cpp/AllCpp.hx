@@ -18,6 +18,7 @@ class AllCpp {
 	static var tests:Array<{name:String, run:Void->Void}> = [
 		{name: 'CppiaTest', run: CppiaTest.run},
 		{name: 'CppiaWorldTest', run: CppiaWorldTest.run},
+		{name: 'LoadFailureTest', run: LoadFailureTest.run},
 		{name: 'StaticInitTest', run: StaticInitTest.run},
 		{name: 'SweepTest', run: SweepTest.run},
 		{name: 'CompilerTest', run: CompilerTest.run},

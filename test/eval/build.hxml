@@ -9,5 +9,11 @@
 -cp test/common
 -cp test/common/fixtures
 -cp test/lib
+# The library ships with this applied via extraParams.hxml (`-lib hxscript`). The suite uses
+# `-cp src`, which does not read extraParams, so without this line the suite tests a
+# configuration no consumer builds: under the default -dce std the standard-library members a
+# script reaches by reflection are stripped, and EReg loses its methods.
+--macro hxscript.macro.Keep.run()
+
 -main AllCommon
 --interp

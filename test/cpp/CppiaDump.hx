@@ -1,5 +1,5 @@
 import hxscript.compile.Cppia;
-import hxscript.compile.CppiaResult;
+import hxscript.compile.Result;
 
 /**
  * Prints the module the emitter produces, so its text can be read against the loader's grammar.
@@ -12,7 +12,7 @@ class CppiaDump {
 		var parser = new hxscript.syntax.Parser();
 		var decls = parser.parseModule(source, 'test', 0, ['p']);
 
-		var result:CppiaResult = Cppia.compile([{name: 'p.T', decls: decls}]);
+		var result:Result = Cppia.compile([{name: 'p.T', decls: decls}]);
 
 		if (result.bytes == null) {
 			Sys.println('refused: ' + result.skipped[0].reason);

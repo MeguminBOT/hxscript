@@ -2,8 +2,8 @@ import haxe.io.Bytes;
 import hxscript.Environment;
 import hxscript.Module;
 import hxscript.compile.Cppia;
-import hxscript.compile.CppiaInput;
-import hxscript.compile.CppiaResult;
+import hxscript.compile.Unit;
+import hxscript.compile.Result;
 import hxscript.types.ScriptedClass;
 
 /**
@@ -15,6 +15,16 @@ import hxscript.types.ScriptedClass;
 class CppiaTest {
 	/** Constructs the emitter declined. Reported, but not a failure: the interpreter still runs them. */
 	static var refused:Int = 0;
+
+	/**
+	 * Puts the abstract fixture in the build, which naming it in a script cannot do.
+	 *
+	 * `-dce no` keeps what is there; it does not type what nothing references. A fixture only ever named
+	 * from script source is never typed, so its `@:build` never runs, no wrapper is generated, and the
+	 * script fails with `Type not found`. That is also what a host gets wrong in exactly this way, and why
+	 * `Autowire.include` exists.
+	 */
+	@:keep static var fixture:OpBlend = OpBlend.ADD;
 
 	public static function run():Void {
 		// Always on, because it is a different code path: an expression the JIT has no generator for
@@ -259,6 +269,57 @@ class CppiaTest {
 		check('string interpolation, escaped', "var n = 1; return 'cost $$5 for $n';", "cost $5 for 1");
 		check('double quotes do not interpolate', "var n = 5; return \"n is $n\";", "n is $n");
 
+		// A native abstract's constant is a value and nothing else once compiled, and the emitter has
+		// to say so. Naming it as a static instead produced `Bad link`, which the loader raises for the
+		// whole module and attributes to nothing inside it, so one such constant cost every class in
+		// the batch its bytecode.
+		var blend:String = 'import OpBlend;';
+		// Through `Std.string` rather than returned bare, because the interpreter hands back the boxed
+		// wrapper and the compiler hands back the value, and this is about the value being right rather
+		// than about which side does the unboxing.
+		check('enum abstract constant folds', 'return Std.string(OpBlend.ADD);', 'add', '', blend);
+		check('enum abstract constant compares', 'return OpBlend.ADD == "add" ? "eq" : "ne";', 'eq', '', blend);
+		check('enum abstract constant in a call', 'return Std.string(OpBlend.NORMAL).toUpperCase();', 'NORMAL', '', blend);
+		refuses('a method on an abstract is refused, not mis-linked', 'return OpBlend.additive("add") ? "y" : "n";', 'abstract', blend);
+
+		TestCase.log('-- constructs the emitter is expected to express --');
+
+		check('key-value for', 'var m = ["a" => 1]; var t = ""; for (k => v in m) t += k + v; return t;', 'a1');
+		check('map value for', 'var m = ["a" => 2]; var t = 0; for (v in m) t += v; return t;', '2');
+		check('array comprehension', 'var a = [for (i in 0...4) i * 2]; return a.join(",");', '0,2,4,6');
+		check('filtered comprehension', 'var a = [for (i in 0...5) if (i % 2 == 0) i]; return a.join(",");', '0,2,4');
+		check('unary not', 'var b = false; return !b ? "y" : "n";', 'y');
+		check('unary negate', 'var i = 5; return -i;', '-5');
+		check('unary complement', 'return ~5;', '-6');
+		check('prefix increment', 'var i = 1; return ++i;', '2');
+		check('postfix increment', 'var i = 1; i++; return i;', '2');
+		check('prefix decrement', 'var i = 3; return --i;', '2');
+		check('postfix decrement', 'var i = 3; i--; return i;', '2');
+		check('unsigned shift', 'return -8 >>> 28;', '15');
+		check('compound shift', 'var i = 1; i <<= 3; return i;', '8');
+		check('compound xor', 'var i = 12; i ^= 10; return i;', '6');
+		check('compound modulo', 'var i = 17; i %= 5; return i;', '2');
+		check('block in value position', 'var x = { var t = 5; t * 2; }; return x;', '10');
+		check('null coalesce', 'var a:Dynamic = null; return a ?? 5;', '5');
+		check('null coalesce keeps value', 'var a:Dynamic = 3; return a ?? 5;', '3');
+		check('null coalesce on a call', 'return first() ?? 9;', '9', 'static function first():Dynamic return null;');
+		check('safe navigation', 'var o:Dynamic = null; return Std.string(o?.x);', 'null');
+		check('arrow function', 'var f = x -> x * 2; return f(4);', '8');
+		check('closure capture', 'var n = 3; var f = function() return n * 2; return f();', '6');
+		check('switch on string', 'var s = "b"; switch (s) { case "a": return 1; case "b": return 2; default: return 0; }', '2');
+		check('switch or-pattern', 'var i = 3; switch (i) { case 1 | 3: return "odd"; default: return "even"; }', 'odd');
+		check('switch with guard', 'var i = 7; switch (i) { case n if (n > 5): return "big"; default: return "small"; }', 'big');
+		check('string interpolation', "var n = 5; return 'n is ${n}';", 'n is 5');
+		check('nested function', 'function inner(a:Int) return a + 1; return inner(4);', '5');
+		check('final local', 'final n = 4; return n * 2;', '8');
+		check('untyped passthrough', 'return untyped 5;', '5');
+		check('multi catch', 'try { throw "x"; } catch (e:Int) { return "int"; } catch (e:String) { return "str"; }', 'str');
+		check('static extension', 'return "ab".startsWith("a") ? "y" : "n";', 'y', '', 'using StringTools;');
+		check('instance field', 'var t = new T(); t.n = 6; return t.n;', '6', 'public var n:Int = 0;\n\tpublic function new() {}');
+		check('instance method', 'return new T().twice(4);', '8', 'public function new() {}\n\tpublic function twice(a:Int) return a * 2;');
+		check('property accessors', 'var t = new T(); t.v = 5; return t.v;',
+			'10', 'public var v(get, set):Int;\n\tvar raw:Int = 0;\n\tpublic function new() {}\n\tfunction get_v() return raw * 2;\n\tfunction set_v(x:Int) { raw = x; return x; }');
+
 		TestCase.log('  refused by the emitter: ' + refused);
 	}
 
@@ -292,12 +353,12 @@ class CppiaTest {
 			return;
 		}
 
-		var result:CppiaResult = Cppia.compile([{name: 'p.T', decls: decls}]);
+		var result:Result = Cppia.compile([{name: 'p.T', decls: decls}]);
 
 		if (result.bytes == null) {
 			refused++;
 			var why:String = result.skipped.length > 0 ? result.skipped[0].reason : 'no reason given';
-			TestCase.log('  --   ' + label + '   refused: ' + why);
+			TestCase.log('  skip ' + label + '   refused: ' + why);
 			return;
 		}
 
@@ -307,6 +368,45 @@ class CppiaTest {
 		} else {
 			TestCase.bad(label, 'cppia gave ' + got + ', interpreter gave ' + interpreted);
 		}
+	}
+
+	/**
+	 * Requires that the emitter decline a body, for the reason it should decline it for.
+	 *
+	 * The opposite assertion to `check`, and worth making separately: a construct with no bytecode
+	 * spelling has two possible outcomes, and only one of them is acceptable. Refusing costs the
+	 * module its speedup and nothing else. Emitting something the loader will not take costs every
+	 * module in the batch, and says so in terms that name neither the class nor the field.
+	 *
+	 * @param label How to name the case in the report.
+	 * @param body The method body.
+	 * @param mentions A word the reason must contain, so it is refused for the right cause.
+	 * @param before Declarations preceding the class.
+	 */
+	static function refuses(label:String, body:String, mentions:String, before:String = ''):Void {
+		var source:String = 'package p;\n' + before + '\nclass T {\n\tpublic static function run():Dynamic {\n\t\t' + body + '\n\t}\n}\n';
+
+		var decls = parse(source);
+		if (decls == null) {
+			TestCase.bad(label, 'could not parse');
+			return;
+		}
+
+		var result:Result = Cppia.compile([{name: 'p.T', decls: decls}]);
+
+		if (result.bytes != null) {
+			TestCase.bad(label, 'the emitter accepted it');
+			return;
+		}
+
+		refused++;
+
+		var why:String = result.skipped.length > 0 ? result.skipped[0].reason : '';
+
+		if (why.indexOf(mentions) < 0)
+			TestCase.bad(label, 'refused, but for "' + why + '" rather than anything about ' + mentions);
+		else
+			TestCase.ok(label + '   ' + why, true);
 	}
 
 	static function parse(source:String):Array<hxscript.syntax.Expr.ModuleDecl> {

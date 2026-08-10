@@ -9,7 +9,7 @@ class GapProbe {
 	}
 
 	public static function run():Void {
-		p("map keys iter", "{ var m=['a'=>1,'b'=>2]; var t=''; for (k in m.keys()) t+=k; t; }", "ab");
+		p("map keys iter", "{ var m=['a'=>1,'b'=>2]; var n=0; var seen=''; for (k in m.keys()) { n++; if (k=='a'||k=='b') seen+='x'; } n+seen; }", "2xx");
 		p("map value iter", "{ var m=['a'=>1,'b'=>2]; var t=0; for (v in m) t+=v; t; }", "3");
 		p("map kv iter", "{ var m=['a'=>1]; var t=''; for (k => v in m) t += k+v; t; }", "a1");
 		p("array map()", "[1,2,3].map(function(x) return x*2).join(',')", "2,4,6");

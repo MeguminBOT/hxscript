@@ -133,8 +133,8 @@ if refused:
     print("compiled subset: " + ", ".join("`%s`" % c for c in refused) + ".")
 else:
     print("Every case compiled. Nothing in this corpus falls outside what the compiler emits, which is")
-    print("a statement about the corpus as much as about the compiler -- it is built from the constructs")
-    print("a hot script actually uses, not from the language's edges.")
+    print("a statement about the corpus as much as about the compiler, since it is built from the")
+    print("constructs a hot script actually uses, not from the language's edges.")
 print("")
 print("<details>")
 print(f"<summary><strong>{sum(1 for c in order if REF in rows[c])} cases, click to expand</strong></summary>")

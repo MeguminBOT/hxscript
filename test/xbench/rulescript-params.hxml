@@ -10,7 +10,7 @@
 
 --macro addMetadata('@:build(rulescript.macro.ExprMacro.buildInterpDefaults())', 'hscript.Interp')
 
---macro addMetadata('@:build(rulescript.macro.ExprMacro.buildToolsDefaults())', 'hscript.Tools')
+--macro addMetadata('@:build(rulescript.macro.ExprMacro.buildToolsDefaults())', 'hscript.Ast')
 
 --macro addMetadata('@:build(rulescript.macro.ExprMacro.buildPrinterDefaults())', 'hscript.Printer')
 

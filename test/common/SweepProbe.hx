@@ -96,6 +96,14 @@ class SweepProbe {
 		raw("import alias", "import Math as M;\nres = M.max(1,2);", "2");
 		raw("import field", "import Math.abs;\nres = abs(-3);", "3");
 		raw("using ext", "using StringTools;\nres = 'ab'.startsWith('a');", "true");
+
+		trace("-- declaration modifiers --");
+		raw("final class", "final class SwF { public function new() {} public function v() return 3; }\nres = new SwF().v();", "3");
+		raw("abstract class", "abstract class SwA { public function new() {} public function v() return 4; }\nres = new SwA().v();", "4");
+		raw("extern member", "class SwE { public function new() {} public extern function v() return 7; }\nres = new SwE().v();", "7");
+		raw("abstract member", "abstract class SwB { public function new() {} public abstract function v():Int; }\nres = 8;", "8");
+		raw("final still a var", "final n = 9;\nres = n;", "9");
+		raw("untyped", "res = untyped 5;", "5");
 	}
 
 	static function main():Void {

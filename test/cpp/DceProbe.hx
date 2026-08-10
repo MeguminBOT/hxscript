@@ -18,7 +18,7 @@ class DceProbe {
 	}
 
 	public static function run():Void {
-		Sys.println("kept: " + hxscript.macro.KeepMacro.types.join(", "));
+		Sys.println("kept: " + hxscript.macro.Keep.types.join(", "));
 		Sys.println("");
 
 		p("IntIterator", "{ var t=0; for (i in 0...4) t+=i; t; }", "6");

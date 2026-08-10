@@ -4,7 +4,7 @@
  * constants of the abstract's own type (which have no runtime form at all), get/set properties that
  * rewrite `this`, and arithmetic operators.
  */
-@:build(hxscript.macro.AbstractMacro.build())
+@:build(hxscript.macro.Abstract.build())
 abstract OpColor(Int) from Int from UInt to Int to UInt {
 	/** Opaque red, as an inline constant of the abstract's own type. */
 	public static inline var RED:OpColor = 0xFFFF0000;

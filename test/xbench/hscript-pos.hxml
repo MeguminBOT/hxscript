@@ -1,6 +1,6 @@
 # Compiles an hscript-family library with source position tracking on.
 #
-# Without this define hscript's `Expr` is `typedef ExprDef = Expr` -- it records no positions at all,
+# Without this define hscript's `Expr` is `typedef ExprDef = Expr`, so it records no positions at all,
 # and its token pushback holds bare tokens rather than {min, max, t}. This fork always tracks
 # positions, because error reporting and call-stack traces depend on them, so the default build is
 # not a like-for-like comparison. See docs/benchmarks.md.

@@ -1,8 +1,8 @@
 import hxscript.Environment;
 import hxscript.Module;
 import hxscript.compile.Cppia;
-import hxscript.compile.CppiaInput;
-import hxscript.compile.CppiaResult;
+import hxscript.compile.Unit;
+import hxscript.compile.Result;
 import hxscript.types.ScriptedClass;
 
 /**
@@ -12,9 +12,9 @@ import hxscript.types.ScriptedClass;
  * things: one class running compiled beside another running interpreted, sharing statics and types.
  * That arrangement is the whole risk, and it is what this exercises.
  *
- * Every case runs twice from the same sources -- once with nothing compiled, once with whatever the
- * case asks for -- and the two must agree. A world that cannot be compiled soundly is expected to
- * fall back, not to produce a different answer.
+ * Every case runs twice from the same sources, once with nothing compiled and once with whatever the case
+ * asks for, and the two must agree. A world that cannot be compiled soundly is expected to fall back, not to
+ * produce a different answer.
  */
 class CppiaWorldTest {
 
@@ -39,6 +39,9 @@ class Tables {
 		ready = true;
 		scale = 7;
 	}
+	public static function set():Bool {
+		return ready;
+	}
 }
 ';
 
@@ -47,6 +50,7 @@ class Tables {
 import w.Tables;
 class Worker {
 	public var seen:Int = 0;
+	public var live:Bool = true;
 	public function new() {}
 	public function run(n:Int):Int {
 		if (!Tables.ready)
@@ -54,10 +58,24 @@ class Worker {
 		seen = n * Tables.scale;
 		return seen;
 	}
+	public function alive():Bool {
+		return live;
+	}
+	public function maybe():Null<Bool> {
+		return live;
+	}
 }
 ';
 
-	/** The entry point, standing in for a class a host keeps interpreted. */
+	/**
+	 * The entry point, standing in for a class a host keeps interpreted.
+	 *
+	 * Reports the TYPE of every boolean it touches as well as its value, which is the only way the
+	 * difference shows: cppia has no boolean and folds `Bool` into its integer type, so a compiled
+	 * `alive()` handed back `1`, which prints as truthy, compares unequal to `true`, and fails a
+	 * typed-mode `Bool` binding. `Null<Bool>` has no cppia spelling at all and read back as null
+	 * whatever was returned.
+	 */
 	static var ENTRY:String = 'package w;
 import w.Tables;
 import w.Worker;
@@ -67,7 +85,23 @@ class Entry {
 		Tables.init();
 		var worker:Worker = new Worker();
 		made = worker;
-		return worker.run(6) + bonus(1);
+
+		var parts:Array<String> = [Std.string(worker.run(6) + bonus(1))];
+		parts.push(tag(Tables.ready));
+		parts.push(tag(Tables.set()));
+		parts.push(tag(worker.live));
+		parts.push(tag(worker.alive()));
+		parts.push(tag(worker.maybe()));
+		parts.push(worker.alive() == true ? "eq" : "ne");
+		parts.push(tag(bound(worker)));
+		return parts.join("/");
+	}
+	static function bound(worker:Worker):Bool {
+		var held:Bool = worker.alive();
+		return held;
+	}
+	static function tag(v:Dynamic):String {
+		return Std.string(v) + ":" + Std.string(Type.typeof(v));
 	}
 }
 ';
@@ -168,7 +202,7 @@ class Entry {
 	 * @param wanted The scripted paths to compile.
 	 */
 	static function compileInto(env:Environment, sources:Array<{name:String, pack:Array<String>, code:String}>, wanted:Array<String>):Void {
-		var inputs:Array<CppiaInput> = [];
+		var inputs:Array<Unit> = [];
 		var outside:Array<String> = [];
 
 		for (source in sources) {
@@ -181,7 +215,7 @@ class Entry {
 				outside.push(path);
 		}
 
-		var result:CppiaResult = Cppia.compile(inputs, null, outside, ['bonus=CppiaWorldTest::bonus']);
+		var result:Result = Cppia.compile(inputs, null, outside, ['bonus=CppiaWorldTest::bonus']);
 		if (result.bytes == null)
 			return;
 

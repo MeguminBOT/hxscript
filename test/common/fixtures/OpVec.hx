@@ -3,7 +3,7 @@
  * `Int` arithmetic would not, so a test can tell an `@:op` dispatch apart from a fallback to the
  * boxed value.
  */
-@:build(hxscript.macro.AbstractMacro.build())
+@:build(hxscript.macro.Abstract.build())
 abstract OpVec(Int) from Int to Int {
 	/**
 	 * Wraps an underlying value.

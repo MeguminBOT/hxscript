@@ -1,7 +1,7 @@
 import hxscript.Environment;
 import hxscript.Module;
 import hxscript.compile.Cppia;
-import hxscript.compile.CppiaResult;
+import hxscript.compile.Result;
 import hxscript.types.ScriptedClass;
 
 /**
@@ -77,7 +77,7 @@ class T {
 		var decls = parser.parseModule(SOURCE, 'bench', 0, ['p']);
 
 		var t1:Float = haxe.Timer.stamp();
-		var result:CppiaResult = Cppia.compile([{name: 'p.T', decls: decls}]);
+		var result:Result = Cppia.compile([{name: 'p.T', decls: decls}]);
 		var compileMs:Float = (haxe.Timer.stamp() - t1) * 1000;
 
 		if (result.bytes == null) {
