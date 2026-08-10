@@ -106,7 +106,7 @@ Earlier versions of this page reported that as a defect in four of the six libra
 Everything here is therefore built with `-dce no`, which measures the libraries rather than the build
 settings. A probe over 83 commonly-scripted standard-library members found **42 unreachable** under
 `-dce std` against 3 under `-dce no`; the catalogue is in
-[`embedding.md`](embedding.md#what--dce-std-actually-removes), and it is worth reading before
+[`embedding.md`](embedding.md#dead-code-elimination), and it is worth reading before
 concluding that any scripting library "cannot do" something.
 
 ### Every library is built with position tracking
@@ -256,7 +256,7 @@ them. Build with `-dce no` and all six libraries run `forRange` and `arrayCompr`
 Worth stating plainly because the failure looks exactly like a library defect from the outside: a
 script gets `Cannot call null`, or on a build without position tracking it silently abandons the rest
 of the program. Neither points at the host's own compiler flags, which is where the cause is. See
-[`embedding.md`](embedding.md#what--dce-std-actually-removes) for what else DCE takes with it.
+[`embedding.md`](embedding.md#dead-code-elimination) for what else DCE takes with it.
 
 **`++` works in all six**, and every loop counter in this suite still uses `i += 1`, which is equally
 fair to all of them and does not depend on which version of a library is checked out. `postIncr`

@@ -1,21 +1,19 @@
 # Embedding hxScript
 
 Putting the library into a Haxe project: running scripts, giving them your API, letting them subclass
-your classes, and compiling the hot ones at runtime.
+your classes, and compiling them at runtime.
 
-Read [`parity.md`](parity.md) for what a script can and cannot do once it is running, and
-[`../examples/battle/`](../examples/battle) for all of this as a runnable program. That example's
-whole integration is one short file, [`game/Mods.hx`](../examples/battle/game/Mods.hx).
+- [`parity.md`](parity.md) covers what a script can and cannot do once it is running.
+- [`modes.md`](modes.md) covers interpreting versus compiling, and what compiling is worth.
+- [`../examples/battle/`](../examples/battle) is all of this as a runnable program.
+
+---
 
 ## Quick start
-
-Add the library to your build:
 
 ```
 -lib hxscript
 ```
-
-Then run something:
 
 ```haxe
 import hxscript.Script;
@@ -30,55 +28,140 @@ script.call("greet", ["world"]);   // "hello, world"
 script.variables.get("greeted");   // 1
 ```
 
-That is a working embed. Everything below is about widening what a script can reach.
+That is a working embed. If the build also has lime, openfl, flixel, flixel-addons, flixel-ui or
+heaps in it, that same line wires the library for scripting as well.
 
-## What each step costs you
+## Giving scripts your own code
 
-Each row is independent. Take the ones you need.
-
-| You want | You write | Cost |
-| --- | --- | --- |
-| Run scripts | nothing beyond `-lib hxscript` | none |
-| Scripts reach a game library | nothing, if it is lime, openfl, flixel, flixel-addons, flixel-ui or heaps | none |
-| Scripts reach *your* API | `@:scriptAmbient` / `@:scriptStatic`, then `Expose.apply()` | none |
-| Scripts `extend` your classes | a bridge per base, kept in the build | one generated override per inherited method, per base |
-| Scripts run 20x faster | three build flags and one call | a few ms per module, once |
-
-## 1. Install
-
-```
-haxelib install hxscript
-```
-
-Or track the repository rather than a release:
-
-```
-haxelib git hxscript https://github.com/MeguminBOT/hxscript
-```
-
-Then add it to your build, as `-lib hxscript` in an hxml or `<haxelib name="hxscript" />` in a
-`Project.xml`. That is the whole of the setup, **including for the game library you already use**.
-If the build contains lime, openfl, flixel, flixel-addons, flixel-ui or heaps, the same line wires it
-for scripting: the packages are force-compiled so scripts can name the types, a bridge is generated
-per class scripts may extend, the abstracts are given a runtime form, and the members with no runtime
-form get emulations. [`advanced.md`](advanced.md#4-adding-a-game-library) covers adding a library that
-has no preset.
-
-Your own classes still need pointing at, because nothing can guess which of them scripts should
-touch:
+Two defines and two pieces of metadata cover most of it.
 
 ```xml
 <haxedef name="hxscript_host" value="game" />
 ```
 
-`-D hxscript_verbose` prints what the setup did. It is worth reading once.
+That names the packages holding your own classes. The setup reads their source for two marks:
 
-## 2. Give scripts your API
+```haxe
+package game;
 
-There are two separate questions here, and they have different answers: which **values** a script can
-see, and which **types** it can name.
+@:scriptable                     // scripts may `extend` this
+class Entity {
+    public function new(name:String) { ... }
+    public function greet():String { ... }
+}
+```
 
-### Values
+```haxe
+package game;
+
+@:scriptAmbient                  // scripts may name this without importing it
+class Api {
+    @:scriptStatic('build')      // a script writing `build` gets this static
+    public static var version:String;
+}
+```
+
+A script then writes ordinary Haxe:
+
+```haxe
+class Bandit extends game.Entity {
+    public function new() super('bandit');
+    override public function greet():String return 'I ambush you, says ' + name;
+}
+```
+
+and what comes back is a real instance of your class:
+
+```haxe
+var cls:ScriptedClass = cast world.resolve('Bandit');
+var made:game.Entity = cls.typeCreateInstance([]);
+
+made is game.Entity;   // true: hand it to any native code taking an Entity
+made.greet();          // your own call site runs the script's override
+```
+
+No bridge to write, no `include` to add, and no `Expose.apply()` to call. `@:scriptable` is what
+generates the bridge, and the runtime half is installed by the first `Script`, `Module` or
+`Environment` you construct.
+
+> **`@:scriptAmbient` and `@:scriptStatic` are read from source text**, so they only take effect for
+> packages `hxscript_host` names. A type outside those packages is still reachable by an explicit
+> `import` in the script, exactly as in Haxe.
+
+Add `-D hxscript_verbose` once and read what it prints. It lists every library detected, every bridge
+generated and every shim registered, which is the fastest way to confirm the setup did what you think.
+
+---
+
+## Build flags
+
+Everything the library reads. Only the first group is likely to concern you.
+
+### Setup
+
+| Flag | Effect |
+| --- | --- |
+| `-lib hxscript` | the whole of the setup, including for a game library already in the build |
+| `-D hxscript_host=<packages>` | comma-separated packages to scan for `@:scriptable` and `@:scriptAmbient` |
+| `-D hxscript_verbose` | print what the setup wired |
+| `-dce no` | keep the standard-library members scripts reach by reflection. See [dead code elimination](#dead-code-elimination) |
+
+### Behaviour
+
+| Flag | Effect |
+| --- | --- |
+| `-D hxscript_dynamic` | turn off runtime type enforcement, leaving everything dynamic |
+| `-D hxscript_sandbox` | blacklist `Sys`, `sys.io.File`, `sys.io.Process`, `sys.FileSystem` and `sys.net.Socket` |
+| `-D hxscript_profile` | count how often evaluation crosses from one interpreter to another |
+
+### Compiling at runtime
+
+| Flag | Effect |
+| --- | --- |
+| `-D hxscript_cppia` | compile the emitter into the build. Without it every module reports as skipped |
+| `-D scriptable` | hxcpp's own flag, which makes your types reachable from bytecode |
+
+### Turning parts of the setup off
+
+Each disables one step, for a host that would rather do it itself or is minimising binary size.
+
+| Flag | Effect |
+| --- | --- |
+| `-D hxscript_no_autowire` | the whole compile-time setup |
+| `-D hxscript_no_keep` | keeping the standard-library types scripts reach |
+| `-D hxscript_no_bridges` | generating a bridge per scriptable base. The expensive step |
+| `-D hxscript_no_abstracts` | giving native abstracts a runtime form |
+| `-D hxscript_no_shims` | registering emulations for members with no runtime form |
+
+## Metadata
+
+| Mark | Goes on | Effect |
+| --- | --- | --- |
+| `@:scriptable` | a host class | scripts may `extend` it; the bridge is generated |
+| `@:scriptAmbient` | a host type | scripts may name it without importing it |
+| `@:scriptStatic('name')` | a host static | a bare name in a script resolves to it. Without an argument the field's own name is used |
+| `@:snapshot` | a scripted static | its value survives a reload |
+
+## Runtime configuration
+
+`hxscript.Config` is read at every interpreter reset, so set these before the first script runs.
+
+| Field | Effect |
+| --- | --- |
+| `globalVariables` | bare names bound to values, for every script in the process |
+| `globalImports` | types that resolve without an `import`. See the warning below |
+| `globalStatics` | bare names answered by a host static, as `owner.path::field` |
+| `blacklist` | types scripts may not touch, by `ByType`, `ByModule` or `ByPackage` |
+| `strictAccess` | enforce `private` on script-declared members |
+| `typedMode` | runtime type enforcement, on unless `-D hxscript_dynamic` |
+| `callShims` | a closure standing in for a member with no runtime form, keyed `Owner.method` |
+| `preprocessorValues` | values a script's `#if` can test |
+| `typeProxy` | a stand-in class for a native type the target cannot reflect on |
+| `interpClass` | your own `Interp` subclass |
+
+---
+
+## Values a script can see
 
 A script's `variables` map is its global scope:
 
@@ -90,10 +173,9 @@ var notShared = 0;  // a local of the program, not visible
 Declared functions are script variables, which is why `call()` finds them.
 
 **`start()` clears `variables` before it runs.** It calls `setDefaults()`, which wipes the map and
-re-applies the global tables, so anything you set beforehand is gone. Put your values in one of these
-instead:
+re-applies the global tables, so anything you set beforehand is gone. Put values in one of these:
 
-| Scope | Where | When to use it |
+| Scope | Where | When |
 | --- | --- | --- |
 | One world | `world.variables.set(...)` on an `Environment` | the usual choice |
 | Every script in the process | `Config.globalVariables.set(...)` | constants, version numbers |
@@ -106,9 +188,9 @@ world.variables.set("damage", 21);
 new Script("damage * 2", "w", world).start(); // 42
 ```
 
-A bare `Interp` is the one case that needs a step. `Script`, `Module`, `ImportModule` and every
-scripted type call `setDefaults()` for you; the constructor deliberately does not, because all of
-them called it again immediately afterwards. If you build one yourself, seed it:
+A bare `Interp` is the one case needing a step. `Script`, `Module`, `ImportModule` and every scripted
+type call `setDefaults()` for you; the constructor deliberately does not, because all of them called
+it again immediately afterwards. If you build one yourself, seed it:
 
 ```haxe
 var interp = new Interp();
@@ -116,10 +198,9 @@ interp.setDefaults();   // globals, the default import, `trace`
 interp.execute(program);
 ```
 
-### Types
+### Types a script can name
 
-Every type compiled into your program is reachable by an explicit `import` in a script, exactly as in
-Haxe. To make a name resolve without one, register a global import:
+`@:scriptAmbient` covers your own packages. For anything else, register a global import:
 
 ```haxe
 import hxscript.syntax.Expr.ImportMode;
@@ -132,9 +213,9 @@ Config.globalImports.set("game.Entity", INormal);
 > bind `File` to a sandboxed replacement, do not also global-import the real one.
 >
 > A global import that cannot resolve **throws out of the `Script` constructor, uncaught**. Global
-> imports are applied on every interpreter reset, before your error handlers exist, so it escapes into
-> your code as `Type not found: X`. It happens when the name is not in this build, and equally when
-> the name is blacklisted. Guard the registration:
+> imports are applied on every interpreter reset, before your error handlers exist, so it escapes as
+> `Type not found: X`. It happens when the name is not in this build, and equally when it is
+> blacklisted. Guard the registration:
 >
 > ```haxe
 > for (path in myTypes)
@@ -145,105 +226,47 @@ Config.globalImports.set("game.Entity", INormal);
 > A script's own `import` of a missing type is fine by comparison, and is reported through
 > `onProgramError` like any other script error.
 
-### Marking instead of listing
+---
 
-Maintaining those registrations by hand gets old, and it gets worse if you ever compile scripts:
-compiled code has no interpreter to inject into, so the same names have to be declared a second time
-in a second format. `Expose` collects both from the build.
+## Subclassing, without `hxscript_host`
 
-```haxe
-@:scriptAmbient
-class Entity {
-    @:scriptStatic('world')   // a script writing `world` gets this
-    public static var current:World;
-
-    @:scriptStatic            // no name given, so the field's own is used
-    public static var version:Int;
-}
-```
-
-```haxe
-hxscript.macro.Expose.apply();   // once, at startup
-```
-
-`apply()` fills `Config.globalVariables` for interpreted code and the compiler's lists for compiled
-code from the same marks, so a name means the same thing whichever way a script runs. **Filling one
-side only is the trap this exists to avoid**: a script that works until the day it is compiled, or
-the reverse.
-
-A whole package can go in without touching its types, sub-packages included:
-
-```
---macro hxscript.macro.Expose.expose(['game', 'engine.api'])
-```
-
-Neither mark changes what a script is *allowed* to touch. `Config` still decides that. This only says
-where the things it already allows actually live.
-
-## 3. Let scripts subclass your classes
-
-This is what turns "run some expressions" into "mods extend the game".
-
-**Step 1.** Declare a bridge: an empty class extending your base, implementing `hxscript.IScripted`.
+`@:scriptable` is the short way and needs the package scanned. Where that does not fit, because the
+base is in a library you do not own or you want the list somewhere explicit, declare the bridge by
+hand: an empty class extending the base, implementing `hxscript.IScripted`.
 
 ```haxe
 package bridges;
 
-import game.Entity;
-
-class ScriptedEntity extends Entity implements hxscript.IScripted {}
+class ScriptedEntity extends game.Entity implements hxscript.IScripted {}
 ```
 
-That is the whole declaration. The `@:autoBuild` on the interface generates an override of every
-inherited method that dispatches to the script when it defines one and falls through to `super`
-otherwise, and registers `Entity` as extendable.
+The `@:autoBuild` on the interface generates an override of every inherited method that dispatches to
+the script when it defines one and falls through to `super` otherwise.
 
-**Step 2.** Force the bridge into the build. Nothing in your code references it, so the compiler
-never types it and the registration never happens:
+Then force it into the build, since nothing in your code references it:
 
 ```
 --macro include('bridges')
 ```
 
-> Without this you get `Class Entity can't be extended for scripting` the moment a script tries,
+> Without that you get `Class Entity can't be extended for scripting` the moment a script tries,
 > which reads like a library limitation and is a missing build flag.
 
-Scripts then write ordinary Haxe, and what comes back is a real instance of your class:
+Two constraints either way:
 
-```haxe
-class Bandit extends Entity {
-    public function new() super('bandit', 34, 8);
-
-    override public function takeTurn(battle:Battle) {
-        var target = battle.pickFoe(this);
-        target.damage(battle, attack, this);
-    }
-}
-```
-
-```haxe
-var bandit:Entity = cast(world.resolve("Bandit"), ScriptedClass).typeCreateInstance([]);
-
-bandit is Entity;         // true: hand it to any native code taking an Entity
-bandit.damage(battle, 5); // inherited methods work
-bandit.takeTurn(battle);  // your own turn loop runs the script's override
-```
-
-A script can also call `super`, subclass its own scripted classes, and construct native classes the
-host never exposed by name.
-
-Two constraints:
-
-- **One generated override per inherited method** that is not `inline` or `final`. Bridging a class
-  with a large method surface is not free in code size, so bridge what people actually subclass.
+- **One generated override per inherited method** that is not `inline` or `final`, per base. Bridging
+  a class with a large method surface is not free in code size, so bridge what people actually
+  subclass. `-D hxscript_verbose` lists what was generated.
 - **`final` classes cannot be bridged.** That is a useful lever rather than only a limit: keeping a
   hot-path class `final` lets the compiler devirtualise it and keeps it off the scriptable list on
   purpose.
 
-Past a handful of bases, generate the bridges instead of writing them.
-[`advanced.md`](advanced.md#1-generating-bridges) has the macro.
+[`advanced.md`](advanced.md#1-generating-bridges) generates bridges from a list with a macro, for a
+host that wants neither the scan nor the hand-written files.
 
-## 4. Load a folder of scripts
+---
+
+## Loading a folder of scripts
 
 A `Module` is one source file's worth of declarations. An `Environment` is the world they live in and
 what scripts resolve names against.
@@ -269,9 +292,9 @@ for (module in world.modules)
         if (type is ScriptedClass) { ... }
 ```
 
-The example filters those by whether the class descends from a native base and by a static the script
-declares about itself, which is enough for content to announce what it is. Dropping a file into the
-folder becomes the whole installation step. See `Mods.roster`.
+Filter those by whether the class descends from a native base, and by a static the script declares
+about itself. That is enough for content to announce what it is, so dropping a file into the folder
+becomes the whole installation step.
 
 ### What a script can declare
 
@@ -292,10 +315,7 @@ abstract Damage(Int) from Int to Int {
 
 Enums carry parameters and destructure in `switch` with guards. Typedefs are checked structurally, by
 field and by field type, and `?x:Int` may be absent. Interfaces work between scripted classes.
-Abstracts carry their operators, `from`/`to` and `@:forward`, at the cost of a wrapper at runtime, so
-they are worth it for meaning rather than for speed.
-
-Two things to know:
+Abstracts carry their operators, `from`/`to` and `@:forward`, at the cost of a wrapper at runtime.
 
 - **Types from another module need importing**, exactly as in Haxe. One environment is still not one
   scope: `import Combat;` is what brings `Element` in, and a constructor from another module is
@@ -303,7 +323,21 @@ Two things to know:
 - **A script cannot redeclare a field its native base already has.** The error names it, and it is
   usually a collision with something ordinary like `name`.
 
-## 5. Handle errors
+### Reloading
+
+Snapshot the world, drop it, and build a new one from freshly read sources:
+
+```haxe
+env.snapshot();   // preserves statics marked @:snapshot
+env = null;
+```
+
+Track file modification times to decide when. A path-to-timestamp map and a `stale()` check is the
+whole of it.
+
+---
+
+## Errors
 
 Everything that goes wrong, whether parsing, building a type, running or compiling, arrives at
 [`Sink`](../src/hxscript/error/Sink.hx) as a
@@ -351,8 +385,8 @@ into your own code, and passes a non-exception value through unchanged. A script
 (`onExpressionError`, `onInstanceError`, `onStaticError`) render through the same function.
 
 These hooks are empty by default rather than tracing, because everything reaching them has already
-gone to the sink. If you print from one as well, either use `Sink.listen` instead or set
-`Sink.printing` to false.
+gone to the sink. If you print from one as well, either use `Sink.listen` or set `Sink.printing` to
+false.
 
 > **Parse errors are different.** Parsing happens inside the constructor, so a handler assigned
 > afterwards is already too late, and the program is left null:
@@ -373,77 +407,45 @@ gone to the sink. If you print from one as well, either use `Sink.listen` instea
 One gap: a method declared in a `Module` runs on that module's interpreter, and each interpreter owns
 its own stack with no link to its caller, so that frame does not appear in the calling script's trace.
 
-## 6. Reload
+---
 
-Snapshot the world, drop it, and build a new one from freshly read sources:
+## Compiling at runtime
 
-```haxe
-env.snapshot();   // preserves statics marked @:snapshot across the reload
-env = null;
-```
-
-Track file modification times to decide when. A path-to-timestamp map and a `stale()` check is the
-whole of it.
-
-## 7. Lock scripts down
-
-```haxe
-Config.blacklist.get(ByType).push("sys.io.File");   // also ByModule and ByPackage
-Config.strictAccess = true;                          // enforce script-declared `private`
-```
-
-Blacklisting is by name, so use fully-qualified ones. Prefer packaged names: blacklisting a top-level
-type such as `Sys` works, but the default root wildcard import tries to resolve it on every
-interpreter reset and logs a warning each time. **A blacklisted type must never also be a global
-import**, since the import cannot resolve and that failure escapes the constructor uncaught.
-
-## 8. Typed mode
-
-Type annotations are enforced at runtime by default: a wrong-typed assignment, argument or return
-throws rather than silently proceeding. `Config.typedMode = false`, or `-D hxscript_dynamic`, turns
-that off. Numeric correctness, meaning `Int` staying `Int`, is unconditional either way.
-
-A class or static field declared with a type is bound exactly as the identical local is, so an
-abstract-typed field boxes and a later write is checked against the declared type. See
-[`parity.md`](parity.md#1-typed-by-default-with-a-dynamic-escape-hatch).
-
-## 9. Compile scripts at runtime
-
-Optional, and worth about 20x on a script's own work. A module can be translated to cppia bytecode and
-loaded as a real class instead of being walked as a tree. [`modes.md`](modes.md) is the whole picture;
+Optional. A module can be translated to cppia bytecode and loaded as a real class instead of being
+walked as a tree. [`modes.md`](modes.md) covers what that is worth and when it repays the cost;
 this section is the wiring.
 
-**Nothing here happens on its own.** There is no setting that turns compiling on. The defines below
-make the compiler *available*, and that is all. If you never ask, every script is interpreted exactly
-as before. What to compile, when, and what to do about a module the compiler will not take are
-decisions only the host can make.
-
-**Build flags.** All three, and all three are about the host rather than any script:
+**Nothing here happens on its own.** The defines make the compiler *available*, and that is all. If
+you never ask, every script is interpreted exactly as before. What to compile, when, and what to do
+about a module the compiler will not take are decisions only the host can make.
 
 ```
--D scriptable       # hxcpp: makes your own types reachable from bytecode
--D hxscript_cppia   # this library: compiles the emitter in at all
--dce no             # see Troubleshooting
+-D hxscript_cppia
+-D scriptable
+-dce no
 ```
 
-Without `-D hxscript_cppia` every module is reported skipped, which looks exactly like a compiler that
-refuses everything. Check it at startup rather than wondering:
+Check the first one at startup rather than wondering, because without it every module reports as
+skipped, which looks exactly like a compiler that refuses everything:
 
 ```haxe
 if (!hxscript.compile.Cppia.available)
     trace('built without -D hxscript_cppia; everything will be interpreted');
 ```
 
-**The whole integration**, in two calls:
+**The whole integration:**
 
 ```haxe
 import hxscript.compile.Compiler;
 import hxscript.macro.Expose;
 
-Expose.apply();                         // once at startup: see section 2
-var report = Compiler.compile(env);     // once per world, whenever you want it compiled
+// once at startup: the interpreted side is automatic, the compiled side is not
+Compiler.ambient = Expose.ambient();
+Compiler.statics = Expose.statics();
 
-trace('${report.compiled.length} classes compiled in ${report.ms}ms');
+// once per world, whenever you want it compiled
+var report = Compiler.compile(env);
+
 for (skip in report.skipped)
     trace('interpreting ${skip.name}: ${skip.reason}');
 ```
@@ -451,9 +453,14 @@ for (skip in report.skipped)
 `Compiler.compile` offers every module in the world, loads what compiled, registers the classes
 against the world and turns substitution on. A module it cannot take is reported and left to the
 interpreter, so the call is safe on any world and safe to repeat. Calling it again after a reload
-binds what it built last time rather than compiling twice.
+binds what it built last time rather than compiling twice. Both paths produce the same class, so
+nothing downstream needs to know which one it got.
 
-Both paths produce the same class, so nothing downstream needs to know which one it got.
+> **The two `Compiler` lines are the trap.** Anything you give scripts through `Config` or through
+> `@:scriptAmbient` is injected into an *interpreter*, and compiled code does not have one. A bare
+> name that resolved fine interpreted refuses to compile unless the compiler is told where it really
+> lives. Setting one side only gives a script that works until the day it is compiled, or the
+> reverse.
 
 Everything below is the same work spelled out, for a host that wants to compile a subset, cache the
 bytes, or decide something the facade decides for it.
@@ -474,24 +481,22 @@ if (result.bytes != null) {
 `bytes` is null when nothing in the batch compiled. `skipped` always says why, per module, in words
 meant to be read.
 
-**Hand over what you inject.** Anything you give scripts through `Config` goes into an *interpreter*,
-and compiled code does not have one, so a bare name that resolved fine interpreted will refuse to
-compile unless you say where it lives:
+The three optional arguments are what the facade fills in for you:
 
 ```haxe
 Cppia.compile(inputs,
     ['game.Player', 'game.World'],       // ambient: types usable without an import
     ['mods.Shared'],                     // external: scripted classes NOT in this batch
-    ['player=game.Player::current',      // statics: bare name -> a real host static
-     'world=game.World::active']);
+    ['player=game.Player::current']);    // statics: bare name -> a real host static
 ```
 
 `external` names scripted classes in another module or world. A module naming one is left interpreted
 on purpose: cppia resolves a class either inside the module being loaded or as a host class, and a
 scripted class elsewhere is neither, so the reference would fail to link and take the whole load down.
 
-**Tell the world what you compiled.** `Compiler.compile` does this for you, and skipping it is the
-one mistake here that reports success:
+### Registering what you compiled
+
+`Compiler.compile` does this for you, and skipping it is the one mistake here that reports success:
 
 ```haxe
 for (input in inputs) {
@@ -510,10 +515,9 @@ env.substituting = true;   // as soon as ANY class compiled, not once all of the
 
 > Resolving the class yourself is not enough. Every other route to it, whether another script naming
 > it, `new` from interpreted code or a static read through it, goes through the world, and the world
-> knows nothing about what you just built. Skip the registration and everything runs interpreted while
-> your logging reports it as compiled, because nothing errors: the compile succeeded, the module
-> loaded, and the class you resolved is real. It is simply not the one anything else reaches. Check it
-> the first time on the actual class an instance came from.
+> knows nothing about what you just built. Skip the registration and everything runs interpreted
+> while your logging reports it as compiled, because nothing errors: the compile succeeded, the
+> module loaded, and the class you resolved is real. It is simply not the one anything else reaches.
 
 `substituting` is what makes it safe. A compiled class carries its own statics and its own identity,
 so the hazard is a class existing both ways at once with the two halves disagreeing about its state.
@@ -526,14 +530,7 @@ declare several classes, which is what `declaredPaths` is for.
 ### Several modules at once
 
 Pass them in one call. Every module is declared before any is emitted, so they may refer to each other
-in any order:
-
-```haxe
-var result = Cppia.compile([
-    {name: 'mods.Goblin', decls: goblinDecls},
-    {name: 'mods.Boss', decls: bossDecls}
-]);
-```
+in any order.
 
 **Skips cascade.** If `Loot` is refused and `Boss` names it, `Boss` is skipped too, reported as
 `uses mods.Loot, which is interpreted`. A reference that cannot link rejects the whole loaded module,
@@ -543,7 +540,7 @@ throwing everything in at once.
 ### The JIT
 
 Once at startup, before any module loads. It is a process-wide switch in hxcpp rather than a
-per-module one, and costs nothing measurable at load time:
+per-module one:
 
 ```haxe
 cpp.cppia.Host.enableJit(true);
@@ -563,32 +560,31 @@ module.boot();
 ```
 
 Bytes written by one process load in another, and bytes written by one build of the host load in a
-**rebuilt** host. That second property holds because names are resolved when the module loads rather
-than baked in when it was compiled.
+**rebuilt** host, because names are resolved when the module loads rather than baked in when it was
+compiled.
 
 What that defers rather than removes: if a later build drops or renames something a cached module
 used, the failure appears when those bytes load. Key the cache on the source's own hash, and treat a
 load failure as "recompile from source", which is cheap and always correct.
 
-### When not to bother
-
-Compiling costs a few milliseconds against a saving paid per operation, so a module of short handlers
-called a handful of times each will never repay it. [`modes.md`](modes.md) has the break-even.
+---
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `Type not found: X` thrown out of `new Script(...)`, uncaught | a global import that cannot resolve | guard the registration; check the type is in the build and not blacklisted |
-| `Unknown identifier: X` | the type was never compiled in | force the package in, or add it to a `Library` record |
-| `Class X can't be extended for scripting` | the bridge is not in the build | `--macro include('bridges')`, or reference it from real code |
-| `Cannot call null` | dead code elimination removed the member | `-dce no`, or `@:keep` on what scripts need |
+| `Unknown identifier: X` | the type was never compiled in | name its package in `hxscript_host`, or force it in |
+| `Class X can't be extended for scripting` | no bridge | `@:scriptable` on it, or a hand-written bridge kept in the build |
+| `Cannot call null` | dead code elimination removed the member | `-dce no`, or `@:keep` |
 | `Cannot call null` on an `inline extern` | it has no runtime form at all | register a closure in `Config.callShims` |
 | A native abstract's members do nothing | no runtime form | `@:build(hxscript.macro.Abstract.build())` on it |
 | Parse handler never fires | parsing happens in the constructor | construct empty, then `parse()` |
 | Compiles "successfully", still interpreted | the classes were never registered against the world | `env.compiled.set(...)` and `env.substituting = true` |
+| A bare name compiles interpreted but not compiled | `Compiler.ambient` / `statics` were never set | set both from `Expose` |
 | Every module reports skipped | built without the define | `-D hxscript_cppia` |
 | A field errors as already inherited | the script redeclares a base field | rename it, or `override` |
+| The setup did not do what you expected | | `-D hxscript_verbose` prints what it wired |
 
 ### Things that bite people
 
@@ -600,18 +596,11 @@ called a handful of times each will never repay it. [`modes.md`](modes.md) has t
   or move a package and nothing fails at compile time. It fails when a script asks.
 - **Abstracts declared in scripts need no setup.** Only native ones need the build macro.
 
-### What `-dce std` actually removes
+### Dead code elimination
 
-Probed over 83 commonly-scripted standard-library members on hxcpp, asking only whether
-`Reflect.field` finds them, which is how an interpreter reaches them:
-
-| build | reachable | unreachable |
-| --- | --- | --- |
-| `-dce std` (hxcpp's default) | 41 | **42** |
-| `-dce no` | 92 | 3 |
-
-**This is a bare program.** A member survives when something in the build references it statically, so
-a large host keeps far more alive by accident. Take the shape of the result, not the exact set.
+Under `-dce std`, which is hxcpp's default, a method your own code never calls statically is stripped
+from the build, and a script reaching it by reflection gets `Cannot call null`. It looks like a
+library bug and is not.
 
 The library covers the worst of it. `extraParams.hxml` runs
 [`Keep`](../src/hxscript/macro/Keep.hx), which pulls `IntIterator`, `Reflect`, `Type`,
@@ -620,11 +609,12 @@ fields kept, so those work under `-dce std` with nothing from you. It handles tw
 because they are different: **keeping** saves a type already in the build from being stripped
 (`Cannot call null`), while **including** puts one in that nothing referenced at all
 (`Unknown identifier`), and `@:keep` cannot help with the second. `Keep.types` is a plain array you
-can add to, and `-D hxscript_no_keep` turns it off.
+can add to.
 
-Members stripped from a class that is otherwise present, fixed by `-dce no` or `@:keep`:
+Members commonly reached from scripts that a bare program strips, and that `-dce no` or `@:keep`
+restores:
 
-| type | members reflection could not reach |
+| type | members |
 | --- | --- |
 | `IntIterator` | `hasNext`, `next` |
 | `Reflect` | `setField`, `getProperty`, `setProperty`, `fields`, `callMethod`, `isFunction`, `compare`, `copy`, `makeVarArgs` |
@@ -638,12 +628,17 @@ Members stripped from a class that is otherwise present, fixed by `-dce no` or `
 `IntIterator` is the one worth knowing by name: it is why `for (i in 0...n)` fails on hxcpp in several
 hscript-family libraries, and it is a property of how the host was built rather than of the library.
 
-Whole classes never compiled in, where `-dce no` does not help because the type has to be reached
+Whole classes are a separate case, where `-dce no` does not help because the type has to be reached
 somehow: `StringTools` under `-dce std`, and `Lambda`, `haxe.Json` and `haxe.Timer` in a bare program
-under either setting.
+under either setting. Every `Math` and `Std` static, and the `Array` and `String` instance methods,
+survive either way, because the runtime itself references them.
 
-Survived untouched in the same probe: every `Math` and `Std` static, and the `Array` and `String`
-instance methods. The runtime itself references those, so they are never candidates.
+**What survives depends on your build**, since a member lives when anything references it statically,
+so a large host keeps far more alive by accident than a bare one.
+[`../apps/sandbox/`](../apps/sandbox) reports what a script can actually reach in a given build, which
+is the answer that matters rather than a general figure.
+
+---
 
 ## Printing scripts back to source
 
@@ -667,13 +662,11 @@ again produces the same text. Comments are not preserved, since the parser does 
 
 - [`advanced.md`](advanced.md) generates bridges with a macro, makes native abstracts visible,
   subclasses the interpreter, and covers every surface for binding your API.
-- [`modes.md`](modes.md) covers interpreting versus compiling: what compiling buys, what it costs, and
-  how it differs from Haxe's own cppia.
+- [`modes.md`](modes.md) covers interpreting versus compiling, and what each costs.
 - [`parity.md`](parity.md) covers what scripts can do compared to real Haxe.
-- [`performance.md`](performance.md) covers what is fast, what is not, and how to measure without
-  fooling yourself.
+- [`performance.md`](performance.md) covers how to measure a change without fooling yourself.
 - [`../examples/battle/`](../examples/battle) is this guide as a runnable program.
 - [`../examples/workbench/`](../examples/workbench) is the other use of the library, where the program
   itself is written in script.
-- [`../apps/sandbox/`](../apps/sandbox) is an application rather than an example. Its headless check
-  reports what a script can actually reach, which is the practical form of the table above.
+- [`../apps/sandbox/`](../apps/sandbox) is an application rather than an example, and its headless
+  check reports what a script can reach in a real build.

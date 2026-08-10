@@ -45,7 +45,7 @@ interpreting saves you is `-D scriptable` and `-D hxscript_cppia`, and nothing e
 The same declarations compiled to hxcpp's own bytecode. `Compiler.compile(env)` emits a module,
 loads it, and makes its classes the ones the world runs; `Cppia.compile` is the layer under that for
 a host that wants the bytes rather than the effect. Either way what comes back is an ordinary
-`Class<Dynamic>`. [`embedding.md`](embedding.md#9-compile-scripts-at-runtime)
+`Class<Dynamic>`. [`embedding.md`](embedding.md#compiling-at-runtime)
 is the integration.
 
 Needs two defines. `-D scriptable` is hxcpp's, and makes the host's own types reachable from

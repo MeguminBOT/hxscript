@@ -96,7 +96,7 @@ code elimination removes whatever nothing references statically, so a compiled s
 standard-library member finds a null field. `-dce no` is also what the cross-library suite is built
 with, so both documents describe the same build. A probe over 83 commonly-scripted standard-library
 members found 42 unreachable under `-dce std` against 3 under `-dce no`; the catalogue is in
-[`embedding.md`](embedding.md#what--dce-std-actually-removes).
+[`embedding.md`](embedding.md#dead-code-elimination).
 
 `-D scriptable` is a decision about the host binary rather than about any script: it makes the
 host's own types reachable from bytecode, which is what a compiled script calls into. What that
