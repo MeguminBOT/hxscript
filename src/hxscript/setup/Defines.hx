@@ -1,4 +1,4 @@
-package hxscript.tools;
+package hxscript.setup;
 
 #if macro
 import haxe.macro.Context;

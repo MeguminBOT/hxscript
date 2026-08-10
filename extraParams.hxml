@@ -1,9 +1,23 @@
 # Applied automatically to anyone using -lib hxscript.
 #
+# Between them these two are the whole of the setup. A build that adds `-lib hxscript` beside the
+# game library it already had needs nothing else: the libraries in the build are detected, their
+# packages are force-compiled, a bridge is generated per scriptable base, their abstracts are given
+# a runtime form, and the matching runtime half is installed before the first script is parsed.
+#
+# See docs/embedding.md, and src/hxscript/setup/Autowire.hx for the defines that narrow or turn off
+# any part of it.
+
 # Keeps the standard-library types scripts reach by reflection. Dead code elimination decides what to
 # strip by what the COMPILED code references, and a script references nothing at compile time, so
 # under the default -dce std a member no call site happens to use is removed and a script reaching it
-# finds a null field. See docs/embedding.md.
+# finds a null field.
 #
 # -D hxscript_no_keep turns this off.
---macro hxscript.macro.KeepMacro.run()
+--macro hxscript.macro.Keep.run()
+
+# The four setup steps, driven by which game libraries this build has. Runs inside
+# onAfterInitMacros, so it does not matter whether -lib flixel comes before or after -lib hxscript.
+#
+# -D hxscript_no_autowire turns this off.
+--macro hxscript.setup.Autowire.run()
