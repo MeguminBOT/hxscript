@@ -55,7 +55,7 @@ Only same-session pairs appear as verified deltas below.
 The entry below made the default wildcard import cheap to resolve. This one stops resolving it twice.
 
 `Interp.new` ended with `setDefaults()`, and **every one of the five construction sites in the library
-called `setDefaults` again straight afterwards** -- `Module.init`, `Script.start`,
+called `setDefaults` again straight afterwards**: `Module.init`, `Script.start`,
 `ScriptedClass.init`, `ScriptedInterface.init` and the generated instance bridge. Four of them pass
 `wipe: true`, which clears `imports`, `usings` and `variables`, so the constructor's work was thrown
 away; the bridge then copies the class's own tables over the top. The constructor's seeding had no
@@ -92,19 +92,19 @@ Verified deltas (same session):
 
 **This changes the public API**, and is the reason the entry is worth reading rather than just the
 diff: a bare `new Interp()` is now unseeded until something calls `setDefaults()`. Everything the
-library hands out -- `Script`, `Module`, `ImportModule`, scripted classes and interfaces -- already
+library hands out (`Script`, `Module`, `ImportModule`, scripted classes and interfaces) already
 does it, so only a host driving an `Interp` directly is affected, and it is one line. That host is
 still better off than before the change, since it used to seed twice.
 
 For reference, hscript-improved builds its interpreter in 1.24us, which is the whole of its 2x lead
 on `classNew` (4.70us against our 9.4us). At 1.05us we now construct one faster than it does, and the
-remaining gap is its much cheaper class shape -- fields in a map behind `hget`/`hset` rather than real
+remaining gap is its much cheaper class shape, with fields in a map behind `hget`/`hset` rather than real
 fields on a generated bridge, which is also why it loses 6x on method calls.
 
 ### Identifiers sliced out of the source instead of grown a character at a time
 
 The lexer built every identifier with `id += String.fromCharCode(char)`: an allocation per character
-plus a copy of everything read so far, so lexing one was quadratic in its length -- on the most
+plus a copy of everything read so far, so lexing one was quadratic in its length, on the most
 common token in any source. `readPos` already indexes the input, so the whole identifier comes out in
 one `substr`. Applied to identifiers, `@metadata` names and `#if` directives; operators are left
 alone, being one to three characters with backtracking that makes the same change fiddly for nothing.
@@ -147,7 +147,7 @@ independent of how fast that library is otherwise:
 
 Fixed a latent bug the reuse made reachable: the `inTry` path unwound the frame on a caught exception
 but not its declarations, leaving them on `declared` for an enclosing `restore` to roll back once
-`locals` was the CALLER's scope -- writing a callee's parameters into its caller.
+`locals` was the CALLER's scope, so it wrote a callee's parameters into its caller.
 
 ### The default wildcard import, resolved once per world instead of once per interpreter
 
@@ -426,14 +426,14 @@ five string constants (`null`, `never`, `get`, `dynamic`, `default`) to reach `s
 variable, which is nearly every variable. A `l.get == null` / `l.set == null` test in front skips it.
 
 **`locals` was a call into the call stack.** It is a property, and its getter loaded the stack, loaded
-its array, indexed it and null-checked the frame -- on every read, write and declaration. The frames
+its array, indexed it and null-checked the frame, on every read, write and declaration. The frames
 only change in `pushStack`, `shiftStack` and `execute`, so `frameLocals` holds the answer and the
 three of them keep it current. The per-node `stack.length == 0` entry guard became a null test on the
 same field.
 
 **`resolveField` allocated to recognise a type path.** An array, two enum values and a joined string
-per field access, all so `pack.Type.field` could be told from `value.field`. The `value.field` case --
-nearly all of them -- now resolves the base and calls `get` directly, and falls through to the general
+per field access, all so `pack.Type.field` could be told from `value.field`. The `value.field` case,
+which is nearly all of them, now resolves the base and calls `get` directly, and falls through to the general
 path untouched when the base is not a value, which is exactly when a type path is still possible.
 
 Also: `numAdd` tested `is String` twice before reaching the integer case, and `expr` stored two
@@ -476,13 +476,13 @@ Parsing the same 19KB source, best of 5 x 200 parses, three runs:
 | this fork, after | **1.045** | **1.53x** |
 
 Position tracking costs *hscript itself* 1.78x. Against hscript doing the same job this fork was 4%
-slower before the changes below and is now **14% faster**. Positions are not optional here -- error
-reporting, `posInfos` and the call-stack traces a host renders all depend on them -- so the residual
+slower before the changes below and is now **14% faster**. Positions are not optional here, because
+error reporting, `posInfos` and the call-stack traces a host renders all depend on them, so the residual
 1.53x is the price of a feature, not a defect to chase.
 
 The cross-library suite reaches the same conclusion on its own 11.6KB corpus source, where the effect
 is larger still: hscript costs 1.97x with positions on (0.985ms against 0.501ms), and this fork
-parses it in 0.819ms -- **17% faster** than hscript doing the same job. See
+parses it in 0.819ms, **17% faster** than hscript doing the same job. See
 [`benchmarks.md`](benchmarks.md). The two sources disagree on the exact multiple because they exercise
 different syntax; they agree on the direction and on the cause.
 
@@ -495,7 +495,7 @@ What changed, all in the lexer:
   a stack; a recursive-descent parser pushes back on every lookahead that does not match, which is
   most of them.
 - `maybe` compared tokens with `Type.enumEq`, reflectively, on all 71 call sites. 62 of them pass a
-  parameterless constructor, so plain equality is tried first -- it answering true always implies
+  parameterless constructor, so plain equality is tried first, because it answering true always implies
   structural equality, so the reflective path is only reached for the handful carrying a payload.
 
 That is **-17% on parse**, and a further **-1.6%** on the interpreter from the reduced garbage, which
@@ -503,7 +503,7 @@ is worth knowing: allocation during parse is paid for again during execution.
 
 > The -1.6% figure is itself a lesson in the rule at the top of this page. Measured against numbers
 > taken earlier in the same session it looked like **-9.4%**, which would have been a nonsense
-> attribution -- parsing happens outside the benchmark's timer. Re-running both binaries interleaved
+> attribution, because parsing happens outside the benchmark's timer. Re-running both binaries interleaved
 > at the same moment gave -1.6%, and showed the machine had drifted nearly 9% faster in between.
 
 ## Where the time goes now
@@ -541,7 +541,7 @@ Remaining known costs, none currently urgent:
   or on the closure would remove it.
 - `resolveField` still allocates an array and an enum instance for a **chained** access (`a.b.c`), and
   for any base that is not a plain value. Single-hop `value.field` no longer does.
-- **Every AST node is three objects** -- an `Expr`, its `ExprDef`, and a `Position` allocated fresh
+- **Every AST node is three objects**: an `Expr`, its `ExprDef`, and a `Position` allocated fresh
   per node in `getPos`. hscript compiled without `-D hscriptPos` has one: the enum itself is the
   expression. That is three times the parse allocation and an extra indirection on every evaluation,
   and it is the whole of the 4x parse gap in [`benchmarks.md`](benchmarks.md). Folding the position

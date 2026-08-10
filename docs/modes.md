@@ -16,13 +16,13 @@ cppia](#runtime-translation-and-how-it-differs-from-haxes-cppia) is the comparis
 
 ## Contents
 
-- [The three modes](#the-three-modes) -- [interpreted](#interpreted), [cppia](#cppia),
+- [The three modes](#the-three-modes): [interpreted](#interpreted), [cppia](#cppia),
   [cppia with the JIT](#cppia-with-the-jit)
 - [What compiling buys](#what-compiling-buys)
 - [What compiling costs](#what-compiling-costs)
 - [Choosing](#choosing)
 - [Runtime translation, and how it differs from Haxe's cppia](#runtime-translation-and-how-it-differs-from-haxes-cppia)
-  -- [the two pipelines](#the-two-pipelines), [side by side](#side-by-side),
+  covering [the two pipelines](#the-two-pipelines), [side by side](#side-by-side),
   [what it makes possible](#what-runtime-translation-makes-possible),
   [what Haxe's does better](#what-haxes-does-better)
 - [What the compiler refuses](#what-the-compiler-refuses)
@@ -65,14 +65,14 @@ startup, and you cannot have some modules jitted and others not.
 Per **ordinary operation**, about **21x**. Per **call**, about **37x**. Calls gain more because a
 call is where the interpreter does most of its bookkeeping, and bytecode does none of it.
 
-Adding the JIT on top is worth about **1.4x on operations** and **2.8x on calls** -- useful, but not
+Adding the JIT on top is worth about **1.4x on operations** and **2.8x on calls**, which is useful but not
 another order of magnitude, and the spread matters more than the average. It is 16x on a case that is
 nothing but bytecode (`noCall`) and 1.1x on one bounded by string allocation in the runtime
 (`strConcat`), which would not care what drove it. The rule of thumb: the JIT speeds up a script's
 own logic and does nothing for time spent inside the standard library.
 
 **Expect less than this in a real application.** Those figures come from a corpus built to isolate
-the interpreter, where every case is a loop of one operation -- exactly the work bytecode removes. A
+the interpreter, where every case is a loop of one operation, which is exactly the work bytecode removes. A
 script that mostly calls into your engine will move far less, because the part being sped up is not
 where its time goes. Treat them as a ceiling.
 
@@ -137,7 +137,7 @@ This library's, where the script is data your application reads:
 ```
 the user's machine, while it is running
 ------------------------------------------------------------------
-source text  ->  hxscript parser  ->  AST  ->  CppiaEmitter
+source text  ->  hxscript parser  ->  AST  ->  Emitter
              ->  cppia bytes      ->  Module.fromData  ->  boot
              ->  Class<Dynamic>
 ```
@@ -184,19 +184,19 @@ Resolving by name at load has no equivalent, which matters most for exactly the 
 write and cannot rebuild.
 
 **Deciding per module, from data.** Which modules compile can be a setting rather than a build
-configuration -- the engine this was written for takes it from a flag in each pack's manifest.
+configuration. The engine this was written for takes it from a flag in each pack's manifest.
 
 ### What Haxe's does better
 
 Everything else, and it is not close.
 
-It type-checks properly, it optimises -- inlining, constant folding, the analyzer -- and it emits the
+It type-checks properly, it optimises with inlining, constant folding and the analyzer, and it emits the
 whole language it accepts rather than a subset. Where both can compile the same script, expect Haxe's
 output to be the faster of the two. The figures on this page are a claim about this emitter, not
 about cppia.
 
 So: use Haxe's when scripts ship with your application and change when it does. Use this one when
-they do not. They compose, too -- nothing stops a host from loading a `.cppia` built by Haxe and a
+they do not. They compose, too, since nothing stops a host from loading a `.cppia` built by Haxe and a
 module translated at runtime in the same process.
 
 ### Writing cppia by hand
@@ -211,7 +211,7 @@ That is what this emitter is, and it is around 2,900 lines of it.
 
 ## What the compiler refuses
 
-Very little, now. A module is refused whole, before anything runs, and interpreting it is correct --
+Very little, now. A module is refused whole, before anything runs, and interpreting it is correct,
 so a refusal costs speed rather than behaviour.
 
 | refused | note |
@@ -236,7 +236,7 @@ them did during the work.
 ## What is not known
 
 **A script type cannot share a short name with a host type across modules.** Each module resolves
-names its own way, so a module declaring `Damage` beside a host `game.Damage` gets its own -- but
+names its own way, so a module declaring `Damage` beside a host `game.Damage` gets its own, but
 another module in the same batch, which has not imported it, gets the host's. Haxe would need an
 import to see it either way, so this matches, but the emitter has no per-module import table for
 other people's modules and would not notice if you wrote one.

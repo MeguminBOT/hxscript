@@ -29,18 +29,26 @@ haxelib git hxscript https://github.com/MeguminBOT/hxscript
 ```
 
 Then add the library to your build (`-lib hxscript` in an hxml, or
-`<haxelib name="hxscript" />` in a Project.xml). Nothing else is required to start: the table
-of compiled types that scripts resolve names against builds itself the first time it is used.
+`<haxelib name="hxscript" />` in a Project.xml). Nothing else is required: the table of compiled
+types that scripts resolve names against builds itself the first time it is used, and if the build
+also has a game library in it (lime, openfl, flixel, flixel-addons, flixel-ui or heaps) then that
+library is wired for scripting by the same line. See
+[advanced.md §4](advanced.md#4-adding-a-game-library) for what that means and how to add a library
+that has no preset.
 
-In a Lime or OpenFL project that is three lines, and they are the only build-level requirement the
-library has:
+In a Lime or OpenFL project it is one line:
 
 ```xml
 <haxelib name="hxscript" />
+```
 
-<!-- keeps the scripting bridges in the build; see section 6 -->
-<haxeflag name="--macro" value="include('bridges')" />
-<haxeflag name="--macro" value="macros.BridgeMacro.generate()" />
+Your *own* classes still need saying, because nothing can guess which of them scripts are meant to
+touch: `@:scriptAmbient` on a class means scripts may name it without importing it (section 4), and
+`@:scriptable` means they may `extend` it (section 6). Point the setup at the packages holding them
+with one define:
+
+```xml
+<haxedef name="hxscript_host" value="game" />
 ```
 
 [`examples/battle/Project.xml`](../examples/battle/Project.xml) is a complete one, including shipping the scripts as
@@ -96,7 +104,7 @@ Config.globalVariables.set("VERSION", "1.4.0");
 ```
 
 **A bare `Interp`** is the one case that needs a step. `Script`, `Module`, `ImportModule` and every
-scripted type call `setDefaults()` for you, and the constructor deliberately does not -- all of them
+scripted type call `setDefaults()` for you, and the constructor deliberately does not, because all of them
 called it again immediately afterwards, so seeding twice was most of what building an interpreter
 cost. If you construct one yourself and run it directly, seed it first:
 
@@ -152,7 +160,7 @@ through `onProgramError` like any other script error.
 
 Maintaining those registrations by hand gets old, and it gets worse if you ever compile scripts:
 compiled code has no interpreter to be injected into, so the same names have to be declared a second
-time in a second format. `ExposeMacro` collects both from the build.
+time in a second format. `Expose` collects both from the build.
 
 ```haxe
 @:scriptAmbient
@@ -166,7 +174,7 @@ class Entity {
 ```
 
 ```haxe
-hxscript.macro.ExposeMacro.apply();   // once, at startup
+hxscript.macro.Expose.apply();   // once, at startup
 ```
 
 `@:scriptAmbient` marks a type scripts may name; `@:scriptStatic` marks a static they may reach by a
@@ -179,7 +187,7 @@ For an API that is already grouped, a whole package can go in without touching i
 sub-packages come with it:
 
 ```
---macro hxscript.macro.ExposeMacro.expose(['game', 'engine.api'])
+--macro hxscript.macro.Expose.expose(['game', 'engine.api'])
 ```
 
 Neither mark changes what a script is *allowed* to touch. `Config` still decides that, for
@@ -187,13 +195,51 @@ interpreted and compiled code alike; this only says where the things it already 
 live. The lists are readable on their own if you want to add to them by hand:
 
 ```haxe
-Compiler.ambient = ExposeMacro.ambient().concat(['extra.Type']);
-Compiler.statics = ExposeMacro.statics();
+Compiler.ambient = Expose.ambient().concat(['extra.Type']);
+Compiler.statics = Expose.statics();
 ```
 
 ## 5. Errors
 
-Runtime errors are routed, not thrown at your game loop:
+Everything that goes wrong, whether parsing, building a type, running, or the runtime compiler, arrives
+at one place, [`hxscript.error.Sink`](../src/hxscript/error/Sink.hx), as a
+[`Diagnostic`](../src/hxscript/error/Diagnostic.hx) carrying the origin, line, column, the source
+line it happened on, and what usually causes it. Until a host asks for them, they are printed:
+
+```
+Playground.hx:42: character 17
+  var x = foo(;
+              ^
+Unexpected token ';'
+```
+
+`Sink.listen` takes them over, which is what a host with a window rather than a terminal wants:
+
+```haxe
+hxscript.error.Sink.listen(function(d) {
+    myConsole.log(d.toString());     // or read d.origin, d.line, d.hint yourself
+});
+```
+
+Listening also stops the default printing. `Sink.history` holds the last few for a backend with
+nowhere to print at all, and `Diagnostic.phase` says which part of the pipeline produced it, which is
+worth branching on: `PRun` is caused by what a script did, and `PEmit`, `PLoad` and `PSetup` are
+caused by how the host was built.
+
+**The hint is the part that saves the afternoon.** A message names the symptom, and the cause is
+usually somewhere the message does not mention, so `Unknown identifier: FlxG` is a message about a
+script and a problem in a build file. So the diagnostic distinguishes them:
+
+- a name that is in the build but not in scope quotes the `import` to add;
+- a name that is in no build at all says the package was never force-compiled;
+- a misspelling suggests the spelling that exists;
+- a call that resolved to nothing says whether the member is missing or `inline`, and names the
+  `Config.callShims` key to register.
+
+### The per-object hooks
+
+The older routing still works, unchanged, and is the right thing when a host wants to handle one
+script's errors differently from the rest:
 
 ```haxe
 var s = new Script("null.explode();", "boom");
@@ -212,6 +258,10 @@ s.onProgramError = function(e) log(ScriptedClass.describeError(e));
 A scripted class's own hooks (`onExpressionError`, `onInstanceError`, `onStaticError`) render
 through that same function, so an error in a field initializer or a method arrives with its frames
 rather than as a bare value.
+
+These hooks are empty by default rather than tracing, because everything reaching them has already
+gone to the sink. Overriding one is purely additive; if you print from it as well, either use
+`Sink.listen` instead or set `Sink.printing` to false.
 
 One gap: a method declared in a `Module` runs on that module's interpreter, and each interpreter
 owns its own stack with no link to its caller, so that frame does not appear in the calling
@@ -468,7 +518,7 @@ preserved, since the parser does not keep them.
 
 Optional, and worth about 20x on a script's own work. A module can be translated to cppia bytecode
 and loaded as a real class instead of being walked as a tree. [`modes.md`](modes.md) is the whole
-picture -- what it buys, what it costs, and how it differs from Haxe's own cppia; this section is
+picture, covering what it buys, what it costs, and how it differs from Haxe's own cppia; this section is
 just the wiring.
 
 Decide per module. Both paths produce the same class, so nothing downstream needs to know which one
@@ -479,7 +529,7 @@ which the library decides to compile something for you: adding the defines below
 *available*, and that is all. If you never ask, every script is interpreted exactly as before.
 
 That is deliberate. What to compile, when to compile it, and what to do about a module the compiler
-will not take are decisions only the host can make -- at startup, on demand, per mod folder, or from
+will not take are decisions only the host can make, whether at startup, on demand, per mod folder, or from
 a flag in a pack's manifest.
 
 Asking is one call:
@@ -512,10 +562,10 @@ if (!hxscript.compile.Cppia.available)
 
 ```haxe
 import hxscript.compile.Compiler;
-import hxscript.macro.ExposeMacro;
+import hxscript.macro.Expose;
 
 // once, at startup: tells both the interpreter and the compiler where your API lives
-ExposeMacro.apply();
+Expose.apply();
 
 // once per world, whenever you want it compiled
 var report = Compiler.compile(env);
@@ -527,10 +577,10 @@ for (skip in report.skipped)
 
 `Compiler.compile` offers every module in the world, loads what compiled, registers the classes
 against the world, and turns substitution on. A module it cannot take is reported and left to the
-interpreter, so the call is safe on any world and safe to repeat -- calling it again after a reload
+interpreter, so the call is safe on any world and safe to repeat. Calling it again after a reload
 binds the classes it built last time rather than compiling them a second time.
 
-`ExposeMacro.apply()` is the other half, and section [4](#4-exposing-your-types) is where the
+`Expose.apply()` is the other half, and section [4](#4-exposing-your-types) is where the
 annotations live. In short: mark a type `@:scriptAmbient` and a static `@:scriptStatic`, and the
 macro fills in `Config.globalVariables` for interpreted code and the compiler's lists for compiled
 code, from the same marks. Doing only one of those gives you a script that works until the day it is
@@ -566,7 +616,7 @@ meant to be read.
 ### Handing over what you inject
 
 This is the part that catches people, and it follows from what compiled code is. Anything you give
-scripts through `Config` -- preset variables, preset imports -- is injected into an *interpreter*.
+scripts through `Config`, meaning preset variables and preset imports, is injected into an *interpreter*.
 Compiled code does not have one. A bare name that resolved fine interpreted will refuse to compile
 unless you say where it really lives:
 
@@ -590,8 +640,8 @@ Cppia.compile(inputs,
 
 `Compiler.compile` does this for you; this is what it does.
 
-Resolving the class yourself is not enough. Everything else -- other scripts naming that class, `new`
-on it from interpreted code, a static read through it -- still goes through the world, and the world
+Resolving the class yourself is not enough. Everything else, from other scripts naming that class to
+`new` on it from interpreted code to a static read through it, still goes through the world, and the world
 knows nothing about what you just built. Register it:
 
 ```haxe
@@ -611,7 +661,7 @@ env.substituting = true;
 ```
 
 `result.compiled` holds the *module* names you passed in, not class paths, and one module can declare
-several classes -- hence `declaredPaths` to get them.
+several classes, which is what `declaredPaths` is for.
 
 Skip this and everything runs interpreted while your own logging cheerfully reports it as compiled,
 because nothing errors: `Cppia.compile` succeeded, the module loaded, and the class you resolved is
@@ -620,7 +670,7 @@ up, on the actual class an instance came from, rather than trusting that the com
 
 `substituting` is the flag that makes it safe. A compiled class carries its own statics and its own
 identity, so the hazard is a class existing both ways at once with the two halves disagreeing about
-its state. What prevents that is not compiling everything -- it is every reference going the same
+its state. What prevents that is not compiling everything. It is every reference going the same
 way. With the flag on, a scripted class that has a compiled form is reached through the compiled
 form from everywhere, including from code that is still interpreted, so there is only ever one of
 it. Which is why it goes on as soon as one class is compiled, not once they all are.
@@ -639,8 +689,8 @@ var result = Cppia.compile([
 ```
 
 One thing to expect: skips cascade. If `Loot` is refused and `Boss` names it, `Boss` is skipped too,
-reported as `uses mods.Loot, which is interpreted`. That is not a defect -- a reference that cannot
-link rejects the whole loaded module -- but it does mean a batch is only as compilable as the
+reported as `uses mods.Loot, which is interpreted`. That is not a defect, since a reference that cannot
+link rejects the whole loaded module, but it does mean a batch is only as compilable as the
 modules it depends on, so group what belongs together rather than throwing everything in at once.
 
 ### Turning on the JIT
@@ -671,7 +721,7 @@ module.boot();
 
 Tested both ways it matters: bytes written by one process load in another, and bytes written by one
 build of the host load in a **rebuilt** host. That second one is the useful property, and it holds
-because names are resolved when the module loads rather than baked in when it was compiled -- there
+because names are resolved when the module loads rather than baked in when it was compiled, so there
 is no snapshot of your classes inside the file to go stale.
 
 The thing to know is what that defers rather than removes. If a later build of your host drops or
@@ -693,12 +743,12 @@ break-even and the figures behind it.
   it removes more than people expect.
 
   The library covers the worst of it for you. `extraParams.hxml` runs
-  [`KeepMacro`](../src/hxscript/macro/KeepMacro.hx), which pulls `IntIterator`, `Reflect`, `Type`,
+  [`Keep`](../src/hxscript/macro/Keep.hx), which pulls `IntIterator`, `Reflect`, `Type`,
   `haxe.ds.StringMap`, `EReg`, `haxe.ds.List`, `Date` and `Sys` into the build and marks them and
   their fields kept, so those work under `-dce std` without you doing anything. It handles the two
   failures separately, because they are different: keeping saves a type already in the build from
   being stripped (`Cannot call null`), while including puts one in that nothing referenced at all
-  (`Unknown identifier`), and `@:keep` cannot help with the second. `KeepMacro.types` is a plain
+  (`Unknown identifier`), and `@:keep` cannot help with the second. `Keep.types` is a plain
   array you can add to; `-D hxscript_no_keep` turns the whole thing off for a host minimising binary
   size. Everything else in the catalogue below is still yours to keep.
 - **`inline` is not the reason a member is missing.** An `inline` method still has a runtime form;
@@ -711,7 +761,7 @@ break-even and the figures behind it.
   one before giving up. Flixel 6.2 turning `FlxG.sound.playMusic` into this form is the case that
   motivated it.
 - **Native abstracts need a build macro** to have any runtime form:
-  `@:build(hxscript.macro.AbstractMacro.build())`. Without it, scripts see nothing usable. Abstracts
+  `@:build(hxscript.macro.Abstract.build())`. Without it, scripts see nothing usable. Abstracts
   declared *in scripts* need no setup. An abstract-typed **field** boxes the same way a local does,
   so `public var dist:Meters = 5.0` on a scripted class reaches the abstract's methods and
   operators.
@@ -721,7 +771,7 @@ break-even and the figures behind it.
 ### What `-dce std` actually removes
 
 Probed over 83 commonly-scripted standard-library members on hxcpp, asking only whether
-`Reflect.field` finds them -- which is how an interpreter reaches them:
+`Reflect.field` finds them, which is how an interpreter reaches them:
 
 | build | reachable | unreachable |
 | --- | --- | --- |
@@ -753,7 +803,7 @@ several hscript-family libraries, and it is a property of how the host was built
 library. See [`benchmarks.md`](benchmarks.md).
 
 **Whole classes that were never compiled in**, because nothing in the host referenced them.
-`-dce no` does not help -- the type has to be reached somehow, by a real reference or by forcing it
+`-dce no` does not help, because the type has to be reached somehow, by a real reference or by forcing it
 into the build:
 
 - `StringTools` (unresolvable entirely under `-dce std`)
@@ -776,6 +826,10 @@ instance methods. The runtime itself references those, so they are never candida
 - [`../examples/battle/`](../examples/battle) is the worked version of this guide, and is runnable.
 - [`../examples/workbench/`](../examples/workbench) is the other use of the library: a coding
   environment where the program itself is written in script, with list/test/run/watch over it.
+- [`../apps/sandbox/`](../apps/sandbox) is an application rather than an example: a prototyping tool
+  for lime, openfl and flixel, whose projects are folders of `.hx` files read at runtime. Its
+  headless check reports what a script can actually reach, which is the practical form of the
+  dead-code elimination table above.
 - [`checker.md`](checker.md) is the design for a pre-run static checker, and the reasons it is not
   built.
 - [`../test/`](../test) holds the suites, which double as executable documentation of behaviour.

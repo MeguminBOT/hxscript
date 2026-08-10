@@ -61,19 +61,36 @@ or track the repository, for the unreleased state:
 haxelib git hxscript https://github.com/MeguminBOT/hxscript
 ```
 
-Then `-lib hxscript` in your hxml, or `<haxelib name="hxscript" />` in a `Project.xml`. Nothing else
-is required: the table of compiled types that scripts resolve names against builds itself on first
-use, and the standard-library types scripts reach by reflection are kept from being eliminated
-under the default `-dce std` -- see [embedding.md](docs/embedding.md#14-things-that-will-bite-you).
+Then `-lib hxscript` in your hxml, or `<haxelib name="hxscript" />` in a `Project.xml`. **That is the
+whole of the setup, including for the game library you are already using.** If the build has flixel,
+openfl, lime or heaps in it, hxScript notices and does the four things a script needs before it can
+touch them: force-compiles their packages so scripts can name the types, generates a bridge per
+class scripts may `extend`, gives their abstracts a runtime form so `BlendMode.ADD` means something,
+and registers emulations for the `inline` members that have no runtime form to call. None of it is
+mentioned in your build file, and a library it does not know is
+[a record you write once](docs/advanced.md#4-adding-a-game-library).
 
-The [embedding guide](docs/embedding.md) covers the rest -- exposing your API, letting scripts
-subclass your classes, and the things that will bite you.
+```
+-lib hxscript
+-lib flixel        # this line is also the flixel scripting setup
+```
+
+Errors say where and why. A parse error quotes the line with a caret under the column; an unknown
+name says whether it is missing from the build or only from the script's scope, and prints the
+`import` to add; a call that resolved to nothing says whether the member is misspelled or `inline`.
+
+The [embedding guide](docs/embedding.md) covers the rest, from exposing your API to letting scripts
+subclass your classes, along with the things that will bite you.
 
 Two worked examples, both runnable: [`examples/battle/`](examples/battle) is a small turn-based RPG
 whose creatures, bosses and status effects are all scripts, and
 [`examples/workbench/`](examples/workbench) is a coding environment where you write, test and run
-any number of scripts with no rebuild -- the program it ships is a playable game written entirely
-in script.
+any number of scripts with no rebuild. The program it ships is a playable game written entirely in
+script.
+
+And one application: [`apps/sandbox/`](apps/sandbox) is a prototyping tool for lime, openfl and
+flixel, where a project is a folder of `.hx` files it reads at runtime. Drop a folder in, press Run,
+edit, save, watch it reload.
 
 ## How it differs from hscript
 
@@ -149,11 +166,11 @@ var x:Int = 5;        // ok
 var y:Int = 3.5;      // throws: 3.5 should be Int
 var f:Float = 5;      // ok, widened
 trace(cast(5, Int));  // a real checked cast
-trace(5 is Int);      // true -- primitives work as targets
+trace(5 is Int);      // true, primitives work as targets
 ```
 
 **Abstracts**, scripted or compiled. Compiled ones need
-`@:build(hxscript.macro.AbstractMacro.build())`, and an explicit cast to reach the abstract type:
+`@:build(hxscript.macro.Abstract.build())`, and an explicit cast to reach the abstract type:
 
 ```haxe
 var color:FlxColor = cast 0xff0040;
@@ -198,12 +215,12 @@ variables and imports.
 
 Scripts are interpreted by default. A module can instead be translated to
 [cppia](https://haxe.org/manual/target-cppia.html), hxcpp's own bytecode, and loaded as a real
-`Class<Dynamic>` -- worth about **21x per operation** and **37x per call**, and about **30x** and
+`Class<Dynamic>`, worth about **21x per operation** and **37x per call**, rising to about **30x** and
 **104x** with hxcpp's JIT enabled on top.
 
 ```haxe
 // once, at startup: marks on your own types say where your API lives
-hxscript.macro.ExposeMacro.apply();
+hxscript.macro.Expose.apply();
 
 // once per world
 var report = hxscript.compile.Compiler.compile(env);
@@ -213,11 +230,11 @@ trace('${report.compiled.length} compiled, ${report.skipped.length} interpreted'
 Needs `-D hxscript_cppia` here and `-D scriptable` on the host. It is decided per module: whatever
 the emitter cannot express is reported with a reason and left to the interpreter, so turning it on
 cannot break a script that was working. `Cppia.compile` is underneath if you want to drive it
-yourself -- to compile a subset, or to cache the bytecode on disk between launches.
+yourself, whether to compile a subset or to cache the bytecode on disk between launches.
 
 **Haxe can emit cppia too, but only as a build step.** That is the difference this is for. Haxe's
 path compiles a `.hx` file ahead of time, against a snapshot of your host's classes, on a machine
-with the Haxe compiler installed -- so it cannot compile a script that did not exist when you
+with the Haxe compiler installed, so it cannot compile a script that did not exist when you
 shipped. This translates source text in-process, at load, with nothing installed, which is what makes
 it work for mods, in-app editors and anything else a user writes after the fact. The same text still
 runs interpreted, unchanged, so it is a flag rather than a second pipeline.
@@ -228,7 +245,7 @@ subset.
 
 **It is new**, and younger than the rest of the library. What it rests on is
 [`test/SweepTest.hx`](test/SweepTest.hx), which runs 33 constructs interpreted and compiled and
-compares the answers -- currently 0 refused, 0 wrong -- and a differential suite that does the same
+compares the answers, currently 0 refused and 0 wrong, plus a differential suite that does the same
 for the language surface. Three wrong-answer bugs were found that way during the work, which is both
 the reason to trust it as far as you do and the reason not to trust it further.
 
@@ -237,22 +254,25 @@ costs; [mode-benchmarks.md](docs/mode-benchmarks.md) is where the figures come f
 
 ## Documentation
 
-- **[Embedding guide](docs/embedding.md)** -- putting the library in a project, worked end to end in
+- **[Embedding guide](docs/embedding.md)** puts the library in a project, worked end to end in
   [`examples/battle/`](examples/battle).
-- **[Macros, a custom interpreter, and binding your API](docs/advanced.md)** -- generating bridges,
+- **[Macros, a custom interpreter, and binding your API](docs/advanced.md)** covers generating bridges,
   making native abstracts visible, subclassing `Interp`, and every surface for handing your API over.
-- **[Execution modes](docs/modes.md)** -- interpreting, compiling at runtime, or compiling and
+- **[Execution modes](docs/modes.md)** covers interpreting, compiling at runtime, or compiling and
   jitting: how runtime translation differs from Haxe's own cppia, what each needs from your build,
   and when compiling repays what it costs.
-- [Parity with Haxe](docs/parity.md) -- what scripts can and cannot do, and why.
-- [Performance](docs/performance.md) -- what has been optimised, and how to measure without fooling
-  yourself.
-- [Benchmarks](docs/benchmarks.md) -- six libraries in this family on identical scripts.
-- [Mode benchmarks](docs/mode-benchmarks.md) -- the same corpus interpreted, compiled and jitted.
-- [Static checking](docs/checker.md) -- the design for a pre-run checker, and its limits.
-- [Examples](examples) -- [`battle/`](examples/battle) embeds the library in a game;
+- [Parity with Haxe](docs/parity.md) sets out what scripts can and cannot do, and why.
+- [Performance](docs/performance.md) covers what has been optimised, and how to measure without
+  fooling yourself.
+- [Benchmarks](docs/benchmarks.md) puts six libraries in this family through identical scripts.
+- [Mode benchmarks](docs/mode-benchmarks.md) runs the same corpus interpreted, compiled and jitted.
+- [Static checking](docs/checker.md) sets out the design for a pre-run checker, and its limits.
+- [Internals](docs/internals.md) explains why the parts that are not obvious are the way they are,
+  keyed by the file and symbol each note belongs to.
+- [Examples](examples): [`battle/`](examples/battle) embeds the library in a game;
   [`workbench/`](examples/workbench) writes the whole program in script.
-- [Tests](test) -- the suites, which double as executable documentation of behaviour.
+- [Apps](apps): [`sandbox/`](apps/sandbox) is a prototyping tool for lime, openfl and flixel.
+- [Tests](test) holds the suites, which double as executable documentation of behaviour.
 
 ## To-do
 
@@ -273,7 +293,7 @@ with a type binds exactly as the identical local does, so an abstract-typed fiel
 
 **Static extensions**: a `using` on a script-declared class registers, and the receiver is checked
 against the extension's first parameter, so several extensions can share a method name. Compiled
-extensions still cannot be checked -- see below.
+extensions still cannot be checked. See below.
 
 **Printing**: `Printer` prints every module declaration, and printing round-trips through a reparse.
 

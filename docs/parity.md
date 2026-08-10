@@ -126,7 +126,7 @@ Limits worth knowing:
   scripted abstract, bare (every field of the boxed value) or with a list of names.
 
 Native (compiled) abstracts *are* bridged via
-[`src/hxscript/macro/AbstractMacro.hx`](../src/hxscript/macro/AbstractMacro.hx): static and instance fields,
+[`src/hxscript/macro/Abstract.hx`](../src/hxscript/macro/Abstract.hx): static and instance fields,
 `from`/`to` casts, and operator overloading all work. The build macro records which method serves
 each operator and the interpreter dispatches `a + b` to it, so scripts get the same results the
 compiled code does. `@:forward` is the exception: it is honoured on a scripted abstract but not on a
@@ -151,7 +151,7 @@ identity.
 ## 4. Overriding native (bridged) methods has holes
 
 Scripts extend curated native bases through generated bridges
-([`src/hxscript/macro/ScriptedMacro.hx`](../src/hxscript/macro/ScriptedMacro.hx)). A native
+([`src/hxscript/macro/Scripted.hx`](../src/hxscript/macro/Scripted.hx)). A native
 method **cannot be overridden** when it is:
 
 - **`inline`**, which Haxe forbids overriding outright. (Not because the method has no runtime form:
@@ -204,7 +204,7 @@ type in the build, or register a `Config.callShims` entry.
 `StringTools` that resolves fine and is missing exactly the members nobody happened to use.
 
 **`inline` is not a second cause of this, and it is routinely blamed for it.** On hxcpp a `static
-inline` or `inline` member still has a runtime form and reflects fine -- verified by declaring one and
+inline` or `inline` member still has a runtime form and reflects fine, verified by declaring one and
 reading it back with `Reflect.field` under both `-dce std` and `-dce no`. What removes it is DCE
 noticing that every call site inlined it, so nothing references it any more. Only **`extern inline`**
 has genuinely no body to emit; that is the case `Config.callShims` exists for (see section 8).

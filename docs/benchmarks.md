@@ -20,7 +20,7 @@ and hscript-improved pay nothing.
 
 The same applies to features. hscript is small and fast and has no scripted classes.
 hscript-improved has them and instantiates one faster than hxScript does, while hxScript calls
-their methods several times faster -- its classes are generated bridges with real fields, theirs are
+their methods several times faster, because its classes are generated bridges with real fields and theirs are
 a shell over a map. RuleScript adds imports, usings and string interpolation. hscript-iris wraps a
 fast interpreter in a friendlier host API. hxScript and hscript-insanity carry the largest language
 surface (abstracts, modules, typedefs, properties, typed mode) and pay for it per operation.
@@ -85,7 +85,7 @@ emits one machine-readable line:
 R|<lib>|<case>|<tier>|<iterations>|<status>|<median ms>|<value>
 ```
 
-`tier` is `core` or `ext` -- whether the case uses only constructs every library is expected to have.
+`tier` is `core` or `ext`, recording whether the case uses only constructs every library is expected to have.
 It is not the `kind` column in the per-case table below, which `collate.py` derives from the case
 name to decide which average the row feeds.
 
@@ -100,7 +100,7 @@ of 80 small functions, median of 5, no execution.
 
 Under hxcpp's default `-dce std` the compiler eliminates `IntIterator.hasNext` and `next`: every call
 site inlines them, so nothing references them statically. An interpreter reaching them by reflection
-then finds a null field, and `for (i in 0...n)` fails -- **in the host's build, not in the library**.
+then finds a null field, and `for (i in 0...n)` fails, **in the host's build, not in the library**.
 Earlier versions of this page reported that as a defect in four of the six libraries. It was not.
 
 Everything here is therefore built with `-dce no`, which measures the libraries rather than the build
@@ -212,7 +212,7 @@ the second pair is a 2ms slice of it, which is a more realistic allowance once
 rendering and physics are paid for. Whole units, rounded down.
 
 **Derived, not measured at this scale.** Timing a frame's worth of work directly is dominated
-by noise -- a few hundred operations is far too short an interval to time on a preemptive OS.
+by noise, because a few hundred operations is far too short an interval to time on a preemptive OS.
 These come from the 100,000-iteration averages above, which are stable, multiplied back out.
 Read it the other way for a budget you already have in mind:
 
@@ -250,7 +250,7 @@ if you are choosing a library. All were reproduced directly, outside the harness
 recorded as broken on hxcpp in hscript, hscript-improved, RuleScript and hscript-insanity, blamed on
 `IntIterator.hasNext`/`next` being `inline` and having no runtime form. Both halves were wrong. They
 have a runtime form; `-dce std` removes it because every call site inlines them, so nothing references
-them. Build with `-dce no` and all six libraries run `forRange` and `arrayCompr` correctly -- the whole
+them. Build with `-dce no` and all six libraries run `forRange` and `arrayCompr` correctly. The whole
 `CRASH` column this page used to carry is gone, and so are the nine timeouts behind it.
 
 Worth stating plainly because the failure looks exactly like a library defect from the outside: a

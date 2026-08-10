@@ -10,7 +10,7 @@ reason is below.
 
 ## Contents
 
-- [What was measured](#what-was-measured) -- [corpus shape](#the-corpus-is-class-shaped-and-cannot-be-shared-with-the-other-suite),
+- [What was measured](#what-was-measured): [corpus shape](#the-corpus-is-class-shaped-and-cannot-be-shared-with-the-other-suite),
   [how a case is run](#how-a-case-is-run), [build settings](#build-settings-and-why-they-are-not-tuning-choices),
   [scale](#one-scale)
 - [Results](#results)
@@ -106,7 +106,7 @@ costs in binary size is not measured here.
 
 The corpus runs at 100,000 iterations, and unlike the cross-library suite this one has not been
 checked across scales. `SCALES="25000 100000 500000"` runs it at three, which is worth doing before
-trusting any of these figures at a size far from this one -- the compiled modes are fast enough here
+trusting any of these figures at a size far from this one. The compiled modes are fast enough here
 that a fixed per-call cost would show up as scale sensitivity, and nothing has ruled that out.
 
 ## Results
@@ -121,7 +121,7 @@ by degree. `unwind` cases are in neither, being dominated by how each mode imple
 iteration and would describe themselves rather than the mode.
 
 Every case compiled. Nothing in this corpus falls outside what the compiler emits, which is
-a statement about the corpus as much as about the compiler -- it is built from the constructs
+a statement about the corpus as much as about the compiler, since it is built from the constructs
 a hot script actually uses, not from the language's edges.
 
 <details>
@@ -215,7 +215,7 @@ Worth recording, because it is the argument for checking values at all rather th
 The first run of this corpus reported `arrayCompr` as `WRONG (0)` in both compiled columns.
 `[for (k in 0...5) k]` was compiling to `[0]`: the emitter treated a comprehension as an array
 literal holding one element, and that element was the loop. It ran, it returned, and it returned the
-wrong answer -- the failure a benchmark that only timed things would have published as a very fast
+wrong answer, the failure a benchmark that only timed things would have published as a very fast
 result.
 
 Fixed by lowering a comprehension to an accumulator before emitting it, and the fix turned up two
@@ -223,13 +223,13 @@ further defects in the interpreter, both found by comparing the two columns rath
 on its own:
 
 - an empty comprehension returned `[null]`, or threw, instead of `[]`
-- an array literal annotated with a type that has no runtime identity -- `var a:Dynamic = [9]` --
+- an array literal annotated with a type that has no runtime identity, as in `var a:Dynamic = [9]`,
   was rejected outright, because the branch that looks for an empty map to build resolved the
   annotation and treated failure as an error
 
 All three are fixed and the whole corpus now agrees across the three modes. Thirteen further
-comprehension shapes -- filtering, `if`/`else`, nesting, blocks, key-value iteration, empty, null
-elements -- are checked by `MBench.exe <mode> __compr`, which prints them per mode so the compiled
+comprehension shapes (filtering, `if`/`else`, nesting, blocks, key-value iteration, empty, and null
+elements) are checked by `MBench.exe <mode> __compr`, which prints them per mode so the compiled
 columns can be read against the interpreted one.
 
 Two more wrong-answer bugs were caught the same way later, both while widening
@@ -256,7 +256,7 @@ Scales must be multiples of 1000, which is the array length `forArray` walks.
 there is nothing to keep in sync.
 
 [`modes.md`](modes.md) quotes figures from here in prose, so a re-run that moves them wants a read
-through that page too. It is written by hand on purpose -- what a number means is not something a
+through that page too. It is written by hand on purpose, because what a number means is not something a
 collator can generate.
 
 ## What was tested
