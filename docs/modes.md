@@ -45,7 +45,7 @@ interpreting saves you is `-D scriptable` and `-D hxscript_cppia`, and nothing e
 The same declarations compiled to hxcpp's own bytecode. `Compiler.compile(env)` emits a module,
 loads it, and makes its classes the ones the world runs; `Cppia.compile` is the layer under that for
 a host that wants the bytes rather than the effect. Either way what comes back is an ordinary
-`Class<Dynamic>`. [`embedding.md`](embedding.md#13-compiling-scripts-instead-of-interpreting-them)
+`Class<Dynamic>`. [`embedding.md`](embedding.md#9-compile-scripts-at-runtime)
 is the integration.
 
 Needs two defines. `-D scriptable` is hxcpp's, and makes the host's own types reachable from
@@ -228,8 +228,9 @@ Everything else in the language a script actually uses now compiles, including t
 listed as refused until recently: abstracts, pattern matching over structures, arrays and enum
 constructors, map comprehensions, rest arguments, property accessors, key-value loops.
 
-The evidence is [`test/SweepTest.hx`](../test/SweepTest.hx), which runs 33 constructs interpreted and
-compiled and compares the answers. It reports 0 refused and 0 wrong. That is a stronger claim than
+The evidence is [`test/cpp/CppiaTest.hx`](../test/cpp/CppiaTest.hx), which runs 148 constructs
+interpreted and compiled and compares the answers. It reports 0 wrong, and one refusal that is
+asserted on purpose. That is a stronger claim than
 "nothing was refused": a construct that compiled to the wrong thing would show as `WRONG`, and two of
 them did during the work.
 

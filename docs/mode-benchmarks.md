@@ -233,7 +233,7 @@ elements) are checked by `MBench.exe <mode> __compr`, which prints them per mode
 columns can be read against the interpreted one.
 
 Two more wrong-answer bugs were caught the same way later, both while widening
-[`test/SweepTest.hx`](../test/SweepTest.hx) rather than by reasoning about the emitter: an abstract
+[`test/cpp/CppiaTest.hx`](../test/cpp/CppiaTest.hx) rather than by reasoning about the emitter: an abstract
 whose value read back as zero, and a guard that could not see what its pattern had bound. In each
 case one passing test had already made the feature look finished.
 

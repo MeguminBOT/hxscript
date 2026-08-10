@@ -7,7 +7,7 @@ Design rationale lifted out of the source, so the docstrings there stay to a sum
 
 ### class SoundTools
 
-The companion to [`Upload`](Upload.hx), for the same two reasons and in the same shape. A script
+The companion to ``Upload``, for the same two reasons and in the same shape. A script
 that synthesises audio has no way to hand it over: `lime.utils.UInt8Array` is an abstract whose
 only constructor is inline and generic, and `AudioBuffer.data` wants one. Inline members of an
 abstract have no runtime symbol for the interpreter to call and nothing for the runtime compiler
@@ -483,7 +483,7 @@ cross at all.
 An abstract has none of its own. A script handed one sees nothing at all: no methods, no operators, no
 `from`/`to`, and for an `enum abstract` none of its constants, which is why
 `sprite.blend = BlendMode.ADD` fails with `Unknown identifier: ADD` rather than with anything
-about abstracts. [`hxscript.macro.Abstract`](../macro/Abstract.hx) emits a reflectable wrapper
+about abstracts. [`hxscript.macro.Abstract`](../src/hxscript/macro/Abstract.hx) emits a reflectable wrapper
 that gives it one, and `Compiler.addMetadata` applies that from outside, which is the only option
 for a library nobody here owns.
 
@@ -504,17 +504,17 @@ A scan makes the exposed set implicit, so `-D hxscript_verbose` prints it.
 
 ### class Autowire
 
-Three steps, in the order [docs/advanced.md](../../../docs/advanced.md#4-adding-a-game-library)
-puts them. Each is driven by the [`Library`](Library.hx) records for whichever libraries this
+Three steps, in the order [docs/advanced.md](advanced.md#4-adding-a-game-library)
+puts them. Each is driven by the [`Library`](../src/hxscript/setup/Library.hx) records for whichever libraries this
 build has, so adding `-lib heaps` to a build is the whole of turning heaps on.
 
 1. **get the types into the build**, so they exist to be found at all, by including a package,
    by referencing individual modules, or both. `Library.types` is why there are two.
-2. **bridge** the bases scripts may extend. [`Bridges`](Bridges.hx).
-3. **wrap** the abstracts scripts hold as values. [`Abstracts`](Abstracts.hx).
+2. **bridge** the bases scripts may extend. [`Bridges`](../src/hxscript/setup/Bridges.hx).
+3. **wrap** the abstracts scripts hold as values. [`Abstracts`](../src/hxscript/setup/Abstracts.hx).
 
 The fourth step, shimming members with no runtime form, is a closure rather than a name and
-happens at startup in [`Shims`](Shims.hx), reached from [`Boot`](Boot.hx).
+happens at startup in [`Shims`](../src/hxscript/setup/Shims.hx), reached from [`Boot`](../src/hxscript/setup/Boot.hx).
 
 The steps run at two different moments, and which one each belongs to is decided by the API it
 uses rather than by preference. `Compiler.include` and `Compiler.addMetadata` are initialization
@@ -543,7 +543,7 @@ surprising.
 
 Two jobs in one type, and both need it to exist. Bridges and forced modules are only ever
 reached reflectively, so nothing in the program refers to them and dead code elimination takes
-them; the arrays below are real references and stop that. And [`Boot`](Boot.hx) reads the
+them; the arrays below are real references and stop that. And [`Boot`](../src/hxscript/setup/Boot.hx) reads the
 string lists rather than re-deriving them from `Presets`, so a `custom` record the build acted
 on cannot be one the startup forgot, because the two halves read the same answer instead of asking
 the same question twice.
@@ -556,7 +556,7 @@ in the two marks that already exist:
 
 - `@:scriptable` means scripts may extend the class, which needs a bridge generated for it.
 - `@:scriptAmbient` means they may name it without importing it, which
-  [`hxscript.macro.Expose`](../macro/Expose.hx) already arranges, but only for a type the
+  [`hxscript.macro.Expose`](../src/hxscript/macro/Expose.hx) already arranges, but only for a type the
   build actually has. Nothing in a host references a class that only scripts use, so it is
   never typed, so `Expose` never sees the mark and the name silently does not resolve. Both
   marks therefore go into `types`, which is what forces them in.
@@ -569,14 +569,14 @@ has the question the wrong way round.
 
 ### class Boot
 
-[`Autowire`](Autowire.hx) put the library's types in the build, generated the bridges and gave the
+[`Autowire`](../src/hxscript/setup/Autowire.hx) put the library's types in the build, generated the bridges and gave the
 abstracts a runtime form. None of that is visible to a script yet: the names still have to be made
 resolvable, the shims registered, and the compiler told which names are ambient. That is this.
 
 **Nothing calls it.** `Environment`, `Module` and `Script` each call `ensure()` before they do
 anything else, and it is idempotent, so the setup is in place before the first interpreter exists
 no matter which of the three a host reaches for first. That ordering is not decorative:
-[docs/advanced.md](../../../docs/advanced.md#order-of-operations) is a page about it, because a
+[docs/advanced.md](advanced.md#order-of-operations) is a page about it, because a
 module builds its interpreter in its constructor and an interpreter reads `Config` when it resets.
 Anything registered afterwards is registered too late for the modules already made.
 
@@ -597,9 +597,9 @@ it defines one and falls through to `super` otherwise. Without one, a script get
 `Class <base> can't be extended for scripting`.
 
 Written by hand that is one file per base, which is clearer for one or two and unreadable for
-twenty; [`examples/battle/bridges/ScriptedEntity.hx`](../../../examples/battle/bridges/ScriptedEntity.hx)
+twenty; [`examples/battle/bridges/ScriptedEntity.hx`](../examples/battle/bridges/ScriptedEntity.hx)
 is the hand form if you want to see it. Everything here is generated instead, because the list is
-data: a [`Library`](Library.hx) record names its bases and this turns them into classes.
+data: a [`Library`](../src/hxscript/setup/Library.hx) record names its bases and this turns them into classes.
 
 Two details are load-bearing and neither is obvious:
 
@@ -619,7 +619,7 @@ size and willing to give up `extends` gets to say so.
 
 ### typedef Library =
 
-[docs/advanced.md](../../../docs/advanced.md#4-adding-a-game-library) says a script writing
+[docs/advanced.md](advanced.md#4-adding-a-game-library) says a script writing
 `class Boss extends FlxSprite` needs four separate things to be true, and that each one fails
 differently. This is those four, written down per library instead of scattered across a build
 file, a macro and a startup function:
@@ -632,11 +632,11 @@ file, a macro and a startup function:
 | `globals` | names resolve without an import | `Unknown identifier: FlxG` |
 
 The fifth thing, shimming members with no runtime form, is a real closure rather than a name, so
-it lives in [`Shims`](Shims.hx) instead.
+it lives in [`Shims`](../src/hxscript/setup/Shims.hx) instead.
 
 Nothing here imports the library it describes, which is the point: these are strings, so the
 record is readable from a macro *and* from the running program, and the compile-time half and the
-runtime half cannot drift apart. [`Presets`](Presets.hx) holds one of these per library the
+runtime half cannot drift apart. [`Presets`](../src/hxscript/setup/Presets.hx) holds one of these per library the
 library knows, and `Presets.custom` is where a host adds its own.
 
 ## src/hxscript/setup/Presets.hx
@@ -647,7 +647,7 @@ A library switches itself on by being in the build: `-lib flixel` defines `flixe
 `active()` tests. There is no list of enabled libraries to keep in step with the haxelibs, and
 nothing to add to a build file, since `-lib hxscript` beside `-lib flixel` is the whole of it.
 
-The lists were derived the way [docs/advanced.md](../../../docs/advanced.md#a-library-not-covered-here)
+The lists were derived the way [docs/advanced.md](advanced.md#a-library-not-covered-here)
 says to derive them by including the package root with an empty ignore list, building, and adding
 whatever the failure names, against these versions:
 
@@ -673,7 +673,7 @@ describe the host's own classes. Append to it from an init macro, before `Autowi
 
 ### public static final CORE:Library =
 
-[`hxscript.bulk`](../bulk) is the set of paths a script cannot walk at speed, or at all. Every
+The per-library `Tools` classes are the set of paths a script cannot walk at speed, or at all. Every
 accessor on `haxe.io.Bytes` is `inline` and so has no runtime form to call; `openfl.Vector` is
 an abstract, so filling a vertex buffer from a script is one interpreted `push` per float; and
 `lime.utils.UInt8Array`'s only constructor is inline and generic, which closes the audio
@@ -782,7 +782,7 @@ still read like a normal method.
 a library declares all arrive here as one entry that has to sort out which was meant from the
 arguments it got. `clipToWorldRect` below is the shape that takes.
 
-Unlike the three compile-time steps this cannot be driven from [`Library`](Library.hx) records,
+Unlike the three compile-time steps this cannot be driven from [`Library`](../src/hxscript/setup/Library.hx) records,
 because it is code rather than names, and code that references the library's own types. A host
 with one of its own adds it to `Config.callShims` directly; nothing here is in the way.
 
@@ -1173,7 +1173,7 @@ across every module in a world so imports between them line up.
 ### src/hxscript/Module.hx :: public dynamic function onParsingError(e:haxe.Exception):Void {}
 
 Empty by default, and that is not the same as errors being swallowed: everything reaching here
-has already gone to [`hxscript.error.Sink`](error/Sink.hx), which prints it until a host takes
+has already gone to [`hxscript.error.Sink`](../src/hxscript/error/Sink.hx), which prints it until a host takes
 over. Overriding this is purely additive, so a host that prints here as well should either use
 `Sink.listen` instead or set `Sink.printing` to false.
 
@@ -1412,7 +1412,7 @@ cannot be included at all. heaps 2.1.0 is that case: `h2d.Flow` does not compile
 domkit, plain `new h2d.Flow()` fails in a bare project, and enough of `h2d` refers to it that
 including the package is not an option at any ignore list.
 
-[`Autowire`](Autowire.hx) emits an array naming these, which is a real reference and so pulls
+[`Autowire`](../src/hxscript/setup/Autowire.hx) emits an array naming these, which is a real reference and so pulls
 each module in. The cost is that the list is explicit rather than "everything under here".
 
 ### src/hxscript/setup/Presets.hx :: public static var custom:Array<Library> = [];

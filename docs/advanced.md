@@ -122,7 +122,7 @@ shells, it collects what your host offers scripts by name. Mark a type `@:script
 interpreted code and `Compiler.ambient`/`Compiler.statics` for compiled code from the same marks.
 
 Worked through in
-[`embedding.md`](embedding.md#marking-things-instead-of-listing-them), including why filling one side
+[`embedding.md`](embedding.md#marking-instead-of-listing), including why filling one side
 only is a trap.
 
 ## 4. Adding a game library
