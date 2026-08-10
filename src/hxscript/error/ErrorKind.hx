@@ -1,9 +1,9 @@
-package hxscript.runtime;
+package hxscript.error;
 
 import hxscript.syntax.Expr;
 
 /** Every parse/interpret error kind, rendered to text by `Printer.errorToString`. */
-enum Error {
+enum ErrorKind {
 	/** A non-import statement appeared in an `import.hx` prelude. */
 	EImportHx;
 

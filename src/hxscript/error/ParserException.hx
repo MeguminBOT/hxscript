@@ -1,11 +1,9 @@
-package hxscript.runtime;
-
-import hxscript.syntax.Printer;
+package hxscript.error;
 
 /** A parse error, carrying the error kind and its source position. */
 class ParserException extends haxe.Exception {
 	/** The specific error. */
-	public var e:Error;
+	public var e:ErrorKind;
 
 	/** Start byte offset of the offending token. */
 	public var pmin:Int;
@@ -16,8 +14,10 @@ class ParserException extends haxe.Exception {
 	/** The source origin (file path or script name). */
 	public var origin:String;
 
-	/** The 1-based line number. */
-	public var line:Int;
+	/**
+	 * The 1-based line number.
+	 */
+	public var lineNumber:Int;
 
 	/**
 	 * Creates a parser exception.
@@ -28,21 +28,39 @@ class ParserException extends haxe.Exception {
 	 * @param origin The source origin.
 	 * @param line The 1-based line number.
 	 */
-	public function new(e:Error, pmin:Int, pmax:Int, origin:String, line:Int) {
-		// Before the assignments, not after: Java and C# require `super()` to be the first statement
-		// when the base class is a native one, so the message is built from the parameters rather
-		// than by calling `toString()` once the fields are set.
+	public function new(e:ErrorKind, pmin:Int, pmax:Int, origin:String, line:Int) {
 		super(Printer.errorAt(e, origin, line));
 
 		this.e = e;
 		this.pmin = pmin;
 		this.pmax = pmax;
 		this.origin = origin;
-		this.line = line;
+		this.lineNumber = line;
 	}
 
 	/** @return The error formatted with its source position. */
 	public override function toString():String {
 		return Printer.errorToString(this.e, this);
+	}
+
+	/**
+	 * The same error as a diagnostic, with the column and source line worked out.
+	 *
+	 * The column is derived here rather than carried, because the parser already holds the byte
+	 * offset and turning it into a column costs a scan of the source. Carrying it would mean paying
+	 * that on every token to have it on the one that fails.
+	 *
+	 * @return The diagnostic.
+	 */
+	public function toDiagnostic():Diagnostic {
+		return {
+			phase: PParse,
+			message: Printer.errorMessage(e),
+			origin: origin,
+			line: lineNumber,
+			column: Sources.column(origin, pmin),
+			excerpt: Sources.line(origin, lineNumber),
+			hint: Hint.forKind(e)
+		};
 	}
 }
