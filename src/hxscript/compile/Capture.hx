@@ -28,15 +28,8 @@ import hxscript.syntax.Expr;
 
 /**
  * Rewrites captured-and-mutated locals so closures match Haxe semantics.
- *
- * cppia captures by value, copying the outer variable into the closure's frame, so later writes on
- * either side are invisible to the other. A local that is both captured and assigned therefore
- * becomes a one-element array and every mention of it becomes an element access, letting the closure
- * share the cell.
- *
- * Selection is by name rather than by binding, so sibling scopes reusing a name are all boxed.
  */
-class CppiaCapture {
+class Capture {
 	/** Names that were boxed, so a read of one is rewritten into a read of its box. */
 	var boxed:StringMap<Bool>;
 
@@ -56,7 +49,7 @@ class CppiaCapture {
 	 * @return The rewritten body, and the argument names needing a cell on entry.
 	 */
 	public static function transform(args:Array<Argument>, body:Expr):{body:Expr, boxedArgs:Array<String>} {
-		var self:CppiaCapture = new CppiaCapture();
+		var self:Capture = new Capture();
 		var prepared:Expr = self.desugar(body);
 
 		var assigned:StringMap<Bool> = new StringMap();
@@ -97,7 +90,7 @@ class CppiaCapture {
 	 * @return The rewritten subtree.
 	 */
 	public static function substitute(e:Expr, name:String, with:Expr):Expr {
-		var self:CppiaCapture = new CppiaCapture();
+		var self:Capture = new Capture();
 		self.boxed.set(name, true);
 		self.replacement = with;
 		return self.replaceIdent(e);

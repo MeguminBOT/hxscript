@@ -7,7 +7,7 @@ import hxscript.syntax.Expr;
  * Raised when a construct has no cppia spelling, so its module falls back to the interpreter. A
  * normal outcome rather than a failure.
  */
-class CppiaUnsupported {
+class Unsupported {
 	/** What could not be emitted. */
 	public var reason:String;
 

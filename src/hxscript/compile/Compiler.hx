@@ -26,37 +26,13 @@ package hxscript.compile;
 import haxe.ds.StringMap;
 import hxscript.Environment;
 import hxscript.Module;
-import hxscript.compile.CppiaInput;
-import hxscript.compile.CppiaResult;
+import hxscript.compile.Unit;
+import hxscript.compile.Result;
+import hxscript.error.Sink;
 #end
 
 /**
  * Compiles a whole world, and makes the result the thing that runs.
- *
- * `Cppia.compile` turns declarations into bytecode and stops there, which leaves an embedder holding
- * several steps that all have to be right: load the module, resolve every class it declared, record
- * each against the world it came from, and turn substitution on. Miss the recording and nothing
- * errors -- the compile succeeded, the module loaded, the class is real, and every script still runs
- * interpreted while the host reports otherwise. This does those steps.
- *
- * One call per world:
- *
- * ```haxe
- * Compiler.ambient = ['game.Player', 'game.World'];
- * Compiler.statics = ['player=game.Player::current'];
- *
- * var report = Compiler.compile(env);
- * trace('${report.compiled.length} compiled, ${report.skipped.length} interpreted');
- * ```
- *
- * Safe to call on a world with nothing left to do, and safe to call again after a reload: classes
- * compiled for an earlier world are handed to the new one rather than compiled a second time, which
- * they could not be anyway -- offered again in a batch of their own they can no longer see the
- * classes they were compiled beside, so they would be refused and reported as interpreted while
- * their compiled form sat right there.
- *
- * Nothing here happens on its own. The library never decides to compile something; a host calls
- * this when it wants it, on the worlds it wants it for.
  */
 class Compiler {
 	/** Whether this build can compile at all, which `-D hxscript_cppia` decides. */
@@ -70,12 +46,16 @@ class Compiler {
 	#if hxscript_cppia
 	/**
 	 * Whether to turn hxcpp's JIT on before the first module loads.
-	 *
-	 * It is a process-wide switch rather than a per-module one, so it is set once and never unset.
-	 * Leaving it on is the usual choice: it costs nothing measurable at load time and is worth
-	 * several times again on a script's own logic.
 	 */
 	public static var jit:Bool = true;
+
+	/**
+	 * Whether to split a batch the loader rejected, instead of giving up on all of it.
+	 *
+	 * On by default. The cost is extra compiles on a path that is already failing; the benefit is
+	 * that one bad class costs one class rather than the whole world's speedup.
+	 */
+	public static var narrowOnFailure:Bool = true;
 
 	/** Types a script may name without importing them, as full paths. */
 	public static var ambient:Array<String> = [];
@@ -98,6 +78,9 @@ class Compiler {
 	/** Whether the JIT has been switched on. It is process-wide, so this happens at most once. */
 	static var jitStarted:Bool = false;
 
+	/** Whether the JIT has already been given up on, so the retry is attempted at most once. */
+	static var jitDropped:Bool = false;
+
 	/**
 	 * Compiles what it can of a world and binds the results into it.
 	 *
@@ -107,8 +90,8 @@ class Compiler {
 	 *        a class split into its own batch can no longer see the ones it was written beside.
 	 * @return What compiled, what did not and why, and how long it took.
 	 */
-	public static function compile(env:Environment, ?modules:Array<Module>):CompileReport {
-		var report:CompileReport = {compiled: [], skipped: [], ms: 0, substituting: false};
+	public static function compile(env:Environment, ?modules:Array<Module>):Report {
+		var report:Report = {compiled: [], skipped: [], failed: [], ms: 0, bytes: 0, substituting: false};
 
 		if (env == null || !Cppia.available)
 			return report;
@@ -120,7 +103,6 @@ class Compiler {
 		}
 
 		var fresh:Array<Module> = [];
-		var inputs:Array<CppiaInput> = [];
 
 		for (module in modules) {
 			if (module == null || module.decls == null)
@@ -129,61 +111,22 @@ class Compiler {
 			if (bind(module, env)) {
 				for (path in Cppia.declaredPaths(module.decls))
 					report.compiled.push(path);
+
 				continue;
 			}
 
 			fresh.push(module);
-			inputs.push({name: module.name, decls: module.decls});
 		}
 
-		if (inputs.length > 0) {
+		if (fresh.length > 0) {
 			if (jit && !jitStarted) {
 				jitStarted = true;
 				cpp.cppia.Host.enableJit(true);
 			}
 
 			var started:Float = haxe.Timer.stamp();
-
-			// Anything scripted that this batch does not itself declare is outside it, and a module
-			// naming one has to stay interpreted: cppia links a class either inside the module being
-			// loaded or as a host class, and a scripted class elsewhere is neither.
-			//
-			// Two sources, and the second is easy to miss. Classes already compiled for another world
-			// are obviously outside. So is every other module of *this* world when only a subset was
-			// offered, which is the normal case: a state re-entered later brings its own batch, and
-			// the classes it was written beside are not in it. Leaving those out does not make them
-			// reachable, it only stops the compiler knowing they are not, so instead of refusing the
-			// module it emits a direct link that resolves to nothing and rejects the whole batch at
-			// load with a bad link naming a class that plainly exists.
-			var outside:Array<String> = [];
-			for (path in built.keys())
-				outside.push(path);
-
-			var mine:Map<String, Bool> = new Map();
-			for (input in inputs)
-				for (path in Cppia.declaredPaths(input.decls))
-					mine.set(path, true);
-
-			for (module in env.modules) {
-				if (module == null || module.decls == null)
-					continue;
-
-				for (path in Cppia.declaredPaths(module.decls)) {
-					if (!mine.exists(path) && outside.indexOf(path) < 0)
-						outside.push(path);
-				}
-			}
-
-			var result:CppiaResult = Cppia.compile(inputs, ambient, outside, statics);
+			batch(fresh, env, report, true);
 			report.ms = (haxe.Timer.stamp() - started) * 1000;
-
-			for (entry in result.skipped) {
-				refused.set(entry.name, entry.reason);
-				report.skipped.push(entry);
-			}
-
-			if (result.bytes != null)
-				load(result.bytes, fresh, result, env, report);
 		}
 
 		env.substituting = anyBound(env);
@@ -192,17 +135,113 @@ class Compiler {
 	}
 
 	/**
+	 * Compiles one group of modules together, splitting it if the loader will not take the result.
+	 *
+	 * @param group The modules to offer together.
+	 * @param env The world to bind into.
+	 * @param report The report being filled.
+	 * @param whole Whether this is the original batch, which is the only place the JIT is worth
+	 *        blaming: a fault that survives to a single module is the module's.
+	 */
+	static function batch(group:Array<Module>, env:Environment, report:Report, whole:Bool):Void {
+		if (group.length == 0)
+			return;
+
+		var inputs:Array<Unit> = [for (module in group) {name: module.name, decls: module.decls}];
+		var result:Result = Cppia.compile(inputs, ambient, outside(group, env), statics);
+
+		if (result.bytes == null) {
+			collect(result, report);
+			return;
+		}
+
+		var fault:String = load(result, group, env, report);
+
+		if (fault == null) {
+			report.bytes += result.bytes.length;
+			collect(result, report);
+			return;
+		}
+
+		if (whole && retryWithoutJit(result, group, env, report))
+			return;
+
+		if (group.length == 1 || !narrowOnFailure) {
+			for (module in group)
+				rejected(module.name, fault, group.length > 1);
+
+			for (module in group)
+				report.failed.push({name: module.name, reason: fault});
+
+			return;
+		}
+
+		var mid:Int = group.length >> 1;
+		batch(group.slice(0, mid), env, report, false);
+		batch(group.slice(mid), env, report, false);
+	}
+
+	/**
+	 * Loads the same bytecode again with the JIT off, once per process.
+	 *
+	 * @param result The bytecode that was refused.
+	 * @param group The modules it holds.
+	 * @param env The world to bind into.
+	 * @param report The report being filled.
+	 * @return Whether the retry loaded.
+	 */
+	static function retryWithoutJit(result:Result, group:Array<Module>, env:Environment, report:Report):Bool {
+		if (!jit || !jitStarted || jitDropped)
+			return false;
+
+		jitDropped = true;
+
+		try {
+			cpp.cppia.Host.enableJit(false);
+		} catch (e:haxe.Exception) {
+			return false;
+		}
+
+		if (load(result, group, env, report) != null) {
+			jit = false;
+			return false;
+		}
+
+		jit = false;
+		collect(result, report);
+
+		Sink.report({
+			phase: PJit,
+			message: 'this batch loads without the hxcpp JIT and is refused with it on; the JIT is off for the rest of this process',
+			hint: 'A JIT fault is cumulative rather than caused by one construct, so there is no module to\n'
+			+ 'blame and nothing to fix in a script. Compiled code without the JIT is still much faster\n'
+			+ 'than interpreted. Set Compiler.jit to false at startup to skip this retry entirely.',
+			fatal: false
+		});
+
+		return true;
+	}
+
+	/**
 	 * Loads a compiled batch and records every class it produced.
 	 *
-	 * @param bytes The compiled module.
+	 * @param result The compiled bytecode and what went into it.
 	 * @param offered The modules that went into it.
-	 * @param result What the compiler said about them.
 	 * @param env The world to bind them into.
 	 * @param report The report being filled.
+	 * @return Null when it loaded, or the loader's complaint.
 	 */
-	static function load(bytes:haxe.io.Bytes, offered:Array<Module>, result:CppiaResult, env:Environment, report:CompileReport):Void {
-		var loaded:cpp.cppia.Module = cpp.cppia.Module.fromData(bytes.getData());
-		loaded.boot();
+	static function load(result:Result, offered:Array<Module>, env:Environment, report:Report):Null<String> {
+		var loaded:cpp.cppia.Module;
+
+		try {
+			loaded = cpp.cppia.Module.fromData(result.bytes.getData());
+			loaded.boot();
+		} catch (e:haxe.Exception) {
+			return e.message;
+		} catch (e:Dynamic) {
+			return Std.string(e);
+		}
 
 		for (module in offered) {
 			if (result.compiled.indexOf(module.name) < 0)
@@ -218,15 +257,94 @@ class Compiler {
 				report.compiled.push(path);
 			}
 		}
+
+		return null;
+	}
+
+	/**
+	 * Records why the loader would not take a module, and says so.
+	 *
+	 * @param name The module's name.
+	 * @param fault The loader's complaint.
+	 * @param shared Whether the fault was still shared by several modules when it was given up on,
+	 *        in which case it names a group rather than a culprit.
+	 */
+	static function rejected(name:String, fault:String, shared:Bool):Void {
+		refused.set(name, fault);
+
+		Sink.report({
+			phase: PLoad,
+			message: 'the bytecode loader refused $name: $fault',
+			hint: shared ? 'Reported against every module in the batch, because narrowing was off. Set\n'
+				+ 'Compiler.narrowOnFailure to true to find which one it is.' : 'The module is left interpreted and everything else still runs. The loader names the fault\n'
+				+ 'and nothing inside the module, so the construct has to be found by elimination: an\n'
+				+ 'assignment or increment through a chain of fields is the usual cause of a Set or\n'
+				+ 'increment complaint, and a link complaint means a class this module names is neither in\n'
+				+ 'the batch nor a host class.',
+			fatal: false
+		});
+	}
+
+	/**
+	 * Moves an attempt's emitter refusals into the report and reports them once.
+	 *
+	 * Only called for an attempt that got as far as loading, or that produced nothing at all. A batch
+	 * that was split has its refusals recounted by its halves, and keeping the parent's would report
+	 * each of them twice.
+	 *
+	 * @param result The attempt.
+	 * @param report The report being filled.
+	 */
+	static function collect(result:Result, report:Report):Void {
+		for (entry in result.skipped) {
+			refused.set(entry.name, entry.reason);
+			report.skipped.push(entry);
+
+			Sink.report({
+				phase: PEmit,
+				message: 'left interpreted: ' + entry.reason,
+				origin: entry.origin,
+				line: entry.line,
+				excerpt: entry.origin == null || entry.line <= 0 ? null : hxscript.error.Sources.line(entry.origin, entry.line),
+				hint: 'A construct with no bytecode spelling is a normal outcome, not a failure: the module\n'
+				+ 'keeps running interpreted and everything else still compiles.',
+				fatal: false
+			});
+		}
+	}
+
+	/**
+	 * The scripted classes a batch must not link directly to.
+	 *
+	 * @param group The modules being offered.
+	 * @param env The world they belong to.
+	 * @return The paths to treat as external.
+	 */
+	static function outside(group:Array<Module>, env:Environment):Array<String> {
+		var out:Array<String> = [];
+		for (path in built.keys())
+			out.push(path);
+
+		var mine:Map<String, Bool> = new Map();
+		for (module in group)
+			for (path in Cppia.declaredPaths(module.decls))
+				mine.set(path, true);
+
+		for (module in env.modules) {
+			if (module == null || module.decls == null)
+				continue;
+
+			for (path in Cppia.declaredPaths(module.decls)) {
+				if (!mine.exists(path) && out.indexOf(path) < 0)
+					out.push(path);
+			}
+		}
+
+		return out;
 	}
 
 	/**
 	 * Hands a world the classes of a module that was compiled for an earlier one.
-	 *
-	 * Skipping the work is not the same as skipping the binding. `built` outlives any one world, so a
-	 * world made after a reload would otherwise find everything already compiled and be handed
-	 * nothing: the classes exist, every report says so, and none of them is what runs, because the
-	 * interpreter reads the world's own map and that map is empty.
 	 *
 	 * @param module The module to check.
 	 * @param env The world to bind into.
@@ -250,16 +368,6 @@ class Compiler {
 
 	/**
 	 * Whether anything in a world has a compiled form, which is when substitution has to be on.
-	 *
-	 * The hazard is a class existing both ways at once, the two halves disagreeing about statics and
-	 * identity. What rules that out is not every class being compiled, it is every reference going
-	 * the same way, including from the classes still interpreted. So this asks whether there is
-	 * anything to substitute at all -- and a module left interpreted has nothing to substitute to,
-	 * since the emitter refuses whatever names it.
-	 *
-	 * Read from the world's own map rather than from `built`. The two differ exactly when a world was
-	 * handed nothing because the work was done for a previous one, and answering from `built` there
-	 * announces a substitution that cannot happen.
 	 *
 	 * @param env The world to weigh.
 	 * @return Whether any of its classes has a compiled form.
@@ -320,24 +428,8 @@ class Compiler {
 	 * @param modules Unused.
 	 * @return An empty report.
 	 */
-	public static function compile(env:Dynamic, ?modules:Dynamic):CompileReport {
-		return {compiled: [], skipped: [], ms: 0, substituting: false};
+	public static function compile(env:Dynamic, ?modules:Dynamic):Report {
+		return {compiled: [], skipped: [], failed: [], ms: 0, bytes: 0, substituting: false};
 	}
 	#end
-}
-
-/** What one call to `Compiler.compile` did. */
-@:structInit
-class CompileReport {
-	/** Scripted paths that have a compiled form, including ones bound from an earlier world. */
-	public var compiled:Array<String>;
-
-	/** Modules left to the interpreter, each with the reason. */
-	public var skipped:Array<{name:String, reason:String}>;
-
-	/** How long compiling took, in milliseconds. Zero when there was nothing to do. */
-	public var ms:Float;
-
-	/** Whether the world now reaches its scripted classes through their compiled form. */
-	public var substituting:Bool;
 }

@@ -22,18 +22,12 @@
 
 package hxscript.compile;
 
-import hxscript.compile.CppiaInput;
-import hxscript.compile.CppiaResult;
+import hxscript.compile.Unit;
+import hxscript.compile.Result;
 import hxscript.syntax.Expr;
 
 /**
  * Compiles hxscript modules to cppia bytecode, which hxcpp loads and JIT-compiles at runtime.
- *
- * Optional in two senses: nothing here is built unless `-D hxscript_cppia` is set, and any module
- * the emitter cannot express is reported in `skipped` and left to the interpreter rather than
- * failing the batch.
- *
- * Loading the result needs a host built with `-D scriptable`, via `cpp.cppia.Module.fromData`.
  */
 class Cppia {
 	/** Whether this build can compile at all. */
@@ -83,30 +77,80 @@ class Cppia {
 	}
 
 	/**
+	 * Members whose declared type is `Bool`, per class the module defines.
+	 *
+	 * @param decls The module's declarations.
+	 * @return Class path to the set of its member names declared `Bool`, omitting classes with none.
+	 */
+	public static function booleans(decls:Array<ModuleDecl>):Map<String, Map<String, Bool>> {
+		var pack:String = '';
+		var found:Map<String, Map<String, Bool>> = [];
+
+		for (decl in decls) {
+			switch (decl.d) {
+				case DPackage(path):
+					pack = path.join('.');
+				case DClass(c) | DInterface(c):
+					var members:Map<String, Bool> = [];
+
+					for (field in c.fields) {
+						var declared:Null<CType> = switch (field.kind) {
+							case KVar(v): v.type;
+							case KFunction(fn): fn.ret;
+						};
+
+						if (isBool(declared))
+							members.set(field.name, true);
+					}
+
+					if (members.keys().hasNext())
+						found.set(pack.length > 0 ? pack + '.' + c.name : c.name, members);
+				case _:
+			}
+		}
+
+		return found;
+	}
+
+	/**
+	 * Whether a written type annotation is a boolean.
+	 *
+	 * `Null<Bool>` counts. It is emitted as `Dynamic`, which keeps the null apart from the false, but
+	 * what fills it is still an integer slot, so a `true` returned from one arrives boxed as `1`.
+	 * Restoring it is the same job and the null passes through untouched.
+	 *
+	 * @param t The annotation, or null when there was none.
+	 * @return Whether it names `Bool` or a nullable one.
+	 */
+	static function isBool(t:Null<CType>):Bool {
+		if (t == null)
+			return false;
+
+		return switch (t) {
+			case CTPath(['Bool'], _): true;
+			case CTPath(['Null'], params): params != null && params.length == 1 && isBool(params[0]);
+			case CTParent(inner) | CTOpt(inner) | CTNamed(_, inner): isBool(inner);
+			case _: false;
+		}
+	}
+
+	/**
 	 * Drops modules that name a class which is not going to be there.
-	 *
-	 * A reference to a refused class cannot link, and the loader rejects the WHOLE module over it, so
-	 * one refusal would otherwise cost every class in the batch. Dropping the modules that lean on it
-	 * keeps them interpreted together, which is where their dependency already is. Repeats until
-	 * nothing more falls out, since dropping one module can strand another.
-	 *
-	 * Presence is keyed by the CLASSES on offer rather than by module name, since a reference names a
-	 * class and a module may declare several under a name of its own.
 	 *
 	 * @param accepted The modules that compiled on their own.
 	 * @param skipped Receives each module dropped here, with its reason.
 	 * @param uses What each module referenced, by module name.
 	 * @return The modules that can be emitted together.
 	 */
-	static function dropDanglingUsers(accepted:Array<CppiaInput>, skipped:Array<{name:String, reason:String}>,
-			uses:Map<String, Array<String>>):Array<CppiaInput> {
+	static function dropDanglingUsers(accepted:Array<Unit>, skipped:Array<Skip>,
+			uses:Map<String, Array<String>>):Array<Unit> {
 		while (true) {
 			var present:Map<String, Bool> = new Map();
 			for (input in accepted)
 				for (path in declaredPaths(input.decls))
 					present.set(path, true);
 
-			var survivors:Array<CppiaInput> = [];
+			var survivors:Array<Unit> = [];
 			var dropped:Bool = false;
 
 			for (input in accepted) {
@@ -140,10 +184,6 @@ class Cppia {
 	/**
 	 * Compiles as many of the given modules as it can.
 	 *
-	 * All modules are declared before any is emitted, so they may refer to each other in any order.
-	 * Emission runs against a throwaway writer first, since a module that failed part-way through
-	 * would otherwise leave a corrupt record behind.
-	 *
 	 * @param inputs The modules to compile.
 	 * @param ambient Types the host makes available without an import.
 	 * @param external Scripted classes the host has elsewhere but that are NOT in this batch. A
@@ -155,15 +195,15 @@ class Cppia {
 	 *        so it reaches them where they really live.
 	 * @return The compiled module, and which inputs were compiled or skipped.
 	 */
-	public static function compile(inputs:Array<CppiaInput>, ?ambient:Array<String>, ?external:Array<String>, ?statics:Array<String>):CppiaResult {
+	public static function compile(inputs:Array<Unit>, ?ambient:Array<String>, ?external:Array<String>, ?statics:Array<String>):Result {
 		#if hxscript_cppia
-		var skipped:Array<{name:String, reason:String}> = [];
-		var accepted:Array<CppiaInput> = [];
+		var skipped:Array<Skip> = [];
+		var accepted:Array<Unit> = [];
 
 		var uses:Map<String, Array<String>> = new Map();
 
 		for (input in inputs) {
-			var trial:CppiaEmitter = new CppiaEmitter();
+			var trial:Emitter = new Emitter();
 			if (ambient != null)
 				trial.ambient(ambient);
 			if (external != null)
@@ -178,8 +218,13 @@ class Cppia {
 				trial.finish();
 				uses.set(input.name, trial.references());
 				accepted.push(input);
-			} catch (e:CppiaUnsupported) {
-				skipped.push({name: input.name, reason: e.reason});
+			} catch (e:Unsupported) {
+				skipped.push({
+					name: input.name,
+					reason: e.reason,
+					origin: e.pos == null ? null : e.pos.origin,
+					line: e.pos == null ? 0 : e.pos.line
+				});
 			}
 		}
 
@@ -188,7 +233,7 @@ class Cppia {
 		if (accepted.length == 0)
 			return {bytes: null, compiled: [], skipped: skipped};
 
-		var emitter:CppiaEmitter = new CppiaEmitter();
+		var emitter:Emitter = new Emitter();
 		if (ambient != null)
 			emitter.ambient(ambient);
 		if (external != null)
@@ -211,7 +256,7 @@ class Cppia {
 
 		return {bytes: emitter.finish(), compiled: compiled, skipped: skipped};
 		#else
-		var skipped:Array<{name:String, reason:String}> = [];
+		var skipped:Array<Skip> = [];
 		for (input in inputs)
 			skipped.push({name: input.name, reason: 'built without -D hxscript_cppia'});
 		return {bytes: null, compiled: [], skipped: skipped};

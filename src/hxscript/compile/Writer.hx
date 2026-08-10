@@ -31,7 +31,7 @@ import haxe.io.Bytes;
  * that reference both by index. Records are buffered so the header can be written once the pools
  * have settled.
  */
-class CppiaWriter {
+class Writer {
 	/** The string pool, in the order the header writes it. */
 	var strings:Array<String>;
 
@@ -115,7 +115,6 @@ class CppiaWriter {
 	 */
 	public inline function token(t:String):Void {
 		if (echo != null) {
-			// Newline as a code rather than an escape: one per token is what makes the echo readable.
 			echo.addChar(10);
 			echo.add(t);
 		}
