@@ -5,21 +5,20 @@
     "license": "MIT",
     "tags": [
         "hscript",
-        "parser",
         "interpreter",
         "scripting",
         "script",
+        "parser",
+        "modding",
         "macro",
         "cppia",
-        "compiler",
-        "JIT",
+        "bytecode",
+        "hxcpp",
         "runtime",
-        "cross",
-        "utility",
         "game"
     ],
-    "version": "1.1.2",
-    "releasenote": "Three lexer and typing fixes. A dollar sign that begins no interpolation is now a literal dollar without consuming the character after it; previously the character was appended blind, so a string ending in a dollar swallowed its own closing quote and ran on to the next quote elsewhere in the file, reporting the error on an unrelated line. Unary bit-complement is now lexed outside a regex, where it was only ever reached through the regex path and otherwise rejected with the position of the character after it. Nested array literals now carry their declared element type down to the inner arrays, so an array of arrays no longer erases to objects one level in and read back as zeroes under cppia.",
+    "version": "2.0.0",
+    "releasenote": "BREAKING: modules renamed and regrouped. The two most likely to be in your build file are hxscript.macro.AbstractMacro, now hxscript.macro.Abstract, and ExposeMacro, now Expose. The exceptions moved to hxscript.error, and hxscript.ImportModule to hxscript.runtime. Script, Environment, Module, Config, IScripted, Interp, ScriptedClass, Compiler and Cppia keep their names. CHANGELOG.md has the full table and what you wrote to be affected. Added: mark a class @:scriptable and name its package with -D hxscript_host and the bridge is generated for you; one diagnostic channel carrying the origin, line, source line and a likely cause; automatic setup for lime, openfl, flixel, flixel-addons, flixel-ui and heaps from -lib hxscript alone. Fixed: five portability faults, taking neko from 287 to 370 passing and python from 38 to 367, with php, js, lua and hl building again. On hxcpp, ??, %=, case a | b: and a using whose receiver type is known now compile rather than being refused. final class, abstract class and extern members parse.",
     "contributors": [
         "MeguminBOT"
     ],
