@@ -8,8 +8,10 @@ import sys.FileSystem;
 import sys.io.File;
 
 /**
- * The compile-time half of embedding, and the only thing a build file needs. It already has it,
- * because `extraParams.hxml` runs this for anyone who writes `-lib hxscript`.
+ * The compile-time half of embedding, and the only thing a build file needs, since
+ * `extraParams.hxml` runs it for anyone who writes `-lib hxscript`. It runs three steps per active
+ * library: include the types, bridge the bases, wrap the abstracts. The fourth, shimming members
+ * with no runtime form, is a closure rather than a name and runs from `Boot` at startup.
  */
 class Autowire {
 	/** The package the generated manifest and bridges are defined in. */
@@ -177,7 +179,7 @@ class Autowire {
 	 * @param bridges References to every generated bridge.
 	 * @param forced The reference expressions and signature arguments from `reference`.
 	 * @param globals Types scripts may name without importing.
-	 * @param abstracts What step 3 wrapped, for the report.
+	 * @param abstracts The abstracts that were given a runtime form, for the report.
 	 * @param libraries The active libraries' titles, for the report.
 	 */
 	static function manifest(bridges:Array<Expr>, forced:{refs:Array<Expr>, args:Array<FunctionArg>, named:Array<String>}, globals:Array<String>,

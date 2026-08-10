@@ -4,9 +4,7 @@ package hxscript.setup;
 import haxe.macro.Context;
 import haxe.macro.Expr;
 
-/**
- * Step 2: generates one bridge per base scripts may extend.
- */
+/** Generates one bridge per base scripts may extend, which is `Autowire`'s bridging step. */
 class Bridges {
 	/** The package generated bridges are defined in. */
 	static inline var PACK:String = 'hxscript.wired';

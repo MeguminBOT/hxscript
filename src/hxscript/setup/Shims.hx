@@ -2,9 +2,7 @@ package hxscript.setup;
 
 import hxscript.Config;
 
-/**
- * Step 4: registers real closures for members that have no runtime form.
- */
+/** Registers real closures for members that have no runtime form. Run from `Boot`, at startup. */
 class Shims {
 	/** What was registered, for the setup report. */
 	public static var registered:Array<String> = [];

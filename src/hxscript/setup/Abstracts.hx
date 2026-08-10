@@ -6,9 +6,7 @@ import haxe.macro.Context;
 import sys.FileSystem;
 import sys.io.File;
 
-/**
- * Step 3: gives the abstracts scripts hold a runtime form.
- */
+/** Gives the abstracts scripts hold a runtime form, which is `Autowire`'s wrapping step. */
 class Abstracts {
 	/**
 	 * Wraps every abstract named or scanned for by the active libraries.
