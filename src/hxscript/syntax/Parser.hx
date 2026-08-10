@@ -24,16 +24,18 @@ package hxscript.syntax;
 
 import hxscript.syntax.Expr;
 import hxscript.syntax.Token;
-import hxscript.runtime.Error;
-import hxscript.runtime.ParserException;
+import hxscript.error.ErrorKind;
+import hxscript.error.ParserException;
 
-using hxscript.tools.Tools;
+using hxscript.syntax.ExprTools;
+using hxscript.types.TypeTools;
 
-/** A recursive-descent parser/lexer that turns script source into `Expr`/`ModuleDecl` trees. */ /**
- * Recursive-descent parser. Token scanning, the preprocessor and source positions live in `Lexer`,
- * which this extends so the grammar can read tokens without threading a scanner through every call.
+/**
+ * Recursive-descent parser turning script source into `Expr` and `ModuleDecl` trees.
+ *
+ * Token scanning, the preprocessor and source positions live in `Lexer`, which this extends so the
+ * grammar can read tokens without threading a scanner through every call.
  */
-
 class Parser extends Lexer {
 	/** Whether the parser is currently at a declaration position. */
 	var decl:Bool;
@@ -107,9 +109,8 @@ class Parser extends Lexer {
 		exprs.push(e);
 
 		var tk = token();
-		// this is a hack to support var a,b,c; with a single EVar
 		while (tk == TComma && e != null && expr(e).match(EVar(_))) {
-			e = parseStructure("var"); // next variable
+			e = parseStructure("var");
 			exprs.push(e);
 			tk = token();
 		}
@@ -195,7 +196,7 @@ class Parser extends Lexer {
 				ensure(TBrClose);
 			}
 
-			var r = parseString("'".code, true); // grab next bit of string
+			var r = parseString("'".code, true);
 
 			switch (r) {
 				case TConst(CString(s, i)):
@@ -567,7 +568,7 @@ class Parser extends Lexer {
 				}
 
 				if (mode != IAll && (maybe(TId('as')) || maybe(TId('in')))) {
-					if (tid == null) // no type identifier found
+					if (tid == null)
 						error(ECustom('Module name must start with an uppercase letter'), p1, tokenMax);
 
 					var t = token();
@@ -584,6 +585,13 @@ class Parser extends Lexer {
 
 				mk(EImport(path, mode));
 			case "class", "interface", "enum", "typedef", "abstract":
+				push(TId(id));
+				var decl = parseModuleDecl();
+				if (!maybe(TSemicolon))
+					push(TSemicolon);
+
+				mk(EDecl(decl));
+			case "final" if (peekIdent("class")):
 				push(TId(id));
 				var decl = parseModuleDecl();
 				if (!maybe(TSemicolon))
@@ -631,7 +639,6 @@ class Parser extends Lexer {
 					case TOp("="): e = parseExpr(t);
 					case TOp(_): unexpected(tk);
 					case TComma | TSemicolon: push(tk);
-					// Above case should be enough but semicolon is not mandatory after }
 					case _ if (t != null): push(tk);
 					default: unexpected(tk);
 				}
@@ -643,10 +650,10 @@ class Parser extends Lexer {
 				mk(EWhile(econd, e), p1, pmax(e));
 			case "do":
 				var e = parseExpr();
-				maybe(TSemicolon); // a brace-less body ends in `;` before `while`; a braced one does not
+				maybe(TSemicolon);
 				var tk = token();
 				switch (tk) {
-					case TId("while"): // Valid
+					case TId("while"):
 					default: unexpected(tk);
 				}
 				var econd = parseExpr();
@@ -786,7 +793,6 @@ class Parser extends Lexer {
 												break;
 										}
 									case TComma:
-										// next expr
 									case TDoubleDot:
 										break;
 									default:
@@ -850,9 +856,6 @@ class Parser extends Lexer {
 					mk(ECast(e, type), p1, tokenMax);
 				}
 			case "untyped":
-				// The interpreter is dynamically typed, so `untyped` only suppresses compile-time
-				// checks that don't exist here: evaluate the inner expression as-is. Handles both
-				// `untyped expr` and `untyped { block }`.
 				parseExpr();
 			default:
 				null;
@@ -871,7 +874,6 @@ class Parser extends Lexer {
 		switch (tk) {
 			case TOp(op):
 				if (op == "->") {
-					// single arg reinterpretation of `f -> e` , `(f) -> e` and `(f:T) -> e`
 					switch (expr(e1)) {
 						case EIdent(i), EParent(expr(_) => EIdent(i)):
 							var eret = parseExpr();
@@ -989,7 +991,7 @@ class Parser extends Lexer {
 	 * @return The parsed arguments, return type, and body expression.
 	 */
 	function parseFunctionDecl(allowNoBody:Bool = false) {
-		parseParams(); // erase method type parameters, e.g. `function map<T, R>(...)`
+		parseParams();
 		ensure(TPOpen);
 		var args = parseFunctionArgs();
 		var ret = null;
@@ -1051,7 +1053,7 @@ class Parser extends Lexer {
 				 * @return The complete function type.
 				 */
 				function withReturn(args) {
-					switch token() { // I think it wouldn't hurt if ensure used enumEq
+					switch token() {
 						case TOp('->'):
 						case t:
 							unexpected(t);
@@ -1101,7 +1103,6 @@ class Parser extends Lexer {
 					switch (t) {
 						case TBrClose: break;
 						case TQuestion:
-							// `?x:Int` is how Haxe spells an optional field; it means `@:optional x:Int`.
 							if (meta == null)
 								meta = [];
 							meta.push({name: ":optional", params: []});
@@ -1142,14 +1143,6 @@ class Parser extends Lexer {
 
 	/**
 	 * Resolves `new Map<K, V>()` to the concrete map class its key type selects.
-	 *
-	 * `Map` is a multi-type abstract, so the compiler picks `StringMap`, `IntMap`, `ObjectMap` or
-	 * `EnumValueMap` from the key type and there is no `Map` class to instantiate at runtime. A
-	 * written key type settles it here, for free, at parse time.
-	 *
-	 * Only `String` and `Int` are decided this way. Any other key needs to tell an enum value from a
-	 * plain object, which a name alone cannot do, so it stays `Map` and the runtime picks from the
-	 * first key instead.
 	 *
 	 * @param path The constructed type path.
 	 * @param targs Its written type arguments, or null when it had none.
@@ -1331,9 +1324,6 @@ class Parser extends Lexer {
 		return meta;
 	}
 
-	// Type parameters are recorded by name and erased: constraints are parsed and
-	// dropped, and every parameter resolves to Dynamic at runtime.
-
 	/**
 	 * Parses a `<...>` type-parameter list, keeping only the parameter names (constraints are erased).
 	 *
@@ -1370,7 +1360,6 @@ class Parser extends Lexer {
 				case TOp(op):
 					if (op == ">")
 						break;
-					// A nested parameter list closes with `>>`, which lexes as one operator.
 					if (op.charCodeAt(0) == ">".code) {
 						tokens.unshift({t: TOp(op.substr(1)), min: tokenMax - op.length - 1, max: tokenMax});
 						break;
@@ -1396,7 +1385,6 @@ class Parser extends Lexer {
 	 * @return The resulting declaration.
 	 */
 	function parseAbstractDecl(name:String, meta:Metadata, params:Array<String>, isEnum:Bool, isPrivate:Bool):ModuleDecl {
-		// `abstract Name(Underlying) from A to B { ... }`.
 		var underlying:Null<CType> = null;
 		if (maybe(TPOpen)) {
 			underlying = parseType();
@@ -1427,8 +1415,6 @@ class Parser extends Lexer {
 			fields.push(f);
 		}
 
-		// An `enum abstract` is its constants and nothing else, so it stays a class of statics, tagged
-		// so the module exposes them unqualified the way enum constructors are.
 		if (isEnum) {
 			return mkd(DClass({
 				name: name,
@@ -1458,6 +1444,18 @@ class Parser extends Lexer {
 	}
 
 	/**
+	 * Looks one token ahead without consuming it.
+	 *
+	 * @param id The identifier to test for.
+	 * @return True if the next token is that identifier.
+	 */
+	function peekIdent(id:String):Bool {
+		var t = token();
+		push(t);
+		return t.match(TId(_ == id => true));
+	}
+
+	/**
 	 * Parses one top-level declaration: `package`, `import`, `using`, `class`, `interface`, `enum`,
 	 * `typedef`, `abstract`, or a module-level field.
 	 *
@@ -1468,13 +1466,23 @@ class Parser extends Lexer {
 	function parseModuleDecl(?decls:Array<ModuleDecl>, importModule:Bool = false):ModuleDecl {
 		var meta = parseMetadata();
 		var ident = getIdent();
-		var isPrivate = false, isExtern = false;
+		var isPrivate = false, isExtern = false, isFinal = false, isAbstract = false;
 		while (true) {
 			switch (ident) {
 				case "private":
 					isPrivate = true;
 				case "extern":
 					isExtern = true;
+				case "final" | "abstract":
+					var peek = token();
+					push(peek);
+					if (!peek.match(TId("class")))
+						break;
+
+					if (ident == "final")
+						isFinal = true;
+					else
+						isAbstract = true;
 				default:
 					break;
 			}
@@ -1558,7 +1566,7 @@ class Parser extends Lexer {
 				}
 
 				if (mode != IAll && (maybe(TId('as')) || maybe(TId('in')))) {
-					if (tid == null) // no type identifier found
+					if (tid == null)
 						error(ECustom('Module name must start with an uppercase letter'), tokenMin, tokenMax);
 
 					var t = token();
@@ -1615,6 +1623,8 @@ class Parser extends Lexer {
 					fields: fields,
 					isPrivate: isPrivate,
 					isExtern: isExtern,
+					isFinal: isFinal,
+					isAbstract: isAbstract,
 				}), tokenMin, tokenMax);
 			case "interface":
 				if (importModule)
@@ -1625,8 +1635,6 @@ class Parser extends Lexer {
 					error(ECustom('Type name should start with an uppercase letter'), tokenMin, tokenMax);
 
 				var params = parseParams();
-				// Haxe spells interface inheritance `extends`, and allows several of them;
-				// they all land in `implement` so the runtime has one parent list to walk.
 				var implement = [];
 
 				while (true) {
@@ -1659,7 +1667,6 @@ class Parser extends Lexer {
 				if (importModule)
 					error(EImportHx, tokenMin, tokenMax);
 
-				// `enum abstract Name(T) { var A = v; }` -- constants of the underlying type.
 				var enumPeek = token();
 				if (enumPeek.match(TId("abstract"))) {
 					var aName = getIdent();
@@ -1802,15 +1809,18 @@ class Parser extends Lexer {
 					access.push(AStatic);
 				case "macro":
 					access.push(AMacro);
+				case "extern":
+					access.push(AExtern);
+				case "abstract":
+					var peek = token();
+					push(peek);
+					if (!peek.match(TId("function")))
+						unexpected(TId("abstract"));
+					access.push(AAbstract);
 				case "overload":
-					// Overloading isn't dispatched at runtime; accept the modifier and treat the
-					// method as ordinary (last same-named definition wins).
 				case "function":
 					var name = getIdent();
-					var inf = parseFunctionDecl(allowNoBody);
-					// A brace-less body (`function get_x() return x;`) leaves the terminating
-					// semicolon for us; a block body may carry an optional one. Swallow it so the
-					// member loop doesn't choke -- matching what real Haxe accepts.
+					var inf = parseFunctionDecl(allowNoBody || access.contains(AAbstract) || access.contains(AExtern));
 					maybe(TSemicolon);
 					return {
 						name: name,
@@ -1823,8 +1833,6 @@ class Parser extends Lexer {
 						}),
 					};
 				case "var", "final":
-					// `final function` is a non-overridable method, not a field -- parse it as an
-					// ordinary method (override-prevention isn't enforced at runtime).
 					if (id == 'final') {
 						var peek = token();
 						push(peek);

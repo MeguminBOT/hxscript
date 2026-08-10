@@ -23,8 +23,7 @@
 package hxscript.syntax;
 
 import hxscript.syntax.Expr;
-import hxscript.runtime.Error;
-import hxscript.runtime.ParserException;
+import hxscript.error.ParserException;
 
 /** Turns parsed AST back into source text, and renders parser/interpreter errors. */
 class Printer {
@@ -185,7 +184,6 @@ class Printer {
 				fieldBlock(c.fields);
 			case DInterface(c):
 				typeHead(c.meta, c.isPrivate, 'interface', c.name, c.params);
-				// An interface's bases parse into `extend`/`implement` the same way a class's do.
 				if (c.extend != null) {
 					add(' extends ');
 					type(c.extend);
@@ -200,7 +198,6 @@ class Printer {
 				add(' {');
 				level++;
 				tabs += '	';
-				// `names` carries declaration order; `constructs` is a map and does not.
 				for (n in e.names) {
 					var c:EnumFieldDecl = e.constructs.get(n);
 					if (c == null)
@@ -303,7 +300,6 @@ class Printer {
 
 			case KVar(v):
 				add((v.isFinal == true ? 'final ' : 'var ') + name);
-				// A property's accessors sit between the name and the type.
 				if (v.get != null || v.set != null)
 					add('(' + (v.get ?? 'default') + ', ' + (v.set ?? 'default') + ')');
 				addType(v.type);
@@ -332,6 +328,8 @@ class Printer {
 					case AOverride: 'override ';
 					case AStatic: 'static ';
 					case AMacro: 'macro ';
+					case AExtern: 'extern ';
+					case AAbstract: 'abstract ';
 				});
 			}
 			fieldBody(f.name, f.kind);
@@ -365,8 +363,6 @@ class Printer {
 			case CFloat(f):
 				add(f);
 			case CString(s):
-				// Backslashes first: escaping them after the others would also escape the backslashes
-				// those introduced, and the printed string would stop parsing back to what it holds.
 				add('"');
 				add(s.split("\\")
 					.join("\\\\")
@@ -707,62 +703,5 @@ class Printer {
 	 */
 	public static function toString(e:Expr) {
 		return new Printer().exprToString(e);
-	}
-
-	/**
-	 * Renders a parser/interpreter error as a human-readable message, prefixed with its source
-	 * position when available.
-	 *
-	 * @param e The error to render.
-	 * @param p The parser exception carrying origin/line, if any.
-	 * @return The formatted message.
-	 */
-	public static function errorToString(e:Error, ?p:ParserException) {
-		if (p != null)
-			return errorAt(e, p.origin, p.line);
-
-		return errorMessage(e);
-	}
-
-	/**
-	 * Renders an error against a position given directly rather than read off an exception.
-	 *
-	 * For a caller that has the position but no exception to read it from. `ParserException`'s
-	 * constructor is the one that matters: Java and C# require `super()` to be the first statement
-	 * when the base class is a native one, so the message has to be built before any field is
-	 * assigned, and `this` cannot be passed to the overload above.
-	 *
-	 * @param e The error to render.
-	 * @param origin The source origin.
-	 * @param line The 1-based line number.
-	 * @return The formatted message, prefixed with the position.
-	 */
-	public static function errorAt(e:Error, origin:String, line:Int):String {
-		return origin + ":" + line + ": " + errorMessage(e);
-	}
-
-	/**
-	 * @param e The error to render.
-	 * @return Its text, with no position prefix.
-	 */
-	static function errorMessage(e:Error):String {
-		return switch (e) {
-			case EImportHx: 'Only import and using is allowed in import.hx files';
-			case EHasNoSuper: 'Current class does not have a super';
-			case EUnknownType(t): 'Type not found: $t';
-			case EUnknownField(o, f): '$o has no field $f';
-			case EUnrecognizedPattern(e): 'Unrecognized pattern: ' + toString(e);
-			case EInvalidChar(c): "Invalid character: '" + (StringTools.isEof(c) ? "EOF" : String.fromCharCode(c)) + "' (" + c + ")";
-			case EUnexpected(s): "Unexpected token: \"" + s + "\"";
-			case EUnterminatedString: "Unterminated string";
-			case EUnterminatedComment: "Unterminated comment";
-			case EUnterminatedRegex: "Unterminated regular expression";
-			case EInvalidPreprocessor(str): "Invalid conditional expression (" + str + ")";
-			case EUnknownVariable(v): "Unknown identifier: " + v;
-			case EInvalidIterator(v): "Invalid iterator: " + v;
-			case EInvalidOp(op): "Invalid operator: " + op;
-			case EInvalidAccess(f): "Invalid access to field " + f;
-			case ECustom(msg): msg;
-		};
 	}
 }

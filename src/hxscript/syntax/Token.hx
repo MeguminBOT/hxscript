@@ -4,11 +4,6 @@ import hxscript.syntax.Expr;
 
 /**
  * One pushed-back token and the span it came from.
- *
- * A `@:structInit` class rather than an anonymous structure, for the same reason as `Variable` and
- * `StackFrame`: anonymous structures resolve their fields by name at runtime on static targets, and
- * a recursive-descent parser pushes a token back on every lookahead that does not match, which is
- * most of them. Keeps the `{t: ..., min: ..., max: ...}` construction syntax.
  */
 @:structInit
 class TokenEntry {

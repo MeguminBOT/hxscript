@@ -24,10 +24,11 @@ package hxscript.syntax;
 
 import hxscript.syntax.Expr;
 import hxscript.syntax.Token;
-import hxscript.runtime.Error;
-import hxscript.runtime.ParserException;
+import hxscript.error.ErrorKind;
+import hxscript.error.ParserException;
 
-using hxscript.tools.Tools;
+using hxscript.syntax.ExprTools;
+using hxscript.types.TypeTools;
 
 /** A recursive-descent parser/lexer that turns script source into `Expr`/`ModuleDecl` trees. */
 class Lexer {
@@ -103,11 +104,6 @@ class Lexer {
 
 	/**
 	 * Pushed-back tokens, innermost LAST.
-	 *
-	 * An `Array` used as a stack rather than a `List`: a linked list allocates a node per pushback on
-	 * top of the entry itself, and the depth here is never more than a token or two. The end is the
-	 * next token to be read, so `push`/`pop` are the array's own; `add`, which queues a token to be
-	 * read after everything already pending, inserts at the front instead.
 	 */
 	var tokens:Array<TokenEntry>;
 
@@ -188,9 +184,6 @@ class Lexer {
 	 */
 	function maybe(tk) {
 		var t = token();
-		// Plain equality first. Sixty-two of the seventy-one call sites pass a parameterless token
-		// constructor, and equality answering true always implies structural equality, so the
-		// reflective comparison is only reached for the handful that carry a payload.
 		if (t == tk || Type.enumEq(t, tk))
 			return true;
 		push(t);
@@ -312,11 +305,11 @@ class Lexer {
 					k <<= 4;
 					var char = readChar();
 					switch (char) {
-						case 48, 49, 50, 51, 52, 53, 54, 55, 56, 57: // 0-9
+						case 48, 49, 50, 51, 52, 53, 54, 55, 56, 57:
 							k += char - 48;
-						case 65, 66, 67, 68, 69, 70: // A-F
+						case 65, 66, 67, 68, 69, 70:
 							k += char - 55;
-						case 97, 98, 99, 100, 101, 102: // a-f
+						case 97, 98, 99, 100, 101, 102:
 							k += char - 87;
 						default:
 							if (StringTools.isEof(char)) {
@@ -363,8 +356,6 @@ class Lexer {
 				break;
 			} else if (interpolate && c == '$'.code) {
 				var next = readChar();
-				// `identChars` includes digits, but an identifier cannot start with one: `$5` is a
-				// literal dollar followed by a five, as it is in Haxe, not an interpolation.
 				var startsIdent:Bool = (idents[next] == true && !(next >= '0'.code && next <= '9'.code));
 				if (startsIdent || next == '{'.code) {
 					readPos--;
@@ -372,11 +363,6 @@ class Lexer {
 				} else if (next == '$'.code) {
 					b.addChar(c);
 				} else {
-					// A dollar that begins nothing is a literal dollar, and the character after it has
-					// not been consumed by anything. Push it back rather than appending it blind: it
-					// may be the closing quote, a newline the line counter needs to see, or the end of
-					// input. Appending it swallowed the terminator, so `'$'` ran on to the next quote
-					// somewhere else in the file and reported the failure there.
 					b.addChar(c);
 					readPos--;
 				}
@@ -487,13 +473,13 @@ class Lexer {
 			switch (char) {
 				case 0:
 					return TEof;
-				case 32, 9, 13: // space, tab, CR
+				case 32, 9, 13:
 					tokenMin++;
 				case 10:
 					columnOffset = currentPos;
-					line++; // LF
+					line++;
 					tokenMin++;
-				case 48, 49, 50, 51, 52, 53, 54, 55, 56, 57: // 0...9
+				case 48, 49, 50, 51, 52, 53, 54, 55, 56, 57:
 					var n = (char - 48) * 1.0;
 					var exp = 0.;
 					while (true) {
@@ -502,7 +488,7 @@ class Lexer {
 						switch (char) {
 							case 48, 49, 50, 51, 52, 53, 54, 55, 56, 57:
 								n = n * 10 + (char - 48);
-							case "_".code: // digit separator
+							case "_".code:
 							case "e".code, "E".code:
 								var tk = token();
 								var pow:Null<Int> = null;
@@ -520,13 +506,9 @@ class Lexer {
 								if (pow == null)
 									invalidChar(char);
 								var mantissa:Float = (exp > 0) ? n * 10 / exp : n;
-								// 10^k is exact up to k = 22, so DIVIDING by it for a negative exponent is
-								// correctly rounded where multiplying by an inexact 10^-k is not: '1e-5' has
-								// to land on the same double as '0.00001'.
 								return TConst(CFloat(pow < 0 ? mantissa / Math.pow(10, -pow) : mantissa * Math.pow(10, pow)));
 							case ".".code:
 								if (exp > 0) {
-									// in case of '0...'
 									if (exp == 10 && readChar() == ".".code) {
 										push(TOp("..."));
 										var i = Std.int(n);
@@ -542,13 +524,13 @@ class Lexer {
 								while (true) {
 									char = readChar();
 									switch (char) {
-										case 48, 49, 50, 51, 52, 53, 54, 55, 56, 57: // 0-9
+										case 48, 49, 50, 51, 52, 53, 54, 55, 56, 57:
 											n = (n << 4) + char - 48;
-										case 65, 66, 67, 68, 69, 70: // A-F
+										case 65, 66, 67, 68, 69, 70:
 											n = (n << 4) + (char - 55);
-										case 97, 98, 99, 100, 101, 102: // a-f
+										case 97, 98, 99, 100, 101, 102:
 											n = (n << 4) + (char - 87);
-										case "_".code: // digit separator
+										case "_".code:
 										default:
 											this.char = char;
 											return TConst(CInt(n));
@@ -561,9 +543,9 @@ class Lexer {
 								while (true) {
 									char = readChar();
 									switch (char) {
-										case 48, 49: // 0-1
+										case 48, 49:
 											n = (n << 1) + (char - 48);
-										case "_".code: // digit separator
+										case "_".code:
 										default:
 											this.char = char;
 											return TConst(CInt(n));
@@ -710,10 +692,6 @@ class Lexer {
 						}
 					}
 					if (idents[char] == true) {
-						// Sliced out of the input in one go rather than grown a character at a time.
-						// `id += String.fromCharCode(char)` allocated a string per character AND copied
-						// everything read so far into it, so lexing an identifier was quadratic in its
-						// length -- on the most common token there is.
 						var start:Int = readPos - 1;
 						while (true) {
 							char = readChar();
@@ -833,7 +811,6 @@ class Lexer {
 					preprocStack.push({r: true});
 					return token();
 				} else {
-					// elseif
 					preprocStack.pop();
 					return preprocess("if");
 				}
@@ -885,7 +862,7 @@ class Lexer {
 	function tokenComment(op:String, char:Int) {
 		var c = op.charCodeAt(1);
 		var s = input;
-		if (c == '/'.code) { // comment
+		if (c == '/'.code) {
 			while (char != '\r'.code && char != '\n'.code) {
 				char = readChar();
 				if (StringTools.isEof(char))
@@ -938,7 +915,7 @@ class Lexer {
 		return switch (c) {
 			case CInt(v): Std.string(v);
 			case CFloat(f): Std.string(f);
-			case CString(s): s; // TODO : escape + quote
+			case CString(s): s;
 			case CReg(p, m): '~/$p/$m';
 		}
 	}
@@ -1008,7 +985,7 @@ class Lexer {
 			}
 		}
 
-		for (x in ["!", "++", "--", "~"]) // unary "-" handled in parser directly!
+		for (x in ["!", "++", "--", "~"])
 			opPriority.set(x, x == "++" || x == "--" ? -1 : -2);
 
 		preprocessorBinops = [

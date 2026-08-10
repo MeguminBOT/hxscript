@@ -281,6 +281,12 @@ typedef ClassDecl = {
 
 	/** Whether the class is `extern`. */
 	var isExtern:Bool;
+
+	/** Whether the class is `final`, and so may not be extended. */
+	var ?isFinal:Bool;
+
+	/** Whether the class is `abstract`, and so may not be instantiated directly. */
+	var ?isAbstract:Bool;
 }
 
 /** A `typedef` declaration and its target type. */
@@ -359,6 +365,12 @@ enum FieldAccess {
 
 	/** `macro`. */
 	AMacro;
+
+	/** `extern`, on a member declared without a body. */
+	AExtern;
+
+	/** `abstract`, on a method an abstract class requires its subclasses to define. */
+	AAbstract;
 }
 
 /** Whether a field is a method or a variable/property. */
