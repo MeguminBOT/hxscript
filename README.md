@@ -7,17 +7,21 @@
 [![stars](https://badgen.net/github/stars/MeguminBOT/hxscript)](https://github.com/MeguminBOT/hxscript/stargazers)
 [![Haxe](https://badgen.net/badge/Haxe/4.3+/orange)](https://haxe.org/)
 
-**An advanced Haxe interpreter, with a compiler that runs inside your application.**
+**An advanced Haxe interpreter.**
 
 It parses Haxe-shaped source and evaluates it directly, with enough of the language intact that a
 script can declare classes, enums, typedefs and abstracts, and extend the ones your application
-already compiled. It can also translate a script to native bytecode **while your application is
-running**, with no Haxe toolchain anywhere in sight.
+already compiled. The interpreter is plain Haxe and builds on every target; see
+[Status](#status) for where that is exercised rather than only compiled.
+
+**On hxcpp** it can also translate a script to native bytecode while your application is running,
+with no Haxe toolchain anywhere in sight. That part is hxcpp-only, because the bytecode is hxcpp's
+own.
 
 It began as a fork of [hscript-insanity](https://github.com/inky03/hscript-insanity), itself a fork
 of [hscript](https://github.com/HaxeFoundation/hscript), and has since grown into its own thing:
-runtime type enforcement, working abstracts, a diagnostic channel, and the runtime compiler. See
-[lineage](#lineage) for what came from where.
+runtime type enforcement, working abstracts, a diagnostic channel, and a bytecode compiler for hxcpp.
+See [lineage](#lineage) for what came from where.
 
 ```haxe
 import hxscript.Script;
@@ -132,7 +136,7 @@ evaluates Haxe-shaped expressions and does that well; what it does not do is let
 | type annotations | parsed, ignored | **enforced at runtime** |
 | `Int` / `Float` distinction | blurred by `Dynamic` | preserved (`/` is always `Float`) |
 | errors | message | call stack across scripts and into the host |
-| **compiling to native bytecode** | no | yes, at runtime, from source text |
+| **compiling to native bytecode** | no | yes, at runtime, from source text, on hxcpp |
 
 The hscript column reflects 2.7.0, the version the benchmark suite ran.
 [benchmarks.md](docs/benchmarks.md) puts six libraries in this family through identical scripts and
@@ -180,10 +184,10 @@ runtime; type parameters are erased by Haxe itself before the interpreter ever s
 
 ## Compiling at runtime
 
-Scripts are interpreted by default. A module can instead be translated to
-[cppia](https://haxe.org/manual/target-cppia.html), hxcpp's own bytecode, and loaded as a real
-`Class<Dynamic>`, worth about **21x per operation** and **37x per call**, rising to about **30x** and
-**104x** with hxcpp's JIT on top.
+**hxcpp targets only.** Scripts are interpreted everywhere by default. On hxcpp a module can
+instead be translated to [cppia](https://haxe.org/manual/target-cppia.html), hxcpp's own bytecode,
+and loaded as a real `Class<Dynamic>`, worth about **21x per operation** and **37x per call**, rising
+to about **30x** and **104x** with hxcpp's JIT on top.
 
 ```haxe
 var report = hxscript.compile.Compiler.compile(env);
@@ -256,9 +260,16 @@ Working, and in use. What is known to be missing:
       does not appear in the calling script's trace. Errors themselves carry their frames wherever
       they are reported; this is the remaining half.
 
-Two targets fall short of the rest. neko and python each fail a handful of scripted-abstract cases,
-recorded with their causes in [`test/known-failing.txt`](test/known-failing.txt). eval, cpp and the
-bytecode compiler pass in full.
+**Targets.** The suite builds on all nine and runs on four of them.
+
+| | built | suite runs | result |
+| --- | --- | --- | --- |
+| eval, cpp | yes | yes | pass in full |
+| neko, python | yes | yes | a handful of scripted-abstract cases fail |
+| js, java, lua, php, hl | yes | no runtime here | compile and generate only |
+
+The bytecode compiler is hxcpp-only and passes in full there. What neko and python fail, and why, is
+in [`test/known-failing.txt`](test/known-failing.txt).
 
 ## Lineage
 

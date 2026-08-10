@@ -1,7 +1,9 @@
 # Execution modes
 
-A script can be interpreted or compiled to bytecode, and the bytecode can be jitted. This page is
-about what choosing between them means for you. The measurements behind every figure quoted here are
+A script can be interpreted or compiled to bytecode, and the bytecode can be jitted. **The two
+compiled modes are hxcpp-only**, since the bytecode is hxcpp's own; everywhere else a script is
+interpreted and this page is not a decision you have. It is about what choosing between them means
+where you do. The measurements behind every figure quoted here are
 in [`mode-benchmarks.md`](mode-benchmarks.md).
 
 The short version: compiling is worth about **21x** on ordinary work and about **37x** on calls, it

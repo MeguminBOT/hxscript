@@ -121,6 +121,8 @@ Everything the library reads. Only the first group is likely to concern you.
 | `-D hxscript_cppia` | compile the emitter into the build. Without it every module reports as skipped |
 | `-D scriptable` | hxcpp's own flag, which makes your types reachable from bytecode |
 
+Both are hxcpp-only. On any other target the compiler does not exist and every script is interpreted.
+
 ### Turning parts of the setup off
 
 Each disables one step, for a host that would rather do it itself or is minimising binary size.
@@ -411,8 +413,9 @@ its own stack with no link to its caller, so that frame does not appear in the c
 
 ## Compiling at runtime
 
-Optional. A module can be translated to cppia bytecode and loaded as a real class instead of being
-walked as a tree. [`modes.md`](modes.md) covers what that is worth and when it repays the cost;
+Optional, and **hxcpp only**. On that target a module can be translated to cppia bytecode and loaded
+as a real class instead of being walked as a tree; everywhere else scripts are interpreted and this
+section does not apply. [`modes.md`](modes.md) covers what that is worth and when it repays the cost;
 this section is the wiring.
 
 **Nothing here happens on its own.** The defines make the compiler *available*, and that is all. If

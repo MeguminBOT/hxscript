@@ -1,27 +1,27 @@
 {
-	"name": "hxscript",
-	"url": "https://github.com/MeguminBOT/hxscript",
-	"description": "A Haxe interpreter with an optional runtime compiler. It parses Haxe-shaped source and evaluates it directly, with enough of the language intact that a script can declare classes, enums, typedefs and abstracts, and extend the ones your application already compiled. A module can instead be translated to native bytecode while your application is running, with no Haxe toolchain anywhere in sight, which is what lets a script that arrives after your release run at close to compiled speed.",
-	"license": "MIT",
-	"tags": [
-		"hscript",
-		"parser",
-		"interpreter",
-		"scripting",
-		"script",
-		"macro",
-		"cppia",
-		"compiler",
-		"JIT",
-		"runtime",
-		"cross",
-		"utility",
-		"game"
-	],
-	"version": "1.1.2",
-	"releasenote": "Three lexer and typing fixes. A dollar sign that begins no interpolation is now a literal dollar without consuming the character after it; previously the character was appended blind, so a string ending in a dollar swallowed its own closing quote and ran on to the next quote elsewhere in the file, reporting the error on an unrelated line. Unary bit-complement is now lexed outside a regex, where it was only ever reached through the regex path and otherwise rejected with the position of the character after it. Nested array literals now carry their declared element type down to the inner arrays, so an array of arrays no longer erases to objects one level in and read back as zeroes under cppia.",
-	"contributors": [
-		"MeguminBOT"
-	],
-	"classPath": "src"
+    "name": "hxscript",
+    "url": "https://github.com/MeguminBOT/hxscript",
+    "description": "An advanced Haxe interpreter. It parses Haxe-shaped source and evaluates it directly, with enough of the language intact that a script can declare classes, enums, typedefs and abstracts, and extend the ones your application already compiled, with declared types enforced at runtime. On hxcpp it can also translate a module to native bytecode while your application is running, with no Haxe toolchain installed, which is what lets a script that arrives after your release run at close to compiled speed.",
+    "license": "MIT",
+    "tags": [
+        "hscript",
+        "parser",
+        "interpreter",
+        "scripting",
+        "script",
+        "macro",
+        "cppia",
+        "compiler",
+        "JIT",
+        "runtime",
+        "cross",
+        "utility",
+        "game"
+    ],
+    "version": "1.1.2",
+    "releasenote": "Three lexer and typing fixes. A dollar sign that begins no interpolation is now a literal dollar without consuming the character after it; previously the character was appended blind, so a string ending in a dollar swallowed its own closing quote and ran on to the next quote elsewhere in the file, reporting the error on an unrelated line. Unary bit-complement is now lexed outside a regex, where it was only ever reached through the regex path and otherwise rejected with the position of the character after it. Nested array literals now carry their declared element type down to the inner arrays, so an array of arrays no longer erases to objects one level in and read back as zeroes under cppia.",
+    "contributors": [
+        "MeguminBOT"
+    ],
+    "classPath": "src"
 }
