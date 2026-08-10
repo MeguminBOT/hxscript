@@ -9,9 +9,9 @@ static errors. This page is the reference for those gaps: the things regular Hax
 script here cannot (or does differently).
 
 > [!NOTE]
-> This complements the checklist in the [README TO-DO](../README.md#to-do). The README tracks
-> feature completion; this page explains the *boundaries* and *why* they exist, with pointers into
-> the source.
+> The [README](../README.md#what-scripts-can-do) has the same summary in one table. This page is the
+> long form: what each boundary is, why it exists, and where in the source it lives. What is missing
+> rather than bounded is under [Status](../README.md#status).
 
 For putting the library into a project in the first place, see the
 [embedding guide](embedding.md).
