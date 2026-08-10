@@ -244,7 +244,7 @@ optimises, and this is a direct translation with no optimisation passes and a sm
 subset.
 
 **It is new**, and younger than the rest of the library. What it rests on is
-[`test/cpp/CppiaTest.hx`](test/cpp/CppiaTest.hx), which runs 148 constructs interpreted and compiled
+[`test/cpp/CppiaTest.hx`](test/cpp/CppiaTest.hx), which runs 151 constructs interpreted and compiled
 and compares the answers, currently 0 wrong and one deliberate refusal whose message is itself
 asserted, plus a differential suite that does the same across whole worlds. Three wrong-answer bugs were found that way during the work, which is both
 the reason to trust it as far as you do and the reason not to trust it further.

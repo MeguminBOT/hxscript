@@ -320,6 +320,10 @@ class CppiaTest {
 		check('property accessors', 'var t = new T(); t.v = 5; return t.v;',
 			'10', 'public var v(get, set):Int;\n\tvar raw:Int = 0;\n\tpublic function new() {}\n\tfunction get_v() return raw * 2;\n\tfunction set_v(x:Int) { raw = x; return x; }');
 
+		check('switch array destructure', 'var a = [1, 2]; switch (a) { case [x, y]: return x * 10 + y; default: return 0; }', '12');
+		check('switch object pattern', 'var o = {k: 3}; switch (o) { case {k: 3}: return "hit"; default: return "miss"; }', 'hit');
+		check('switch nested array', 'var a = [[1, 2]]; switch (a) { case [[x, y]]: return x + y; default: return 0; }', '3');
+
 		TestCase.log('  refused by the emitter: ' + refused);
 	}
 

@@ -219,20 +219,22 @@ so a refusal costs speed rather than behaviour.
 | a name it cannot resolve | an identifier or type that is neither in the batch, ambient, nor a host static |
 | a reference to a class compiled in another batch | it cannot link across batches, so it waits for one that holds both |
 | a host superclass whose constructor shape is unknown | the type table has no entry for it, so a call to it cannot be padded |
-| `@:op` and `@:arrayAccess` overloads *declared on a native abstract* | scripted ones compile |
+| a method or non-constant field *of a native abstract* | an abstract has no class to call a method on once compiled; its constants fold to their value |
+| a static extension whose receiver type is not known here | rewriting a call that was really a member call would change what the program does, so it is refused instead |
 | inline type declarations | anonymous types declared in place |
 | local property accessors | `var x(get, set)` declared inside a function body |
 | mixed array and map literals | a literal the emitter cannot type as one or the other |
 
 Everything else in the language a script actually uses now compiles, including the things this page
-listed as refused until recently: abstracts, pattern matching over structures, arrays and enum
-constructors, map comprehensions, rest arguments, property accessors, key-value loops.
+listed as refused until recently: abstracts, map comprehensions, rest arguments, property accessors,
+key-value loops, `??`, `%=`, `case a | b:`, and a `using` whose receiver type is known. Pattern
+matching compiles in full, over enum constructors, arrays, objects and nested shapes alike: a switch
+the `SWITCH` instruction cannot express is rewritten into an if-else chain rather than refused.
 
-The evidence is [`test/cpp/CppiaTest.hx`](../test/cpp/CppiaTest.hx), which runs 148 constructs
+The evidence is [`test/cpp/CppiaTest.hx`](../test/cpp/CppiaTest.hx), which runs 151 constructs
 interpreted and compiled and compares the answers. It reports 0 wrong, and one refusal that is
-asserted on purpose. That is a stronger claim than
-"nothing was refused": a construct that compiled to the wrong thing would show as `WRONG`, and two of
-them did during the work.
+asserted on purpose. That is a stronger claim than "nothing was refused": a construct that compiled
+to the wrong thing would show as `WRONG`, and two of them did during the work.
 
 ## What is not known
 

@@ -18,20 +18,22 @@ For putting the library into a project in the first place, see the
 
 ## At a glance
 
-| Works with parity | Erases / weakened | Not available |
+This table is the whole summary. Each section below is one row of it, explained.
+
+| Works like Haxe | Parses, but weaker | Not available |
 | --- | --- | --- |
-| classes, `extends`, `override` | type parameters (erased) | macros / `@:build` / reification |
-| scripted + native interfaces | structural typedefs (values, not literals) | |
-| enums (+ params, `switch` extraction, guards, `\|`) | | `@:structInit`, `@:multiType` |
-| abstracts, scripted and native: `@:op`, `@:arrayAccess`, `from`/`to` | | |
-| typedef aliases | custom metadata (mostly inert) | compile-time type errors / inference |
-| static / instance / `private` / getters-setters | `private` enforcement (opt-in, explicit only) | overload resolution |
-| `using` (typed on scripted classes), `import` (`as` / `.*` / single field) | typed metadata / `untyped` (no-op) | overriding native `inline`/`final`/`@:generic` methods |
-| string interpolation, comprehensions | | interface default methods |
-| optional/default/rest args | | compile-time inlining / DCE |
+| classes, `extends`, `override`, `super(...)` | type parameters, erased to `Dynamic` | macros, `@:build`, reification |
+| scripted and native interfaces | structural typedefs check values, not literals | interface default methods |
+| enums with parameters; `switch` extraction, guards, `\|`, array and object patterns | custom metadata, mostly inert | overload resolution |
+| abstracts, scripted and native: `@:op`, `@:arrayAccess`, `from`/`to` | `private`, enforced only where written explicitly | `@:structInit`, `@:multiType` |
+| typedef aliases | `untyped`, a no-op | compile-time type errors and inference |
+| statics, instance fields, `final` fields, accessors (`get`/`set`/`null`/`never`/`default`/`dynamic`) | `final` and `abstract` on a class, and `final` on a method: recorded, not enforced | overriding a native `inline`, `final` or `@:generic` method |
+| `using`, and `import` with `as`, `.*` and single fields | `inline` and `final` carry no optimization | compile-time inlining and DCE |
+| string interpolation, array and map comprehensions | | type-checking a `using` on a compiled class |
+| optional, default and rest arguments | | |
 | typed multi-catch, closures, `#if` | | |
-| **runtime type enforcement** (`cast`/`is`/var/param/return) | | |
-| **`Int`/`Float` correctness** | | type-checking `using` on compiled classes |
+| **runtime type enforcement** of `cast`, `is`, vars, params and returns | | |
+| **`Int`/`Float` correctness**, and `/` always `Float` | | |
 
 ---
 
@@ -186,32 +188,35 @@ and never reaches that stage.
 - **`inline` / `final` have no optimization effect**, they parse, but everything is interpreted.
   There is no constant folding, inlining, or dead-code elimination; expect interpreter-level
   performance.
+- **`final class`, `abstract class` and `final` on a method parse and are recorded, but nothing
+  enforces them.** A script may extend a `final` class, instantiate an `abstract` one, and override a
+  `final` method. Haxe rejects all three at compile time, and there is no compile time here. The
+  flags are kept on the declaration (`ClassDecl.isFinal`, `isAbstract`, and `AFinal` / `AAbstract` in
+  `FieldAccess`), so a checker could enforce them without a parser change. `extern` on a member
+  parses for the same reason, and a member marked `abstract` or `extern` may be declared with no
+  body.
 
 ## 7. Scripts can only reach what survives DCE
 
-A script calls native code by reflection, which the compiler cannot see. With dead code elimination
-on (Haxe defaults to `-dce std`), a std or library method that the **host** never calls statically
-can be stripped, and the script's call then fails at runtime with "Cannot call null".
+The parity consequence is worth stating on its own, because it is the one boundary that is a property
+of *your build* rather than of this library: **what a script can reach is not decided here.** A script
+calls native code by reflection, which the compiler cannot see, so under `-dce std` a member the host
+never calls statically is stripped and the script's call fails with `Cannot call null`.
 
-This is easy to mistake for a library bug. A standalone test program that never touches `EReg`
-compiles without `EReg.replace`, so `~/a+/g.replace(...)` fails there while working under `-dce no`.
+Two things about it are routinely got wrong.
 
-Mitigations, in order of preference: call the API somewhere in the host, add an `include()` for the
-type in the build, or register a `Config.callShims` entry.
+**It is per member, not per class.** A host that calls `StringTools.trim` in three hundred places
+keeps `trim` and loses `isSpace`, so scripts see a `StringTools` that resolves fine and is missing
+exactly the members nobody happened to use.
 
-**It is per MEMBER, not per class**, which is what makes it confusing in practice. A host that calls
-`StringTools.trim` in three hundred places keeps `trim` and loses `isSpace`, so scripts see a
-`StringTools` that resolves fine and is missing exactly the members nobody happened to use.
+**`inline` is not a second cause of it.** On hxcpp a `static inline` or `inline` member still has a
+runtime form and reflects fine, verified by declaring one and reading it back with `Reflect.field`
+under both settings. What removes it is DCE noticing that every call site inlined it, so nothing
+references it. Only `extern inline` genuinely has no body to emit, and that is the case
+`Config.callShims` exists for.
 
-**`inline` is not a second cause of this, and it is routinely blamed for it.** On hxcpp a `static
-inline` or `inline` member still has a runtime form and reflects fine, verified by declaring one and
-reading it back with `Reflect.field` under both `-dce std` and `-dce no`. What removes it is DCE
-noticing that every call site inlined it, so nothing references it any more. Only **`extern inline`**
-has genuinely no body to emit; that is the case `Config.callShims` exists for (see section 8).
-
-`StringTools.trim` is the usual example given, and it is a bad one twice over: on the C++ target it
-is not `inline` at all (only on `cs`/`java`), and when it goes missing it is because the host never
-called it.
+[`embedding.md`](embedding.md#dead-code-elimination) has what to do about it, and what the library
+already keeps for you.
 
 ## 8. Interop subtlety worth knowing
 
@@ -248,26 +253,3 @@ practical consequence: a compiled extension whose name collides with another may
 and rejected on an exception, and a compiled extension that throws internally on a legitimate
 call is indistinguishable from one that did not apply. Prefer script-declared extensions where
 the name is not unique.
-
-## What has parity
-
-For reference, the following behave like Haxe:
-
-- classes, `extends`, `override`, `super(...)`;
-- scripted interfaces **and** native interface implementation (via the bridge);
-- enums with parameterized constructors, and `switch` with extraction, guards, `|` alternatives, and
-  array/object patterns;
-- typedef aliases to named types;
-- `static` / instance / `private` / getters & setters (`get`/`set`/`null`/`never`/`default`/
-  `dynamic`), `final` fields;
-- `using` static extensions, **selected by receiver type** when the extension is declared in a
-  script (see below);
-- `import`, normal, `as` alias, wildcard `.*`, and single static field / enum constructor;
-- string interpolation (`'$ident'`, `'${expr}'`), array and map comprehensions;
-- optional, default, and rest (`...`) arguments;
-- typed **multi-catch** and raw `throw` of any value;
-- closures with capture and self-recursion;
-- `#if` / `#elseif` / `#else` / `#end` preprocessing against defines;
-- runtime **type enforcement** of variable, parameter, return, and `cast(x, T)` annotations, plus
-  `is` / `Std.isOfType` on classes, interfaces, scripted enums, and the primitives (typed mode);
-- **`Int`/`Float` correctness**, integer arithmetic stays `Int`, `/` is `Float`.
