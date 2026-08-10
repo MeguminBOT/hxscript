@@ -244,6 +244,8 @@ Two worked examples and one application, all runnable:
 - [Static checking](docs/checker.md) sets out the design for a pre-run checker, and its limits.
 - [Internals](docs/internals.md) explains why the parts that are not obvious are the way they are.
 - [Tests](test) holds the suites, which double as executable documentation of behaviour.
+- [Changelog](CHANGELOG.md) has what changed per release, including the renames 2.0.0 asks you
+  to follow.
 
 ## Status
 
