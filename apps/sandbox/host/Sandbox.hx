@@ -65,6 +65,9 @@ class Sandbox {
 	/** Modification times at load, so `stale` can tell whether anything changed. */
 	static var times:Map<String, Float> = [];
 
+	/** The last answer `classes()` gave, dropped whenever a world is built. */
+	static var listed:Array<ScriptedClass> = null;
+
 	/**
 	 * Reads a project's scripts into a fresh world and starts them.
 	 *
@@ -100,6 +103,7 @@ class Sandbox {
 		hxscript.error.Sink.onDiagnostic.push(count);
 
 		world = new Environment();
+		listed = null;
 
 		var scriptsRoot:String = '${project.path}/scripts';
 
@@ -179,6 +183,7 @@ class Sandbox {
 	public static function unload():Void {
 		world = null;
 		current = null;
+		listed = null;
 		times = [];
 	}
 
@@ -206,6 +211,7 @@ class Sandbox {
 		#if hxscript_cppia
 		if (!studio.Settings.compiling()) {
 			compiled = 'interpreted (by choice)';
+			guard();
 			return;
 		}
 
@@ -225,6 +231,7 @@ class Sandbox {
 			parts.push('all interpreted');
 
 		compiled = parts.join('; ');
+		guard();
 		#else
 		compiled = 'interpreted (built without -D hxscript_cppia)';
 		#end
@@ -236,18 +243,23 @@ class Sandbox {
 	 * Compares against the paths recorded at load and against the folder as it is now, so a file added or
 	 * removed counts as a change too, which is what somebody creating a new script in their editor is doing.
 	 *
+	 * It walks the folder rather than re-reading the project: the manifest has nothing to do with
+	 * whether a script changed, and this runs several times a second for as long as the application is
+	 * open, so parsing a JSON file to answer it was work with no bearing on the answer.
+	 *
 	 * @return Whether a `load` would produce something different.
 	 */
 	public static function stale():Bool {
 		if (current == null)
 			return false;
 
-		var fresh:ProjectInfo = studio.Projects.read(current.name, current.path);
+		var fresh:Array<String> = [];
+		studio.Projects.scripts(current.path, fresh);
 
-		if (fresh.scripts.length != current.scripts.length)
+		if (fresh.length != current.scripts.length)
 			return true;
 
-		for (file in fresh.scripts) {
+		for (file in fresh) {
 			if (!times.exists(file))
 				return true;
 
@@ -262,12 +274,24 @@ class Sandbox {
 		return false;
 	}
 
-	/** @return Every scripted class in the world, sorted by name. */
+	/**
+	 * Every scripted class in the world, sorted by name.
+	 *
+	 * Cached, because the answer only changes when a world is built. It is asked far more often than
+	 * that: resolving what a project runs reaches it six times, describing a project once more, and
+	 * the readout window four times a second. Rebuilding a map, an array and a sort each time was the
+	 * shape of the cost, not its size.
+	 *
+	 * @return The classes, in name order.
+	 */
 	public static function classes():Array<ScriptedClass> {
-		var found:Map<String, ScriptedClass> = [];
+		if (listed != null)
+			return listed;
 
 		if (world == null)
 			return [];
+
+		var found:Map<String, ScriptedClass> = [];
 
 		for (module in world.modules)
 			for (name => type in module.types)
@@ -276,7 +300,7 @@ class Sandbox {
 
 		var names:Array<String> = [for (n in found.keys()) n];
 		names.sort(Reflect.compare);
-		return [for (n in names) found.get(n)];
+		return listed = [for (n in names) found.get(n)];
 	}
 
 	/**

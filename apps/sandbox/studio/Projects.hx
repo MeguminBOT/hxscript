@@ -146,7 +146,7 @@ class Projects {
 		}
 
 		var scripts:Array<String> = [];
-		walk('$path/scripts', scripts);
+		Projects.scripts(path, scripts);
 
 		if (scripts.length == 0 && problem == null)
 			problem = 'no .hx files under scripts/';
@@ -316,6 +316,19 @@ class Projects {
 		}
 	}
 	#end
+
+	/**
+	 * Every `.hx` a project would load, in load order.
+	 *
+	 * Public because the file watcher asks the same question several times a second and has no use
+	 * for the rest of what reading a project produces.
+	 *
+	 * @param path The project folder.
+	 * @param out Where to append.
+	 */
+	public static function scripts(path:String, out:Array<String>):Void {
+		walk('$path/scripts', out);
+	}
 
 	/**
 	 * Collects every `.hx` under a directory, deepest paths last.
