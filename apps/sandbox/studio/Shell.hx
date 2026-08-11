@@ -72,6 +72,15 @@ class Shell extends FlxState {
 	/** How often to look for changed files, in seconds. */
 	static inline var WATCH:Float = 0.5;
 
+	/**
+	 * Points added to every font size in the shell.
+	 *
+	 * SmiðrUI's design sizes suit a dense editor chrome, and this is a window somebody reads error
+	 * text out of. Raising the theme's scale instead would grow every control with the text, which
+	 * costs the list and the log the rows they are worth having.
+	 */
+	static inline var FONT_BOOST:Int = 2;
+
 	/** The only shell, so the launcher and the hotkeys can reach it. */
 	public static var instance(default, null):Shell = null;
 
@@ -142,6 +151,8 @@ class Shell extends FlxState {
 		Api.onQuit = Launcher.stop;
 
 		FlxG.autoPause = false;
+
+		UITheme.setFontBoost(FONT_BOOST);
 
 		Settings.load();
 		Settings.apply();
