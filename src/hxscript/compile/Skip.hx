@@ -24,4 +24,20 @@ class Skip {
 
 		return '$name ($origin:$line): $reason';
 	}
+
+	#if (hxscript_cppia || hxscript_hl)
+	/**
+	 * @param name The module's name.
+	 * @param e What the emitter refused, carrying where it was when it knew.
+	 * @return The record a report carries for it.
+	 */
+	public static function from(name:String, e:Unsupported):Skip {
+		return {
+			name: name,
+			reason: e.reason,
+			origin: e.pos == null ? null : e.pos.origin,
+			line: e.pos == null ? 0 : e.pos.line
+		};
+	}
+	#end
 }

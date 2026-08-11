@@ -1,7 +1,7 @@
 import ModeCases.Case;
 import hxscript.Environment;
 import hxscript.Module;
-import hxscript.compile.Cppia;
+import hxscript.cppia.Backend;
 import hxscript.compile.Result;
 import hxscript.syntax.Parser;
 import hxscript.types.ScriptedClass;
@@ -67,7 +67,7 @@ class MBench {
 			// Writes compiled bytes to disk, to find out whether a later process can load them.
 			var src:String = 'package p;\nclass T {\n\tpublic static function run():Dynamic { return 40 + 2; }\n}\n';
 			var decls = new Parser().parseModule(src, 'cache', 0, ['p']);
-			var r:Result = Cppia.compile([{name: 'p.T', decls: decls}]);
+			var r:Result = Backend.compile([{name: 'p.T', decls: decls}]);
 			sys.io.File.saveBytes('bin_mbench/cached.cppia', r.bytes);
 			Sys.println('saved ' + r.bytes.length + ' bytes');
 			return;
@@ -218,7 +218,7 @@ class MBench {
 		}
 
 		var decls:Dynamic = new Parser().parseModule(src, 'mbench', 0, ['p']);
-		var result:Result = Cppia.compile([{name: 'p.T', decls: decls}]);
+		var result:Result = Backend.compile([{name: 'p.T', decls: decls}]);
 		if (result.bytes == null) {
 			// Thrown rather than returned as null so the reason reaches the results file. Which
 			// constructs the compiler declines is half of what this benchmark is reporting.

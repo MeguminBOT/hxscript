@@ -20,7 +20,9 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-package hxscript.compile;
+package hxscript.cppia;
+
+import hxscript.compile.Unsupported;
 
 #if hxscript_cppia
 import haxe.ds.StringMap;

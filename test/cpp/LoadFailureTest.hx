@@ -1,7 +1,7 @@
 import hxscript.Environment;
 import hxscript.Module;
 import hxscript.compile.Compiler;
-import hxscript.compile.Cppia;
+import hxscript.cppia.Backend;
 import hxscript.compile.Unit;
 import hxscript.compile.Report;
 import hxscript.compile.Result;

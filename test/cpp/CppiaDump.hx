@@ -1,4 +1,4 @@
-import hxscript.compile.Cppia;
+import hxscript.cppia.Backend;
 import hxscript.compile.Result;
 
 /**
@@ -12,7 +12,7 @@ class CppiaDump {
 		var parser = new hxscript.syntax.Parser();
 		var decls = parser.parseModule(source, 'test', 0, ['p']);
 
-		var result:Result = Cppia.compile([{name: 'p.T', decls: decls}]);
+		var result:Result = Backend.compile([{name: 'p.T', decls: decls}]);
 
 		if (result.bytes == null) {
 			Sys.println('refused: ' + result.skipped[0].reason);

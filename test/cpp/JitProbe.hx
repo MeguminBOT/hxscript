@@ -1,4 +1,4 @@
-import hxscript.compile.Cppia;
+import hxscript.cppia.Backend;
 import hxscript.compile.Unit;
 import hxscript.compile.Result;
 
@@ -30,7 +30,7 @@ class JitProbe {
 			inputs.push({name: src.n, decls: new hxscript.syntax.Parser().parseModule(src.c, src.n, 0, ['w'])});
 		}
 
-		var res:Result = Cppia.compile(inputs, null, [], []);
+		var res:Result = Backend.compile(inputs, null, [], []);
 		if (res.bytes == null) {
 			Sys.println('refused: ' + (res.skipped.length > 0 ? res.skipped[0].reason : '?'));
 			return;

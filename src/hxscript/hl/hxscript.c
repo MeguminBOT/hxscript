@@ -103,4 +103,4 @@ HL_PRIM vclosure *HL_NAME(closure)(hxs_module *h, int findex) {
 DEFINE_PRIM(_BYTES, last_error, _NO_ARG);
 DEFINE_PRIM(_ABSTRACT(hxs_module), load, _BYTES _I32);
 DEFINE_PRIM(_I32, entry_index, _ABSTRACT(hxs_module));
-DEFINE_PRIM(_FUN(_DYN, _NO_ARG), closure, _ABSTRACT(hxs_module) _I32);
+DEFINE_PRIM(_DYN, closure, _ABSTRACT(hxs_module) _I32);

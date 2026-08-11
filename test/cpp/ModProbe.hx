@@ -1,4 +1,4 @@
-import hxscript.compile.Cppia;
+import hxscript.cppia.Backend;
 import hxscript.compile.Unit;
 import hxscript.compile.Result;
 
@@ -64,7 +64,7 @@ class ModProbe {
 			var problem:String = null;
 			try {
 				var decls = new hxscript.syntax.Parser().parseModule(src, name, 0, parts);
-				var res:Result = Cppia.compile([{name: name, decls: decls}], null, outside, []);
+				var res:Result = Backend.compile([{name: name, decls: decls}], null, outside, []);
 
 				if (res.bytes == null) {
 					problem = 'refused: ' + (res.skipped.length > 0 ? res.skipped[0].reason : 'no reason');
@@ -113,7 +113,7 @@ class ModProbe {
 		if (inputs.length == 0) return null;
 
 		try {
-			var res:Result = Cppia.compile(inputs, null, outside, []);
+			var res:Result = Backend.compile(inputs, null, outside, []);
 			if (res.bytes == null) return null;
 			var loaded = cpp.cppia.Module.fromData(res.bytes.getData());
 			loaded.boot();

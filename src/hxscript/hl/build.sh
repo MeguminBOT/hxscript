@@ -39,11 +39,22 @@ $CC $FLAGS -o "$OUT/hxscript.hdll" "$HERE/hxscript.c" $LOADER "$HL_BIN/libhl.dll
 
 echo "ok"
 
-# Passing `test` also proves it works: a host program loads a SEPARATE module that Haxe produced,
-# jits it and calls its entry point, all inside one stock VM. The probe lives in the test tree
-# because it is not part of the library.
+# Passing `test` proves both halves. First a host program loads a SEPARATE module that Haxe
+# produced, jits it and calls its entry point, all inside one stock VM. Then it does the same with
+# modules this library wrote itself, which is the only way to find out whether a layout is right:
+# the reader rejects a whole module rather than pointing at the byte that was wrong. The probes live
+# in the test tree because they are not part of the library.
 if [ "$1" = "test" ]; then
 	haxe -cp test/hl/loader -main Guest -hl "$OUT/guest.hl"
-	haxe -cp test/hl/loader -main LoadProbe -hl "$OUT/loadprobe.hl"
+	haxe -cp src -cp test/hl/loader -D hxscript_hl -main LoadProbe -hl "$OUT/loadprobe.hl"
 	( cd "$OUT" && "$HL_BIN/hl.exe" loadprobe.hl guest.hl )
+
+	haxe -cp src -cp test/hl/loader -D hxscript_hl -main WriterProbe -hl "$OUT/writerprobe.hl"
+	( cd "$OUT" && "$HL_BIN/hl.exe" writerprobe.hl )
+
+	haxe -cp src -cp test/hl/loader -D hxscript_hl --macro "hxscript.macro.Keep.run()" -main EmitProbe -hl "$OUT/emitprobe.hl"
+	( cd "$OUT" && "$HL_BIN/hl.exe" emitprobe.hl )
+
+	haxe -cp src -cp test/hl/loader -D hxscript_hl --macro "hxscript.macro.Keep.run()" -main HostProbe -hl "$OUT/hostprobe.hl"
+	( cd "$OUT" && "$HL_BIN/hl.exe" hostprobe.hl )
 fi

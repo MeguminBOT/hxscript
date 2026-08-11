@@ -2,6 +2,9 @@ package hxscript;
 
 import hxscript.types.*;
 import hxscript.types.TypeCollection;
+#if hxscript_cppia
+import hxscript.cppia.Backend;
+#end
 
 /**
  * A world of modules that resolve against each other. It owns the module set, a combined
@@ -55,7 +58,7 @@ class Environment {
 			if (!module.types.exists(path))
 				continue;
 
-			for (declared => members in hxscript.compile.Cppia.booleans(module.decls))
+			for (declared => members in Backend.booleans(module.decls))
 				booleans.set(declared, members);
 
 			break;

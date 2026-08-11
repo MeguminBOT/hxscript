@@ -1,7 +1,7 @@
 import hxscript.Environment;
 import hxscript.syntax.Expr.ImportMode;
 import hxscript.Module;
-import hxscript.compile.Cppia;
+import hxscript.cppia.Backend;
 import hxscript.compile.Compiler;
 import hxscript.syntax.Parser;
 import hxscript.types.ScriptedClass;
@@ -196,7 +196,7 @@ class C {
 	static function viaCppia(src:String):String {
 		try {
 			var decls = new Parser().parseModule(src, 'sweep', 0, ['s']);
-			var r = Cppia.compile([{name: 's.C', decls: decls}], Compiler.ambient, null, Compiler.statics);
+			var r = Backend.compile([{name: 's.C', decls: decls}], Compiler.ambient, null, Compiler.statics);
 			if (r.bytes == null)
 				return 'REFUSED: ' + (r.skipped.length > 0 ? r.skipped[0].reason : '?');
 
