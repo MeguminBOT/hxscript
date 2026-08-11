@@ -79,7 +79,13 @@
 	<!-- <haxedef name="hxscript_verbose" /> -->
 
 	<!-- HXCPP -->
-	<haxedef name="HXCPP_GC_MOVING"/>
+	<!--
+		HXCPP_GC_MOVING is deliberately off. hxcpp ships it commented out in Immix.cpp, and turning
+		it on segfaulted this application during the first project load, before anything was drawn.
+		A compacting collector relocates objects, and this build is `scriptable`: a script's world is
+		built by an interpreter holding references across allocations, and cppia keeps its own. Leave
+		it off unless somebody has a reason and a way to test it.
+	-->
 	<haxedef name="HXCPP_GC_DYNAMIC_SIZE"/>
 	<haxedef name="HXCPP_GC_BIG_BLOCKS"/>
 	<haxedef name="HXCPP_GC_DEBUG_LEVEL" value="1"/>

@@ -64,8 +64,15 @@ class Settings {
 	 * thing running faster. They are three different runtimes, and a difference between them is a bug in one
 	 * of them. The differential suites exist for exactly that, and being able to drop a project into the
 	 * interpreter without rebuilding is the same test with somebody's real code.
+	 *
+	 * Bytecode rather than the JIT by default, and the reason is that a JIT fault cannot be survived.
+	 * `Compiler.retryWithoutJit` covers a loader that *refuses* a batch, because a refusal comes back
+	 * as a value. A fault inside hxcpp's JIT while it compiles is a segmentation fault instead, which
+	 * ends the process from underneath Haxe with nothing to catch and nothing written down. One of
+	 * the projects here does exactly that. Bytecode is most of the speed and cannot do that, so the
+	 * JIT is something to turn on deliberately rather than something everybody starts with.
 	 */
-	public static var mode:String = JIT;
+	public static var mode:String = CPPIA;
 
 	/**
 	 * Frames per second the application runs at, or zero for the window's own rate.
