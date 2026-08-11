@@ -27,6 +27,44 @@ class AbstractTools {
 	}
 
 	/**
+	 * Opens a boxed abstract toward a type it declares itself convertible to.
+	 *
+	 * An `@:to` method answers first. Failing that, a `to` on the declaration itself hands the
+	 * underlying value over, which is what makes `abstract Metres(Float) to Float` usable as a
+	 * `Float` at all: there is no method behind that conversion, only the box coming off.
+	 *
+	 * Kept out of `Interp` deliberately. That class is large enough that adding a method to it moved
+	 * every hot path's code around and cost the whole benchmark a few percent, for a conversion no
+	 * hot path performs.
+	 *
+	 * @param e The boxed value.
+	 * @param path The target type's name.
+	 * @return The opened value, or null when the abstract declares no route to that type.
+	 */
+	public static function openTo(e:AbstractValue, path:String):Dynamic {
+		var direct:Dynamic = e.resolveTo(path);
+		if (direct != null)
+			return direct;
+
+		if (!(e is ScriptedAbstractValue))
+			return null;
+
+		var box:ScriptedAbstractValue = cast e;
+		if (box.owner == null)
+			return null;
+
+		for (target in box.owner.to) {
+			switch (target) {
+				case CTPath(p, _) if ((p.length == 1 ? p[0] : p.join('.')) == path):
+					return box.boxed;
+				case _:
+			}
+		}
+
+		return null;
+	}
+
+	/**
 	 * Names the type of a value, reporting an enum-abstract by its underlying implementation name.
 	 *
 	 * @param v The value to name.

@@ -2890,6 +2890,11 @@ class Interp {
 					case 'Dynamic' | 'Any' | 'Void' | 'Class' | 'Enum':
 						return e;
 					case 'Int' | 'Float' | 'Bool' | 'String' | 'Map' | 'IMap':
+						if (e is AbstractValue) {
+							var opened:Dynamic = AbstractTools.openTo(cast e, path);
+							if (opened != null && opened != e)
+								return castCoreType(opened, path);
+						}
 						return castCoreType(e, path);
 					default:
 						if (t == null)
