@@ -1,5 +1,6 @@
 import flixel.FlxGame;
 import host.Api;
+import studio.JitProbe;
 import studio.Projects;
 import studio.Shell;
 
@@ -39,6 +40,12 @@ class Main {
 	static function main():Void {
 		if (!Projects.open(argument('--projects')))
 			Api.log('could not open a projects folder at ' + Projects.root);
+
+		var probe:String = argument('--probe');
+		if (probe != null) {
+			JitProbe.run(probe, argument('--only'));
+			return;
+		}
 
 		Shell.autoRun = argument('--run');
 
