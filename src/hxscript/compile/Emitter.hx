@@ -1350,6 +1350,14 @@ class Emitter {
 			return;
 		}
 
+		if (op == 'is') {
+			expr({
+				e: ECall({e: EField({e: EIdent('Std'), pos: pos}, 'isOfType'), pos: pos}, [e1, e2]),
+				pos: pos
+			});
+			return;
+		}
+
 		throw new Unsupported('operator ' + op, pos);
 	}
 
