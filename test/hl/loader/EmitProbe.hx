@@ -253,7 +253,12 @@ class EmitProbe {
 		check('a string compared', 'Bool', 'var s:String = "a"; return s == "a";');
 		check('a string field', 'Int', 'var s:String = "abc"; return s.length;');
 		check('a string method', 'String', 'var s:String = "ab"; return s.toUpperCase();');
-		check('an array is refused', 'Int', 'var a = [1, 2]; return a[0];');
+		check('an array', 'Int', 'var a = [1, 2]; return a[0];');
+		check('an array written to', 'Int', 'var a = [1, 2]; a[0] = 40; return a[0] + a[1];');
+		check('an array looped over', 'Int', 'var t:Int = 0; for (v in [1, 2, 3]) t += v; return t;');
+		check('a map', 'Int', 'var m = ["a" => 40, "b" => 2]; return m.get("a") + m.get("b");');
+		check('a structure', 'Int', 'var o = {a: 40, b: 2}; return o.a + o.b;');
+		check('a comprehension', 'Int', 'var a = [for (i in 0...4) i * 2]; return a[3];');
 
 		Sys.println('== ' + passed + ' passed, ' + failed + ' failed ==, ' + refused + ' refused');
 		Sys.exit(failed == 0 ? 0 : 1);

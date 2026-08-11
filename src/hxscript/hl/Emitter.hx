@@ -103,6 +103,9 @@ class Emitter {
 	/** The global each bound value sits in, by what identifies it. */
 	var hostSlots:StringMap<Int>;
 
+	/** Where a comprehension is gathering, or null when a loop is just a loop. */
+	var collector:Null<{slot:Int, pairs:Bool}>;
+
 	/**
 	 * Every value this module needs handed to it, in the order the globals were made.
 	 *
@@ -134,6 +137,7 @@ class Emitter {
 		memberTypes = new StringMap();
 		inside = null;
 		hostSlots = new StringMap();
+		collector = null;
 		bindings = [];
 
 		tVoid = module.prim(HVoid);
@@ -435,6 +439,9 @@ class Emitter {
 					case EField(obj, name, _):
 						setField(obj, name, value, e.pos);
 
+					case EArray(obj, at):
+						callSupport('setIndex', [dynOf(obj), dynOf(at), dynOf(value)], reg(tDyn));
+
 					case EIdent(name):
 						throw new Unsupported('an assignment to ' + name + ', which is not a local here', e.pos);
 
@@ -466,15 +473,40 @@ class Emitter {
 
 				breaks.push([]);
 				continues.push([]);
-				statement(body);
+				loopBody(body);
 
 				land(continues.pop());
 				back(head);
 				land(out);
 				land(breaks.pop());
 
+			case EDoWhile(cond, body):
+				var head:Int = mark();
+
+				breaks.push([]);
+				continues.push([]);
+				loopBody(body);
+
+				land(continues.pop());
+
+				var again:Array<Int> = [];
+				condition(cond, true, again);
+				landAt(again, head);
+				land(breaks.pop());
+
 			case EFor(name, it, body):
-				forRange(name, it, body, e.pos);
+				if (rangeOf(it) != null)
+					forRange(name, it, body, e.pos);
+				else
+					forEach(name, it, body, e.pos);
+
+			case EForGen(spec, body):
+				switch (spec.e) {
+					case EBinop('in', {e: EBinop('=>', {e: EIdent(k)}, {e: EIdent(v)})}, source):
+						forPairs(k, v, source, body, e.pos);
+					case _:
+						throw new Unsupported('a for over something that is not a key and a value', e.pos);
+				}
 
 			case EReturn(value):
 				if (value == null) {
@@ -522,29 +554,31 @@ class Emitter {
 		}
 	}
 
-	/** Writes a `for` over an integer range, which is the only iterable here. */
-	function forRange(name:String, it:Expr, body:Expr, pos:Position):Void {
-		var low:Expr;
-		var high:Expr;
-
-		switch (it.e) {
-			case EBinop('...', a, b):
-				low = a;
-				high = b;
-			case EParent({e: EBinop('...', a, b)}):
-				low = a;
-				high = b;
-			case _:
-				throw new Unsupported('a for over something that is not an integer range', pos);
+	/** @return The two ends of a range, or null when an expression is not one. */
+	function rangeOf(it:Expr):Null<{low:Expr, high:Expr}> {
+		return switch (it.e) {
+			case EBinop('...', a, b): {low: a, high: b};
+			case EParent(inner): rangeOf(inner);
+			case _: null;
 		}
+	}
+
+	/**
+	 * Writes a `for` over an integer range, which is the one that needs no help.
+	 *
+	 * A counter in a typed register and a comparison that is already a jump, so this is the loop the
+	 * measured numbers come from and the reason it is spotted before anything else is tried.
+	 */
+	function forRange(name:String, it:Expr, body:Expr, pos:Position):Void {
+		var ends:{low:Expr, high:Expr} = rangeOf(it);
 
 		push();
 
 		var counter:Int = reg(tI32);
-		into(low, counter);
+		into(ends.low, counter);
 
 		var limit:Int = reg(tI32);
-		into(high, limit);
+		into(ends.high, limit);
 
 		scopes[scopes.length - 1].set(name, counter);
 
@@ -553,7 +587,7 @@ class Emitter {
 
 		breaks.push([]);
 		continues.push([]);
-		statement(body);
+		loopBody(body);
 
 		land(continues.pop());
 		ops.push({op: OIncr, args: [counter]});
@@ -562,6 +596,142 @@ class Emitter {
 		land(breaks.pop());
 
 		pop();
+	}
+
+	/**
+	 * Writes a `for` over anything else, through the iterator protocol.
+	 *
+	 * What counts as iterable is the interpreter's rule rather than one of this emitter's, so a
+	 * value a script can loop over interpreted is one it can loop over compiled.
+	 */
+	function forEach(name:String, it:Expr, body:Expr, pos:Position):Void {
+		push();
+
+		var cursor:Int = reg(tDyn);
+		callSupport('iterator', [dynOf(it)], cursor);
+
+		var item:Int = reg(tDyn);
+		scopes[scopes.length - 1].set(name, item);
+
+		var head:Int = mark();
+		var more:Int = reg(tBool);
+		callSupport('step', [cursor], more);
+
+		var out:Array<Int> = [jump(OJFalse, [more])];
+		callSupport('take', [cursor], item);
+
+		breaks.push([]);
+		continues.push([]);
+		loopBody(body);
+
+		land(continues.pop());
+		back(head);
+		land(out);
+		land(breaks.pop());
+
+		pop();
+	}
+
+	/**
+	 * Writes a `for (key => value in ...)`.
+	 *
+	 * The pair a key-value iterator hands back is an anonymous structure, so its two halves come out
+	 * of it by name the way any other field does.
+	 */
+	function forPairs(key:String, value:String, source:Expr, body:Expr, pos:Position):Void {
+		push();
+
+		var cursor:Int = reg(tDyn);
+		callSupport('pairs', [dynOf(source)], cursor);
+
+		var k:Int = reg(tDyn);
+		var v:Int = reg(tDyn);
+		scopes[scopes.length - 1].set(key, k);
+		scopes[scopes.length - 1].set(value, v);
+
+		var head:Int = mark();
+		var more:Int = reg(tBool);
+		callSupport('step', [cursor], more);
+
+		var out:Array<Int> = [jump(OJFalse, [more])];
+
+		var pair:Int = reg(tDyn);
+		callSupport('take', [cursor], pair);
+		ops.push({op: ODynGet, args: [k, pair, module.stringId('key')]});
+		ops.push({op: ODynGet, args: [v, pair, module.stringId('value')]});
+
+		breaks.push([]);
+		continues.push([]);
+		loopBody(body);
+
+		land(continues.pop());
+		back(head);
+		land(out);
+		land(breaks.pop());
+
+		pop();
+	}
+
+	/**
+	 * Writes a loop's body, which is where a comprehension differs from a loop.
+	 *
+	 * Everything else about the two is the same, so this is the only place that has to know which
+	 * one is being written.
+	 */
+	inline function loopBody(e:Expr):Void {
+		if (collector == null)
+			statement(e);
+		else
+			collect(e);
+	}
+
+	/**
+	 * Writes the body of a comprehension, gathering what it produces.
+	 *
+	 * A comprehension yields the value of whatever its body ends with, so the tail is walked to and
+	 * everything before it is an ordinary statement. Loops inside go back through the loop writers,
+	 * which come back here for their own bodies, so a nested comprehension needs nothing of its own.
+	 *
+	 * @param e The body.
+	 */
+	function collect(e:Expr):Void {
+		switch (e.e) {
+			case EBlock(items):
+				push();
+				for (i in 0...items.length) {
+					if (i == items.length - 1)
+						collect(items[i]);
+					else
+						statement(items[i]);
+				}
+				pop();
+
+			case EParent(inner) | EMeta(_, _, inner):
+				collect(inner);
+
+			case EIf(cond, yes, no):
+				var toElse:Array<Int> = [];
+				condition(cond, false, toElse);
+				collect(yes);
+
+				if (no == null) {
+					land(toElse);
+				} else {
+					var over:Int = jump(OJAlways);
+					land(toElse);
+					collect(no);
+					land([over]);
+				}
+
+			case EFor(_, _, _) | EForGen(_, _) | EWhile(_, _) | EDoWhile(_, _):
+				statement(e);
+
+			case EBinop('=>', k, v):
+				callSupport('put', [collector.slot, dynOf(k), dynOf(v)], collector.slot);
+
+			case _:
+				callSupport('push', [collector.slot, dynOf(e)], reg(tDyn));
+		}
 	}
 
 	/**
@@ -674,6 +844,18 @@ class Emitter {
 				into(no, slot);
 				land([over]);
 
+			case EArrayDecl(items):
+				emitArrayDecl(items, slot, e.pos);
+
+			case EObject(fields):
+				emitObject(fields, slot);
+
+			case EArray(obj, at):
+				callSupport('index', [dynOf(obj), dynOf(at)], slot);
+
+			case EBinop('...', low, high):
+				callSupport('range', [dynOf(low), dynOf(high)], slot);
+
 			case EBinop(op, a, b) if (COMPARE.exists(op) || op == '&&' || op == '||'):
 				materialise(e, slot);
 
@@ -700,6 +882,108 @@ class Emitter {
 
 			case _:
 				throw new Unsupported('this expression as a value', e.pos);
+		}
+	}
+
+	/**
+	 * Writes an array literal, a map literal, or the comprehension either can be spelled as.
+	 *
+	 * Which of the three it is comes from the shape: a `=>` among the items makes it a map, and a
+	 * single loop makes it a comprehension. A map starts as null rather than as a map, because which
+	 * kind of map it wants is decided by its first key and a comprehension has no first key until it
+	 * has run once.
+	 *
+	 * @param items The literal's contents.
+	 * @param slot Where to leave it.
+	 * @param pos Where it appears.
+	 */
+	function emitArrayDecl(items:Array<Expr>, slot:Int, pos:Position):Void {
+		var held:Int = landing(slot);
+
+		if (items.length == 1 && looping(items[0])) {
+			var pairs:Bool = yieldsPairs(items[0]);
+
+			if (pairs)
+				ops.push({op: ONull, args: [held]});
+			else
+				callSupport('array', [], held);
+
+			var outer:Null<{slot:Int, pairs:Bool}> = collector;
+			collector = {slot: held, pairs: pairs};
+			statement(items[0]);
+			collector = outer;
+
+			if (held != slot)
+				move(held, slot);
+			return;
+		}
+
+		var pairs:Bool = items.length > 0 && paired(items[0]);
+
+		if (pairs) {
+			ops.push({op: ONull, args: [held]});
+
+			for (item in items) {
+				switch (item.e) {
+					case EBinop('=>', k, v):
+						callSupport('put', [held, dynOf(k), dynOf(v)], held);
+					case _:
+						throw new Unsupported('a literal mixing pairs with plain values', pos);
+				}
+			}
+		} else {
+			callSupport('array', [], held);
+
+			for (item in items)
+				callSupport('push', [held, dynOf(item)], reg(tDyn));
+		}
+
+		if (held != slot)
+			move(held, slot);
+	}
+
+	/** Writes an anonymous structure. */
+	function emitObject(fields:Array<{name:String, e:Expr}>, slot:Int):Void {
+		var held:Int = landing(slot);
+		callSupport('object', [], held);
+
+		for (f in fields) {
+			var name:Int = reg(tDyn);
+			ops.push({op: OGetGlobal, args: [name, constSlot('s' + f.name, f.name)]});
+			callSupport('setField', [held, name, dynOf(f.e)], reg(tDyn));
+		}
+
+		if (held != slot)
+			move(held, slot);
+	}
+
+	/** @return Whether an expression is a loop, which is what makes a literal a comprehension. */
+	function looping(e:Expr):Bool {
+		return switch (e.e) {
+			case EFor(_, _, _) | EForGen(_, _) | EWhile(_, _) | EDoWhile(_, _): true;
+			case EParent(inner) | EMeta(_, _, inner): looping(inner);
+			case _: false;
+		}
+	}
+
+	/** @return Whether an expression is a `key => value` pair. */
+	function paired(e:Expr):Bool {
+		return switch (e.e) {
+			case EBinop('=>', _, _): true;
+			case EParent(inner) | EMeta(_, _, inner): paired(inner);
+			case _: false;
+		}
+	}
+
+	/** @return Whether a comprehension's body ends in a pair, which makes it build a map. */
+	function yieldsPairs(e:Expr):Bool {
+		return switch (e.e) {
+			case EFor(_, _, body) | EForGen(_, body) | EWhile(_, body) | EDoWhile(_, body): yieldsPairs(body);
+			case EParent(inner) | EMeta(_, _, inner): yieldsPairs(inner);
+			case EBlock(items): items.length > 0 && yieldsPairs(items[items.length - 1]);
+			case EIf(_, yes, no): yieldsPairs(yes) || (no != null && yieldsPairs(no));
+			case EBinop('=>', _, _): true;
+			case _: false;
 		}
 	}
 
@@ -1216,10 +1500,21 @@ class Emitter {
 	}
 
 	/** Points every listed jump at wherever the next instruction goes. */
-	function land(sites:Array<Int>):Void {
+	inline function land(sites:Array<Int>):Void {
+		landAt(sites, ops.length);
+	}
+
+	/**
+	 * Points every listed jump at one instruction.
+	 *
+	 * @param sites Where the jumps were written.
+	 * @param target Which instruction they should reach. A target already written has to be a label,
+	 *        which is what `mark` leaves.
+	 */
+	function landAt(sites:Array<Int>, target:Int):Void {
 		for (site in sites) {
 			var instr:Instruction = ops[site];
-			instr.args[instr.args.length - 1] = ops.length - site - 1;
+			instr.args[instr.args.length - 1] = target - site - 1;
 		}
 	}
 
@@ -1285,6 +1580,7 @@ class Emitter {
 			// integers, and a division is always a float even between two integers.
 			case EBinop(op, _, _) if (INTEGRAL.indexOf(op) >= 0): tI32;
 			case EBinop('/', _, _): tF64;
+			case EBinop('...', _, _): tDyn;
 
 			case EBinop(_, a, b):
 				var l:Int = infer(a);
