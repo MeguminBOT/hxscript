@@ -119,8 +119,20 @@ class Emitter {
 	 */
 	var moduleAbstracts:StringMap<String> = new StringMap();
 
+	/**
+	 * The method serving each operator on one of this batch's abstracts, keyed `path op`.
+	 *
+	 * Without it an overloaded operator lowers to the arithmetic its underlying type happens to
+	 * support, which silently agrees with the declared body whenever the body IS that arithmetic and
+	 * silently disagrees the moment it is not.
+	 */
+	var abstractOps:StringMap<String> = new StringMap();
+
 	/** What `nativeAbstract` has answered, misses included, so a repeat costs a map read. */
 	var wrappers:StringMap<Class<Dynamic>> = new StringMap();
+
+	/** What `resolvable` has answered, so a repeated reference costs a map read. */
+	var resolvedTypes:StringMap<Bool> = new StringMap();
 
 	/** Statics a `using` in this module puts in scope, by member name, to the type declaring them. */
 	var usingStatics:StringMap<String> = new StringMap();
@@ -230,7 +242,20 @@ class Emitter {
 
 		for (name in BUILTIN_TYPES)
 			typePaths.set(name, name);
+
+		typePaths.set(ENUMS, 'hxscript.proxy.TypeProxy');
 	}
+
+	/**
+	 * The name a desugared enum switch reads its reflection helpers through.
+	 *
+	 * `Type.enumConstructor` is an unchecked cast on hxcpp, so compiled code that reached it with a
+	 * value the INTERPRETER built ended the process rather than reporting anything. That happens
+	 * whenever only part of a world is compiled, which is the arrangement partial substitution
+	 * exists for. `TypeProxy` answers for both forms, and the leading `@` keeps the name out of
+	 * reach of a script, which cannot write it.
+	 */
+	static inline var ENUMS:String = '@enums';
 
 	/**
 	 * Registers types the host makes available to every script without an import.
@@ -350,6 +375,7 @@ class Emitter {
 					for (f in a.fields) {
 						if (f.name == 'new')
 							abstractCtors.set(full, true);
+						recordOperators(full, f);
 					}
 
 					var returns:StringMap<String> = new StringMap();
@@ -914,14 +940,19 @@ class Emitter {
 
 			case EIf(cond, e1, e2):
 				w.pos(line);
+
+				// Always the two-branch form, even with nothing to put in the second. The loader gives
+				// `IF` no value at all, so an `if` read as a value was null however it went, while the
+				// interpreter hands back the branch it took. Writing an empty else costs one token and
+				// makes the two agree.
+				w.token('IFELSE');
+				expr(cond);
+				expr(e1);
+
 				if (e2 == null) {
-					w.token('IF');
-					expr(cond);
-					expr(e1);
+					w.pos(line);
+					w.token('NULL');
 				} else {
-					w.token('IFELSE');
-					expr(cond);
-					expr(e1);
 					expr(e2);
 				}
 
@@ -1178,7 +1209,12 @@ class Emitter {
 					w.int(1);
 
 					noteArrayElement(n, t);
-					var id:Int = declareVar(n, t == null ? null : typeName(t));
+
+					// Without an annotation the initialiser is asked what it produces, because a local
+					// holding one of this batch's abstracts has to be known as one: its methods are
+					// statics taking the boxed value, and a call it did not recognise was emitted as an
+					// instance call on the type the abstract wraps, which the loader resolves to nothing.
+					var id:Int = declareVar(n, t == null ? inferType(init) : typeName(t));
 					if (init == null) {
 						w.token('VARDECL');
 						w.str(n);
@@ -1311,6 +1347,24 @@ class Emitter {
 			w.token('SET');
 			expr(e1);
 			expectedArray = elementArray(inferType(e1));
+			expr(e2);
+			return;
+		}
+
+		var plain:String = ASSIGN_OPS.indexOf(op) >= 0 ? op.substr(0, op.length - 1) : op;
+		var over:Null<{owner:String, name:String}> = operatorFor(plain, e1, e2);
+		if (over != null) {
+			if (plain != op) {
+				emitBinop('=', e1, {e: EBinop(plain, e1, e2), pos: pos}, pos);
+				return;
+			}
+
+			w.pos(line);
+			w.token('CALLSTATIC');
+			useType(over.owner);
+			w.str(over.name);
+			w.int(2);
+			expr(e1);
 			expr(e2);
 			return;
 		}
@@ -1980,7 +2034,10 @@ class Emitter {
 		var name:String = tempName('sw');
 		var ref:Expr = {e: EIdent(name), pos: pos};
 
-		var chain:Expr = defaultExpr;
+		// An explicit `null` rather than nothing, because the chain is often read as a value and the
+		// loader gives an `if` with no else no value at all. A switch that matches nothing evaluates
+		// to null, which is what the interpreter does, so writing the else says what was meant.
+		var chain:Expr = defaultExpr ?? {e: EIdent('null'), pos: pos};
 		var i:Int = cases.length - 1;
 		while (i >= 0) {
 			var c = cases[i];
@@ -2009,7 +2066,7 @@ class Emitter {
 						continue;
 
 					var params:Expr = {
-						e: ECall({e: EField({e: EIdent('Type'), pos: pos}, 'enumParameters'), pos: pos}, [ref]),
+						e: ECall({e: EField({e: EIdent(ENUMS), pos: pos}, 'enumParameters'), pos: pos}, [ref]),
 						pos: pos
 					};
 					var element:Expr = {e: EArray(params, {e: EConst(CInt(b)), pos: pos}), pos: pos};
@@ -2020,7 +2077,7 @@ class Emitter {
 				body = {e: EBlock(bound), pos: pos};
 
 				var ctor:Expr = {
-					e: ECall({e: EField({e: EIdent('Type'), pos: pos}, 'enumConstructor'), pos: pos}, [ref]),
+					e: ECall({e: EField({e: EIdent(ENUMS), pos: pos}, 'enumConstructor'), pos: pos}, [ref]),
 					pos: pos
 				};
 				test = {e: EBinop('==', ctor, {e: EConst(CString(pattern.name)), pos: pos}), pos: pos};
@@ -2034,7 +2091,7 @@ class Emitter {
 				for (v in c.values) {
 					var eq:Expr = anyEnumCtor(v) ? {
 						e: EBinop('==', {
-							e: ECall({e: EField({e: EIdent('Type'), pos: pos}, 'enumConstructor'), pos: pos}, [ref]),
+							e: ECall({e: EField({e: EIdent(ENUMS), pos: pos}, 'enumConstructor'), pos: pos}, [ref]),
 							pos: pos
 						}, {e: EConst(CString(bareName(v))), pos: pos}),
 						pos: pos
@@ -2061,7 +2118,7 @@ class Emitter {
 							continue;
 
 						var params:Expr = {
-							e: ECall({e: EField({e: EIdent('Type'), pos: pos}, 'enumParameters'), pos: pos}, [ref]),
+							e: ECall({e: EField({e: EIdent(ENUMS), pos: pos}, 'enumParameters'), pos: pos}, [ref]),
 							pos: pos
 						};
 						guard = Capture.substitute(guard, bind, {e: EArray(params, {e: EConst(CInt(b)), pos: pos}), pos: pos});
@@ -2275,7 +2332,7 @@ class Emitter {
 		for (v in c.values) {
 			switch (v.e) {
 				case EIdent(name):
-					if (name != 'true' && name != 'false' && name != 'null' && !typePaths.exists(name))
+					if (name != 'true' && name != 'false' && name != 'null' && !typePaths.exists(name) && enumOwning(name) == null)
 						return name;
 				case _:
 			}
@@ -2801,6 +2858,64 @@ class Emitter {
 	 * @param name The type name as written.
 	 * @return Its full path, or null when it names something else.
 	 */
+	/**
+	 * Records which method serves an operator on one of this batch's abstracts.
+	 *
+	 * Read the same way the interpreter reads it, from `@:op` and `@:arrayAccess`, so the two cannot
+	 * drift apart on which field an operator lands in.
+	 *
+	 * @param owner The abstract's full path.
+	 * @param f The field to inspect.
+	 */
+	function recordOperators(owner:String, f:FieldDecl):Void {
+		if (f.meta == null)
+			return;
+
+		for (m in f.meta) {
+			if (m.name == ':arrayAccess') {
+				var args:Int = switch (f.kind) {
+					case KFunction(fn): fn.args.length;
+					case _: 0;
+				}
+				abstractOps.set(owner + ' ' + (args > 1 ? '[]=' : '[]'), f.name);
+				continue;
+			}
+
+			if (m.name != ':op' || m.params == null || m.params.length == 0)
+				continue;
+
+			switch (hxscript.syntax.ExprTools.expr(m.params[0])) {
+				case EBinop(op, _, _):
+					abstractOps.set(owner + ' ' + op, f.name);
+				case EUnop(op, _, _):
+					abstractOps.set(owner + ' u' + op, f.name);
+				case _:
+			}
+		}
+	}
+
+	/**
+	 * The abstract method serving an operator, when either operand is one of this batch's abstracts.
+	 *
+	 * @param op The operator as written.
+	 * @param a The left operand.
+	 * @param b The right operand, or null for a unary operator.
+	 * @return The owning abstract and the method name, or null when no overload applies.
+	 */
+	function operatorFor(op:String, a:Expr, b:Null<Expr>):Null<{owner:String, name:String}> {
+		var owner:Null<String> = abstractTypeOf(a);
+		var found:Null<String> = owner == null ? null : abstractOps.get(owner + ' ' + op);
+		if (found != null)
+			return {owner: owner, name: found};
+
+		if (b == null)
+			return null;
+
+		owner = abstractTypeOf(b);
+		found = owner == null ? null : abstractOps.get(owner + ' ' + op);
+		return found == null ? null : {owner: owner, name: found};
+	}
+
 	function abstractPathOf(name:String):Null<String> {
 		var full:Null<String> = declaredClass(name);
 		if (full == null)
@@ -2934,9 +3049,45 @@ class Emitter {
 				refs.push(path);
 		} else if (external.exists(path)) {
 			throw new Unsupported('uses $path, which is compiled elsewhere', null);
+		} else if (!resolvable(path)) {
+			throw new Unsupported('uses $path, which nothing at runtime answers to', null);
 		}
 
 		w.type(path);
+	}
+
+	/**
+	 * Whether a name reaches a type that exists once the module is loaded.
+	 *
+	 * The host lists the scripted classes it keeps elsewhere, but it lists them by MODULE, and a
+	 * module names only one of the types it declares: an abstract beside an enum in `w.Colour` was
+	 * never on that list, so a reference to it passed every check and was written out. cppia resolves
+	 * an unknown name to null and then uses it without looking, which is a crash rather than a
+	 * refusal, so a name nothing answers to is refused here instead.
+	 *
+	 * Only the host build's own table is consulted. `Type.resolveClass` would also answer, but it
+	 * answers for every class an EARLIER cppia load registered, and those are precisely the ones a
+	 * new module cannot link against: the reference would look sound and reach a dead module's class.
+	 *
+	 * @param path The type being referenced.
+	 * @return True when something at runtime carries that name.
+	 */
+	function resolvable(path:String):Bool {
+		if (path == null || path.length == 0)
+			return true;
+
+		var known:Null<Bool> = resolvedTypes.get(path);
+		if (known != null)
+			return known;
+
+		var infos:Array<hxscript.types.TypeCollection.TypeInfo> = hxscript.types.TypeCollection.main.fromCompilePath(path);
+		if (infos == null || infos.length == 0)
+			infos = hxscript.types.TypeCollection.main.fromPath(path);
+
+		var found:Bool = infos != null && infos.length > 0;
+
+		resolvedTypes.set(path, found);
+		return found;
 	}
 
 	/**
@@ -3375,6 +3526,9 @@ class Emitter {
 	 * @return Its type path, or null when not known.
 	 */
 	function inferType(e:Expr):Null<String> {
+		if (e == null)
+			return null;
+
 		switch (e.e) {
 			case EConst(CString(_, _)):
 				return 'String';
@@ -3412,6 +3566,14 @@ class Emitter {
 
 			case ENew(cl, _):
 				return typePaths.exists(cl) ? typePaths.get(cl) : null;
+
+			case EBinop(op, a, b):
+				var over:Null<{owner:String, name:String}> = operatorFor(op, a, b);
+				if (over == null)
+					return null;
+
+				var rets:Null<StringMap<String>> = methodReturns.get(over.owner);
+				return rets == null ? null : rets.get(over.name);
 
 			case EArray(arr, _):
 				var named:Null<String> = arrayElements.get(varNameOf(arr));
