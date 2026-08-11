@@ -20,9 +20,9 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-package hxscript.cppia;
+package hxscript.compile;
 
-#if hxscript_cppia
+#if (hxscript_cppia || hxscript_hl)
 import haxe.ds.StringMap;
 import hxscript.syntax.Expr;
 

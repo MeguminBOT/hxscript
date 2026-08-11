@@ -207,7 +207,8 @@ class Backend {
 	 * when it names something that is not there.
 	 *
 	 * @param owner The owner's name, as the script wrote it.
-	 * @param field The field's name.
+	 * @param field The field's name, or empty to ask for the owner itself, which is what a type used
+	 *        as a value wants: `is` and a catch clause name a type rather than anything on one.
 	 * @param env The world.
 	 * @return The value, or null when nothing answers to it.
 	 */
@@ -218,8 +219,6 @@ class Backend {
 		if (holder == null)
 			return null;
 
-		// An empty field asks for the owner itself, which is what a type used as a value wants: `is`
-		// and a catch clause name a type rather than anything on one.
 		if (field == '')
 			return holder;
 

@@ -28,6 +28,7 @@ import hxscript.hl.TypeKind;
 import hxscript.hl.Binding;
 import hxscript.hl.Binding.BindingKind;
 import hxscript.hl.Bytecode.Instruction;
+import hxscript.compile.Capture;
 import hxscript.compile.Unsupported;
 import hxscript.hl.TypeEntry.Field;
 import hxscript.hl.TypeEntry.Proto;
@@ -206,6 +207,9 @@ class Emitter {
 	 * Its own type index already exists, because its methods take it as their first argument and a
 	 * class whose methods could not be typed until the class was typed could never be declared.
 	 *
+	 * A function that declares no return type still returns something, unless it is a constructor.
+	 * Reading it as `Void` would compile away the value it hands back.
+	 *
 	 * @param c The class.
 	 */
 	function shape(c:ClassDecl):Void {
@@ -266,8 +270,6 @@ class Emitter {
 			for (a in fn.args)
 				args.push(typeOf(a.t));
 
-			// A function that declares no return type still returns something, unless it is a
-			// constructor. Reading it as `Void` would compile away the value it hands back.
 			var ret:Int = fn.ret != null ? typeOf(fn.ret) : (f.name == 'new' ? tVoid : tDyn);
 
 			var sig:Signature = {
@@ -291,6 +293,9 @@ class Emitter {
 	/**
 	 * Writes the bodies of everything `declare` accepted.
 	 *
+	 * A static has nothing written for it: its storage and its starting value belong to the class
+	 * the world already holds.
+	 *
 	 * @param decls The declarations.
 	 * @param owner How to name the class they belong to.
 	 * @throws Unsupported If a body uses something with no instruction here.
@@ -309,8 +314,6 @@ class Emitter {
 									throw new Unsupported(key + ', whose signature this cannot express', decl.pos);
 								emitFunction(sig, fn, decl.pos, isStatic(f) ? null : c.name);
 
-							// A static's storage and its starting value belong to the class the world
-							// already holds, so there is nothing to write here for one.
 							case KVar(_):
 						}
 					}
@@ -342,6 +345,9 @@ class Emitter {
 	 * `Dynamic` and lose the typed registers that make this worth doing, the typed function stays as
 	 * it is and this stands in front of it.
 	 *
+	 * Only a value with a type of its own is boxed. Boxing one that is already dynamic wraps the
+	 * pointer rather than the value, and what comes back then reads as its own address.
+	 *
 	 * @param name The function to wrap.
 	 * @return The wrapper's index, or null when there is no such function.
 	 */
@@ -363,20 +369,18 @@ class Emitter {
 
 		body.push({op: callFor(sig.args.length), args: pass});
 
-		// Only a value with a type of its own needs boxing. Boxing one that is already dynamic wraps
-		// the pointer rather than the value, and what comes back reads as its own address.
-		if (sig.ret == tDyn) {
-			body.push({op: ORet, args: [result]});
-		} else if (sig.ret == tVoid) {
+		if (sig.ret == tVoid) {
 			var empty:Int = slots.length;
 			slots.push(tDyn);
 			body.push({op: ONull, args: [empty]});
 			body.push({op: ORet, args: [empty]});
-		} else {
+		} else if (primitive(sig.ret)) {
 			var boxed:Int = slots.length;
 			slots.push(tDyn);
 			body.push({op: OToDyn, args: [boxed, result]});
 			body.push({op: ORet, args: [boxed]});
+		} else {
+			body.push({op: ORet, args: [result]});
 		}
 
 		module.add({
@@ -391,6 +395,10 @@ class Emitter {
 
 	/**
 	 * Writes one function's registers and body.
+	 *
+	 * Whether every path returns is not worked out here, so a body that can fall off its end is
+	 * given the value Haxe would have given it. Refusing instead would turn a `while (true)` whose
+	 * only exit is a `return` into a module nobody compiles.
 	 *
 	 * @param sig Its shape.
 	 * @param fn Its declaration.
@@ -421,11 +429,26 @@ class Emitter {
 			scopes[scopes.length - 1].set(fn.args[i].name, i + first);
 		}
 
-		statement(fn.expr);
+		var boxing = Capture.transform(fn.args, fn.expr);
+		for (name in boxing.boxedArgs) {
+			var cell:Int = lookup(name);
+			var raw:Int = reg(regs[cell]);
+			move(cell, raw);
 
-		// Whether every path returns is not worked out here, so a body that can fall off its end gets
-		// the value Haxe would have given it. Refusing instead would turn a `while (true)` whose exit
-		// is a `return` into a module nobody compiles.
+			var held:Int = reg(tDyn);
+			move(raw, held);
+
+			var box:Int = reg(tDyn);
+			callSupport('array', [], box);
+			callSupport('push', [box, held], reg(tDyn));
+
+			var slot:Int = reg(tDyn);
+			ops.push({op: OMov, args: [slot, box]});
+			scopes[scopes.length - 1].set(name, slot);
+		}
+
+		statement(boxing.body);
+
 		if (ops.length == 0 || ops[ops.length - 1].op != ORet) {
 			var slot:Int = reg(sig.ret);
 
@@ -453,6 +476,10 @@ class Emitter {
 
 	/**
 	 * Writes an expression for its effect rather than its value.
+	 *
+	 * Anything that is a value is a statement too: it is run and its answer dropped. Saying that
+	 * once rather than listing the forms keeps one refusal message instead of two that mean the same
+	 * thing, and means a construct only has to be taught here once.
 	 *
 	 * @param e The expression.
 	 * @throws Unsupported If it has no instruction here.
@@ -563,6 +590,11 @@ class Emitter {
 			case EThrow(thrown):
 				ops.push({op: OThrow, args: [dynOf(thrown)]});
 
+			case EFunction(args, body, name, _, _) if (name != null):
+				var slot:Int = reg(tDyn);
+				scopes[scopes.length - 1].set(name, slot);
+				emitLambda(args, body, name, slot, e.pos);
+
 			case ETry(body, name, t, handler, extra):
 				emitTry(body, name, t, handler, extra, null, e.pos);
 
@@ -613,9 +645,6 @@ class Emitter {
 			case EParent(inner):
 				statement(inner);
 
-			// Anything that is a value is a statement too: it is run and its answer dropped. Writing
-			// this out rather than listing the forms keeps one refusal message instead of two saying
-			// the same thing, and means a construct only has to be taught once.
 			case _:
 				var discard:Int = reg(infer(e));
 				into(e, discard);
@@ -805,6 +834,10 @@ class Emitter {
 	/**
 	 * Writes an expression so that its value ends up in a register.
 	 *
+	 * A value on its way into a dynamic is boxed on the way rather than written raw. Writing an int
+	 * into a pointer slot is not a wrong number, it is a pointer, and what reads it next is what
+	 * falls over.
+	 *
 	 * @param e The expression.
 	 * @param slot The register to leave it in.
 	 * @throws Unsupported If it has no instruction here.
@@ -812,15 +845,12 @@ class Emitter {
 	function into(e:Expr, slot:Int):Void {
 		var want:Int = regs[slot];
 
-		// A value on its way into a dynamic is boxed on the way rather than written raw. Writing an
-		// int into a pointer slot is not a wrong number, it is a pointer, and what reads it next is
-		// what falls over.
 		if (want == tDyn) {
 			var natural:Int = infer(e);
 			if (natural != tDyn) {
 				var raw:Int = reg(natural);
 				into(e, raw);
-				ops.push({op: OToDyn, args: [slot, raw]});
+				move(raw, slot);
 				return;
 			}
 		}
@@ -905,8 +935,6 @@ class Emitter {
 				truth(inner, v);
 				ops.push({op: ONot, args: [slot, v]});
 
-			// HashLink has no complement instruction. Haxe defines it as flipping every bit, which is
-			// what exclusive-or against all of them does.
 			case EUnop('~', _, inner):
 				var v:Int = reg(tI32);
 				into(inner, v);
@@ -931,10 +959,10 @@ class Emitter {
 			case ETry(body, name, t, handler, extra):
 				emitTry(body, name, t, handler, extra, slot, e.pos);
 
+			case EFunction(args, body, name, _, _):
+				emitLambda(args, body, name, slot, e.pos);
+
 			case EBinop('is', v, t):
-				// An instance this module made is its own, because a module HashLink loads gets its own
-				// type table. Asking the world whether one is a class the world declared gets a truthful
-				// no, which is a wrong answer to the question the script asked.
 				if (classes.exists(calledName(t) ?? ''))
 					throw new Unsupported('is ' + calledName(t) + ', whose instances this module makes its own', e.pos);
 
@@ -961,7 +989,6 @@ class Emitter {
 
 				callSupport('regex', [p, f], slot);
 
-			// A block's value is whatever it ends with, and everything before that is a statement.
 			case EBlock(items):
 				if (items.length == 0) {
 					ops.push({op: ONull, args: [slot]});
@@ -986,8 +1013,6 @@ class Emitter {
 
 				var step:Opcode = op == '++' ? OIncr : ODecr;
 
-				// The difference between the two spellings is only which side of the step the value is
-				// read from.
 				if (prefix) {
 					ops.push({op: step, args: [local]});
 					move(local, slot);
@@ -996,12 +1021,10 @@ class Emitter {
 					ops.push({op: step, args: [local]});
 				}
 
-			// The left is answered with unless it is null, and only then is the right run at all.
 			case EBinop('??', a, b):
 				into(a, slot);
 
 				if (regs[slot] != tDyn) {
-					// A typed register cannot hold null, so there is nothing for the right to answer.
 				} else {
 					var over:Int = jump(OJNotNull, [slot]);
 					into(b, slot);
@@ -1139,7 +1162,13 @@ class Emitter {
 		}
 	}
 
-	/** Writes a call to a batch function. */
+	/**
+	 * Writes a call to a batch function.
+	 *
+	 * The call is given a register of what it declared and the result converted afterwards. Writing
+	 * straight into the destination puts an integer in a pointer slot whenever the two disagree
+	 * about the type, and the answer then reads back as an address rather than as a number.
+	 */
 	function emitCall(callee:Expr, params:Array<Expr>, slot:Int, pos:Position):Void {
 		var method:Null<{on:Expr, sig:Signature}> = methodCall(callee);
 		if (method != null) {
@@ -1149,9 +1178,6 @@ class Emitter {
 			var self:Int = reg(method.sig.args[0]);
 			into(method.on, self);
 
-			// A call writes what it declared, so it is given a register of that type and converted
-			// afterwards. Writing straight into the destination puts an integer in a pointer slot
-			// whenever the two disagree, which reads back as an address rather than as a number.
 			var landed:Int = regs[slot] == method.sig.ret ? slot : reg(method.sig.ret);
 			var args:Array<Int> = [landed, method.sig.findex, self];
 
@@ -1339,14 +1365,15 @@ class Emitter {
 	 * register from its own type to its own type, which is nothing, and the raw pointer stays there
 	 * as a plausible number.
 	 *
+	 * Nothing here can know whether what was named really exists, and a global or a field left null
+	 * is what says it does not. Calling that would be an access violation with no message, so it is
+	 * checked first and raises the null the way reaching for a missing name anywhere else does.
+	 *
 	 * @param fn A dynamic register holding what to call.
 	 * @param params The arguments.
 	 * @param slot Where to leave the result.
 	 */
 	function through(fn:Int, params:Array<Expr>, slot:Int):Void {
-		// Nothing here can know whether what was named really exists, and a global or a field left
-		// null is what says it does not. Calling it would be an access violation with no message;
-		// this raises the null the way reaching for a missing name anywhere else does.
 		ops.push({op: ONullCheck, args: [fn]});
 
 		var returned:Int = reg(tDyn);
@@ -1360,7 +1387,11 @@ class Emitter {
 	}
 
 	/**
-	 * Writes an instantiation: allocate, then run the constructor over what was allocated.
+	 * Writes an instantiation: allocate, fill in what the fields were declared with, then run the
+	 * constructor over what was allocated.
+	 *
+	 * The declared values go in first so a constructor that reads one of its own fields sees what
+	 * the declaration promised rather than the zero the allocation left.
 	 *
 	 * @param cls The class being built.
 	 * @param params Its constructor's arguments.
@@ -1374,9 +1405,6 @@ class Emitter {
 
 		ops.push({op: ONew, args: [slot]});
 
-		// What a field was declared with is written before the constructor runs, so a constructor
-		// that reads one of its own fields sees what the declaration promised rather than the zero
-		// the allocation left.
 		var types:Array<Int> = memberTypes.get(cls);
 		for (start in openings.get(cls)) {
 			var v:Int = reg(types[start.slot]);
@@ -1530,6 +1558,10 @@ class Emitter {
 	/**
 	 * Writes a condition as control flow.
 	 *
+	 * A comparison with a dynamic on either side is one the instructions cannot make, because what
+	 * it means depends on what is in there: two strings compare by their contents, and two abstracts
+	 * through whichever `@:op` method they declare.
+	 *
 	 * @param e The condition.
 	 * @param wanted Which way the collected jumps should leave.
 	 * @param exits Filled with the instructions whose jump has to be pointed somewhere.
@@ -1564,9 +1596,6 @@ class Emitter {
 					land(fall);
 				}
 
-			// A comparison with a dynamic on either side is one the instructions cannot make, because
-			// what it means depends on what is in there: two strings compare by their contents, two
-			// abstracts through whichever `@:op` method they declare.
 			case EBinop(op, a, b) if (COMPARE.exists(op) && (infer(a) == tDyn || infer(b) == tDyn)):
 				var answer:Int = reg(tBool);
 				var equality:Bool = op == '==' || op == '!=';
@@ -1600,6 +1629,11 @@ class Emitter {
 	 * This is the seam between the typed tier and the dynamic one, and the place a wrong answer
 	 * hides rather than raises: writing an `Int` straight into a pointer slot is not a wrong number,
 	 * it is a pointer, and what reads it next is what falls over.
+	 *
+	 * Only a number or a boolean is boxed on the way into a dynamic. A class, a function value and
+	 * an object are already pointers the VM can carry as one, and boxing such a value a second time
+	 * wraps the pointer rather than the value: what comes out is not the closure, and calling it
+	 * says so.
 	 */
 	function move(from:Int, to:Int):Void {
 		if (from == to)
@@ -1624,7 +1658,7 @@ class Emitter {
 		}
 
 		if (b == tDyn) {
-			ops.push({op: OToDyn, args: [to, from]});
+			ops.push({op: primitive(a) ? OToDyn : OMov, args: [to, from]});
 			return;
 		}
 
@@ -1634,6 +1668,11 @@ class Emitter {
 		}
 
 		throw new Unsupported('a value of one type where another was declared', null);
+	}
+
+	/** @return Whether a type is one the VM cannot carry in a dynamic without boxing it first. */
+	inline function primitive(t:Int):Bool {
+		return t == tI32 || t == tF64 || t == tBool || t == tVoid;
 	}
 
 	/** @return A fresh dynamic register holding an expression's value. */
@@ -1749,6 +1788,10 @@ class Emitter {
 	 * Answers dynamic for anything it does not recognise rather than refusing. Being wrong about a
 	 * type here costs the speed of a typed register; refusing costs the whole module its bytecode.
 	 *
+	 * Some operators produce what Haxe says they produce whatever they are given rather than
+	 * whatever their operands were: the bitwise ones are always integers, a division is always a
+	 * float even between two integers, and a range is an iterator.
+	 *
 	 * @param e The expression.
 	 * @return Its type.
 	 */
@@ -1774,8 +1817,6 @@ class Emitter {
 
 			case EBinop(op, a, b) if (COMPARE.exists(op) || op == '&&' || op == '||'): tBool;
 
-			// Haxe fixes what these produce whatever they are given: the bitwise operators are always
-			// integers, and a division is always a float even between two integers.
 			case EBinop(op, _, _) if (INTEGRAL.indexOf(op) >= 0): tI32;
 			case EBinop('/', _, _): tF64;
 			case EBinop('...', _, _): tDyn;
@@ -2054,8 +2095,6 @@ class Emitter {
 			if (c.values.length == 1) {
 				match(c.values[0], value, toNext);
 			} else {
-				// Any one of them matching is enough, so each is tried and the ones that succeed all
-				// arrive at the body.
 				var hit:Array<Int> = [];
 
 				for (p in c.values) {
@@ -2092,6 +2131,175 @@ class Emitter {
 		}
 
 		land(done);
+	}
+
+	/**
+	 * Writes a function value.
+	 *
+	 * HashLink has no closure that carries an environment, only one that binds a first argument, so
+	 * what a lambda sees from outside itself is gathered into an object and that object is what gets
+	 * bound. The object is shared rather than copied, which is what a name declared before the
+	 * lambda and written after it needs, and what lets a named function reach itself: its own value
+	 * is put in the object once the closure exists.
+	 *
+	 * Anything both captured and written has already been turned into a one-element array by the
+	 * shared capture pass, so the object holds the array and both sides write through it.
+	 *
+	 * Every argument is dynamic whatever it was declared. A call site holding a function value knows
+	 * nothing about its shape and can only pass dynamics, and a typed parameter handed one takes the
+	 * pointer for the value, which reads back as a number nobody wrote.
+	 *
+	 * @param args The lambda's arguments.
+	 * @param body Its body.
+	 * @param name Its name, when it has one.
+	 * @param slot Where to leave the function value.
+	 * @param pos Where it appears.
+	 */
+	function emitLambda(args:Array<Argument>, body:Expr, name:Null<String>, slot:Int, pos:Position):Void {
+		var seen:Array<String> = free(args, body);
+		var fields:Array<Field> = [for (n in seen) {name: module.stringId(n), type: tDyn}];
+
+		var envType:Int = module.reserveType();
+		module.defineType(envType, TObj(module.stringId('captured' + envType), fields, []));
+
+		var built:Int = reg(envType);
+		ops.push({op: ONew, args: [built]});
+
+		for (i in 0...seen.length) {
+			var from:Int = lookup(seen[i]);
+			var held:Int = reg(tDyn);
+			move(from, held);
+			ops.push({op: OSetField, args: [built, i, held]});
+		}
+
+		var signature:Array<Int> = [envType];
+		for (a in args)
+			signature.push(tDyn);
+
+		var findex:Int = module.reserve();
+		inner(findex, seen, signature, args, body, pos);
+
+		var made:Int = reg(module.typeId(TFun(signature.slice(1), tDyn)));
+		ops.push({op: OInstanceClosure, args: [made, findex, built]});
+
+		var self:Int = name == null ? -1 : seen.indexOf(name);
+		if (self >= 0) {
+			var boxed:Int = reg(tDyn);
+			move(made, boxed);
+			ops.push({op: OSetField, args: [built, self, boxed]});
+		}
+
+		move(made, slot);
+	}
+
+	/**
+	 * Writes the function a lambda becomes, with everything it captured unpacked on entry.
+	 *
+	 * Everything about which function is being written lives on this class, so the state of the one
+	 * in progress is put aside and put back. Nesting is what makes that necessary: a lambda inside a
+	 * lambda arrives here while this is already part-way through.
+	 */
+	function inner(findex:Int, seen:Array<String>, signature:Array<Int>, args:Array<Argument>, body:Expr, pos:Position):Void {
+		var heldOps:Array<Instruction> = ops;
+		var heldRegs:Array<Int> = regs;
+		var heldScopes:Array<StringMap<Int>> = scopes;
+		var heldBreaks:Array<Array<Int>> = breaks;
+		var heldContinues:Array<Array<Int>> = continues;
+		var heldReturns:Int = returns;
+		var heldInside:Null<String> = inside;
+		var heldTraps:Int = traps;
+		var heldCollector:Null<{slot:Int, pairs:Bool}> = collector;
+
+		ops = [];
+		regs = [];
+		scopes = [];
+		breaks = [];
+		continues = [];
+		returns = tDyn;
+		inside = null;
+		traps = 0;
+		collector = null;
+
+		push();
+
+		for (t in signature)
+			regs.push(t);
+
+		for (i in 0...args.length)
+			scopes[0].set(args[i].name, i + 1);
+
+		for (i in 0...seen.length) {
+			var held:Int = reg(tDyn);
+			ops.push({op: OField, args: [held, 0, i]});
+			scopes[0].set(seen[i], held);
+		}
+
+		statement(body);
+
+		if (ops.length == 0 || ops[ops.length - 1].op != ORet) {
+			var empty:Int = reg(tDyn);
+			ops.push({op: ONull, args: [empty]});
+			ops.push({op: ORet, args: [empty]});
+		}
+
+		module.add({
+			type: module.typeId(TFun(signature, tDyn)),
+			findex: findex,
+			regs: regs,
+			ops: ops
+		});
+
+		ops = heldOps;
+		regs = heldRegs;
+		scopes = heldScopes;
+		breaks = heldBreaks;
+		continues = heldContinues;
+		returns = heldReturns;
+		inside = heldInside;
+		traps = heldTraps;
+		collector = heldCollector;
+	}
+
+	/**
+	 * Works out what a lambda uses from outside itself.
+	 *
+	 * Every name it mentions is gathered and then kept only if it is bound where the lambda sits.
+	 * Gathering too much is harmless: a name the lambda declares for itself shadows what was
+	 * captured under it, so the extra is a field nothing reads.
+	 *
+	 * @param args The lambda's arguments.
+	 * @param body Its body.
+	 * @return The names it captures, in a settled order.
+	 */
+	function free(args:Array<Argument>, body:Expr):Array<String> {
+		var mentioned:StringMap<Bool> = new StringMap();
+		gather(body, mentioned);
+
+		for (a in args)
+			mentioned.remove(a.name);
+
+		var out:Array<String> = [];
+		for (n in mentioned.keys()) {
+			if (lookup(n) != null)
+				out.push(n);
+		}
+
+		out.sort(Reflect.compare);
+		return out;
+	}
+
+	/** Collects every name an expression mentions. */
+	function gather(e:Expr, out:StringMap<Bool>):Void {
+		if (e == null)
+			return;
+
+		switch (e.e) {
+			case EIdent(v):
+				out.set(v, true);
+			case _:
+		}
+
+		hxscript.syntax.ExprTools.iter(e, function(child:Expr):Void gather(child, out));
 	}
 
 	/**
@@ -2216,6 +2424,10 @@ class Emitter {
 	/**
 	 * Writes the test one pattern makes, and binds whatever it names.
 	 *
+	 * A bare lowercase name binds rather than compares, even when a local of that name is in scope.
+	 * That is Haxe's rule and it is worth being sure of: comparing instead reads a value nothing
+	 * here put there, and answers plausibly.
+	 *
 	 * @param p The pattern.
 	 * @param value A register holding what it is matched against.
 	 * @param onFail Filled with the jumps taken when it does not match.
@@ -2225,7 +2437,6 @@ class Emitter {
 			case EParent(inner) | EMeta(_, _, inner):
 				match(inner, value, onFail);
 
-			// An alternative: the left is tried, and only what it rejects reaches the right.
 			case EBinop('|', a, b):
 				var missed:Array<Int> = [];
 				match(a, value, missed);
@@ -2237,9 +2448,6 @@ class Emitter {
 
 			case EIdent('_'):
 
-			// A bare lowercase name binds rather than compares, even when a local of that name is in
-			// scope. That is Haxe's rule and it is worth being sure of: comparing instead reads a
-			// value nothing here put there.
 			case EIdent(name) if (!isTypeName(name)):
 				var bound:Int = reg(tDyn);
 				move(value, bound);

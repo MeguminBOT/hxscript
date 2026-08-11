@@ -23,6 +23,7 @@
 package hxscript.cppia;
 
 import hxscript.compile.Unsupported;
+import hxscript.compile.Capture;
 
 #if hxscript_cppia
 import haxe.ds.StringMap;
