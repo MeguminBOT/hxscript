@@ -71,7 +71,9 @@ class Sandbox {
 	 * Errors are not returned. Everything a script can get wrong reaches
 	 * `hxscript.error.Sink` with its position, source line and cause, and the shell is listening,
 	 * so a caller that wanted to know "did it work" asks `world` for the types it expected rather
-	 * than reading a status back from here.
+	 * than reading a status back from here. Building the world is wrapped for the same reason: a
+	 * static initializer that throws would otherwise leave through openfl and end the process with
+	 * nothing printed.
 	 *
 	 * @param project The project to load.
 	 * @param compileNow Whether to run the runtime compiler as well. Off by default, because reading a
@@ -111,7 +113,16 @@ class Sandbox {
 			world.addModule(new Module(File.getContent(file), name, parts, file));
 		}
 
-		world.start();
+		try {
+			world.start();
+		} catch (e:Dynamic) {
+			if (Std.isOfType(e, haxe.Exception))
+				hxscript.error.Sink.caught(cast e, PType, 'starting ${project.name}');
+			else
+				hxscript.error.Sink.note(PType, 'starting ${project.name}: ' + Std.string(e));
+
+			typeErrors++;
+		}
 
 		if (compileNow)
 			compile();
