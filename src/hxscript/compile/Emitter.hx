@@ -62,6 +62,9 @@ class Emitter {
 	/** Compound assignments, which cppia spells the same way but reads as a `SetExpr`. */
 	static var ASSIGN_OPS:Array<String> = ['+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>=', '>>>='];
 
+	/** Operators that produce a `Bool` whatever they were given. */
+	static var COMPARISONS:Array<String> = ['==', '!=', '>=', '<=', '>', '<', '&&', '||'];
+
 	/** The token stream being built. */
 	var w:Writer;
 
@@ -134,6 +137,14 @@ class Emitter {
 	/** What `resolvable` has answered, so a repeated reference costs a map read. */
 	var resolvedTypes:StringMap<Bool> = new StringMap();
 
+	/**
+	 * Set while an assignment's target is being written, and cleared by whatever consumes it.
+	 *
+	 * A `Bool` field is read back through a comparison, which is not what the left of an assignment
+	 * wants: there the field itself has to be named.
+	 */
+	var writingTo:Bool = false;
+
 	/** Statics a `using` in this module puts in scope, by member name, to the type declaring them. */
 	var usingStatics:StringMap<String> = new StringMap();
 
@@ -156,6 +167,15 @@ class Emitter {
 	 * without it the second call has no idea it is still holding an abstract.
 	 */
 	var methodReturns:StringMap<StringMap<String>> = new StringMap();
+
+	/**
+	 * How many arguments a batch type's methods declare, by `owner method`.
+	 *
+	 * A cppia call links by arity, so leaving an optional off is not a shorter call, it is a call to
+	 * nothing and the loader raises `Arg count error`. The interpreter fills the gap with null, and
+	 * so does the emitter now, which is why the count has to be known here.
+	 */
+	var methodArity:StringMap<Int> = new StringMap();
 
 	/**
 	 * How many arguments the current class's host superclass constructor declares, or -1 when the
@@ -303,6 +323,8 @@ class Emitter {
 					var owner:String = fieldsClass(decls, moduleName);
 					moduleFields.set(m.name, owner);
 					switch (m.kind) {
+						case KFunction(fn):
+							recordArity(owner, m.name, fn);
 						case KVar(v):
 							if (v.get == 'get' || v.get == 'dynamic')
 								staticGetters.set(owner + '.' + m.name, true);
@@ -344,8 +366,10 @@ class Emitter {
 					var rets:StringMap<String> = new StringMap();
 					for (f in c.fields) {
 						switch (f.kind) {
-							case KFunction(fn) if (fn.ret != null):
-								rets.set(f.name, typeName(fn.ret));
+							case KFunction(fn):
+								if (fn.ret != null)
+									rets.set(f.name, typeName(fn.ret));
+								recordArity(full, f.name, fn);
 							case _:
 						}
 					}
@@ -381,8 +405,15 @@ class Emitter {
 					var returns:StringMap<String> = new StringMap();
 					for (f in a.fields) {
 						switch (f.kind) {
-							case KFunction(fn) if (fn.ret != null):
-								returns.set(f.name == 'new' ? '@new' : f.name, typeName(fn.ret));
+							case KFunction(fn):
+								var as:String = f.name == 'new' ? '@new' : f.name;
+								if (fn.ret != null)
+									returns.set(as, typeName(fn.ret));
+
+								// One more than written for anything but a static: an abstract's instance
+								// methods and its constructor compile to statics taking the boxed value
+								// first, and its own statics do not.
+								recordArity(full, as, fn, hasAccess(f, AStatic) ? 0 : 1);
 							case _:
 						}
 					}
@@ -850,13 +881,20 @@ class Emitter {
 		for (a in args) {
 			var box:Bool = boxing.boxedArgs.indexOf(a.name) >= 0;
 
+			// An argument the caller may leave off cannot hold its declared type. A cppia `Int` slot
+			// reads the null a padded call passes as 0, which is a value the argument never had: the
+			// omitted case then looks supplied, and the prologue that applies the default never fires
+			// because 0 is not null.
+			var loose:Bool = box || a.t == null || a.opt == true || a.value != null;
+			var spelling:String = loose ? '' : typeName(a.t);
+
 			noteArrayElement(a.name, a.t);
-			var id:Int = declareVar(a.name, box || a.t == null ? null : typeName(a.t));
+			var id:Int = declareVar(a.name, loose ? null : spelling);
 
 			w.str(a.name);
 			w.int(id);
 			w.bool(false);
-			storableType(box || a.t == null ? '' : typeName(a.t));
+			storableType(spelling);
 			w.bool(false);
 		}
 
@@ -1102,24 +1140,25 @@ class Emitter {
 						return;
 					}
 
+					var wantedCtor:Int = padArgs(boxed, '@new', params.length + 1);
 					w.pos(line);
 					w.token('CALLSTATIC');
 					useType(boxed);
 					w.str('@new');
-					w.int(params.length + 1);
+					w.int(wantedCtor);
 					w.pos(line);
 					w.token('NULL');
-					for (p in params)
-						expr(p);
+					emitArgs(params, wantedCtor, 1, line);
 					return;
 				}
 
+				var built:String = resolveType(cl, e.pos);
+				var wantedNew:Int = padArgs(declaredClass(built), 'new', params.length);
 				w.pos(line);
 				w.token('NEW');
-				useType(resolveType(cl, e.pos));
-				w.int(params.length);
-				for (p in params)
-					expr(p);
+				useType(built);
+				w.int(wantedNew);
+				emitArgs(params, wantedNew, 0, line);
 
 			case EObject(fields):
 				w.pos(line);
@@ -1345,13 +1384,30 @@ class Emitter {
 
 			w.pos(line);
 			w.token('SET');
+			writingTo = true;
 			expr(e1);
+			writingTo = false;
 			expectedArray = elementArray(inferType(e1));
 			expr(e2);
 			return;
 		}
 
 		var plain:String = ASSIGN_OPS.indexOf(op) >= 0 ? op.substr(0, op.length - 1) : op;
+
+		// A `Bool` joined to a `String` is spelled out rather than added. cppia has no boolean of its
+		// own, so the addition sees the integer behind it and writes `1`, and the JIT's own inline
+		// conversion of a comparison to a string ends the process outright. `Std.string` is a call,
+		// which both modes get right.
+		if (plain == '+') {
+			var left:Null<String> = inferType(e1);
+			var right:Null<String> = inferType(e2);
+
+			if (left == 'String' && right == 'Bool')
+				e2 = spelled(e2, pos);
+			else if (right == 'String' && left == 'Bool')
+				e1 = spelled(e1, pos);
+		}
+
 		var over:Null<{owner:String, name:String}> = operatorFor(plain, e1, e2);
 		if (over != null) {
 			if (plain != op) {
@@ -1526,38 +1582,38 @@ class Emitter {
 						return;
 					}
 
+					var wantedStatic:Int = padArgs(asType, name, params.length);
 					w.pos(line);
 					w.token('CALLSTATIC');
 					useType(asType);
 					w.str(name);
-					w.int(params.length);
-					for (p in params)
-						expr(p);
+					w.int(wantedStatic);
+					emitArgs(params, wantedStatic, 0, line);
 					return;
 				}
 
 				var boxed:Null<String> = abstractTypeOf(obj);
 				if (boxed != null) {
+					var wantedBoxed:Int = padArgs(boxed, name, params.length + 1);
 					w.pos(line);
 					w.token('CALLSTATIC');
 					useType(boxed);
 					w.str(name);
-					w.int(params.length + 1);
+					w.int(wantedBoxed);
 					expr(obj);
-					for (p in params)
-						expr(p);
+					emitArgs(params, wantedBoxed, 1, line);
 					return;
 				}
 
 				switch (obj.e) {
 					case EIdent('super'):
+						var wantedSuper:Int = padArgs(currentSuper, name, params.length);
 						w.pos(line);
 						w.token('CALLSUPER');
 						w.type(currentSuper);
 						w.str(name);
-						w.int(params.length);
-						for (p in params)
-							expr(p);
+						w.int(wantedSuper);
+						emitArgs(params, wantedSuper, 0, line);
 						return;
 					case _:
 				}
@@ -1571,14 +1627,14 @@ class Emitter {
 				if (usingStatics.exists(name))
 					throw new Unsupported('$name through a static extension on a receiver whose type is not known here', pos);
 
+				var wantedMember:Int = padArgs(instanceClassOf(obj), name, params.length);
 				w.pos(line);
 				w.token('CALLMEMBER');
 				w.type('');
 				w.str(name);
-				w.int(params.length);
+				w.int(wantedMember);
 				expr(obj);
-				for (p in params)
-					expr(p);
+				emitArgs(params, wantedMember, 0, line);
 
 			case EIdent('super'):
 				var supplied:Int = params.length;
@@ -1620,31 +1676,32 @@ class Emitter {
 					expr(p);
 
 			case EIdent(name) if (lookupVar(name) == null && members.exists(name)):
+				var wantedThis:Int = padArgs(currentClass, name, params.length);
 				w.pos(line);
 				w.token('CALLTHIS');
 				w.type(currentClass);
 				w.str(name);
-				w.int(params.length);
-				for (p in params)
-					expr(p);
+				w.int(wantedThis);
+				emitArgs(params, wantedThis, 0, line);
 
 			case EIdent(name) if (lookupVar(name) == null && statics.exists(name)):
+				var wantedOwn:Int = padArgs(currentClass, name, params.length);
 				w.pos(line);
 				w.token('CALLSTATIC');
 				w.type(currentClass);
 				w.str(name);
-				w.int(params.length);
-				for (p in params)
-					expr(p);
+				w.int(wantedOwn);
+				emitArgs(params, wantedOwn, 0, line);
 
 			case EIdent(name) if (lookupVar(name) == null && moduleFields.exists(name)):
+				var owningModule:String = moduleFields.get(name);
+				var wantedModule:Int = padArgs(owningModule, name, params.length);
 				w.pos(line);
 				w.token('CALLSTATIC');
-				w.type(moduleFields.get(name));
+				w.type(owningModule);
 				w.str(name);
-				w.int(params.length);
-				for (p in params)
-					expr(p);
+				w.int(wantedModule);
+				emitArgs(params, wantedModule, 0, line);
 
 			case EIdent(name) if (lookupVar(name) == null && ambientMembers.exists(name)):
 				var target:String = ambientMembers.get(name);
@@ -1835,13 +1892,32 @@ class Emitter {
 			return;
 		}
 
+		var writing:Bool = writingTo;
+		writingTo = false;
+
 		var holder:Null<String> = (obj.e.match(EIdent('this'))) ? currentClass : instanceClassOf(obj);
 		if (holder != null && instanceVar(holder, name) != null) {
+			// An instance field declared `Bool` is laid out as cppia's integer type, so reading one
+			// hands back 0 or 1: a condition and a comparison are still right, but `Std.string`,
+			// concatenation and reflection all see the number. Comparing it produces a real boolean,
+			// which is what every other spelling of a `Bool` already hands back. Not on the left of an
+			// assignment, where the field itself is what is wanted.
+			var readsBool:Bool = !writing && instanceVar(holder, name) == 'Bool';
+			if (readsBool) {
+				w.pos(line);
+				w.token('==');
+			}
+
 			w.pos(line);
 			w.token('FLINK');
 			w.type(holder);
 			w.str(name);
 			expr(obj);
+
+			if (readsBool) {
+				w.pos(line);
+				w.token('true');
+			}
 			return;
 		}
 
@@ -2859,6 +2935,77 @@ class Emitter {
 	 * @return Its full path, or null when it names something else.
 	 */
 	/**
+	 * Records how many arguments a batch method declares.
+	 *
+	 * A rest argument is not recorded: those compile to a variadic closure that takes one array, so
+	 * the call site's arity is already irrelevant and padding one would add an argument the closure
+	 * would read as data.
+	 *
+	 * @param owner The declaring type's full path.
+	 * @param name The method name, as the emitter will write it.
+	 * @param fn The declaration.
+	 * @param extra Arguments the compiled form takes beyond the written ones.
+	 */
+	function recordArity(owner:String, name:String, fn:FunctionDecl, extra:Int = 0):Void {
+		for (a in fn.args) {
+			if (a.rest == true)
+				return;
+		}
+
+		methodArity.set(owner + ' ' + name, fn.args.length + extra);
+	}
+
+	/**
+	 * Wraps an expression in `Std.string`, for a value the addition would otherwise write as a number.
+	 *
+	 * @param e The value.
+	 * @param pos Where it appears.
+	 * @return The wrapped call.
+	 */
+	function spelled(e:Expr, pos:Position):Expr {
+		return {
+			e: ECall({e: EField({e: EIdent('Std'), pos: pos}, 'string'), pos: pos}, [e]),
+			pos: pos
+		};
+	}
+
+	/**
+	 * The arity a call to a batch method has to be written with.
+	 *
+	 * @param owner The declaring type's full path, or null when it is not a batch type.
+	 * @param name The method being called.
+	 * @param given How many arguments the call site supplies, leading ones included.
+	 * @return The declared arity when it is larger, otherwise what was given.
+	 */
+	function padArgs(owner:Null<String>, name:String, given:Int):Int {
+		if (owner == null)
+			return given;
+
+		var declared:Null<Int> = methodArity.get(owner + ' ' + name);
+		return (declared == null || declared <= given) ? given : declared;
+	}
+
+	/**
+	 * Writes a call's arguments, then a null for each optional the call left off.
+	 *
+	 * @param params The arguments as written.
+	 * @param wanted The arity being written.
+	 * @param leading Arguments the caller writes itself before these.
+	 * @param line The line to attribute the nulls to.
+	 */
+	function emitArgs(params:Array<Expr>, wanted:Int, leading:Int, line:Int):Void {
+		for (p in params)
+			expr(p);
+
+		var i:Int = params.length + leading;
+		while (i < wanted) {
+			w.pos(line);
+			w.token('NULL');
+			i++;
+		}
+	}
+
+	/**
 	 * Records which method serves an operator on one of this batch's abstracts.
 	 *
 	 * Read the same way the interpreter reads it, from `@:op` and `@:arrayAccess`, so the two cannot
@@ -3539,6 +3686,9 @@ class Emitter {
 			case EConst(CFloat(_)):
 				return 'Float';
 
+			case EIdent('true') | EIdent('false'):
+				return 'Bool';
+
 			case EIdent(v):
 				if (lookupVar(v) != null)
 					return lookupVarType(v);
@@ -3547,6 +3697,9 @@ class Emitter {
 				if (statics.exists(v))
 					return staticTypes.get(v);
 				return null;
+
+			case EUnop('!', _, _):
+				return 'Bool';
 
 			case EParent(inner):
 				return inferType(inner);
@@ -3566,6 +3719,9 @@ class Emitter {
 
 			case ENew(cl, _):
 				return typePaths.exists(cl) ? typePaths.get(cl) : null;
+
+			case EBinop(op, _, _) if (COMPARISONS.indexOf(op) >= 0):
+				return 'Bool';
 
 			case EBinop(op, a, b):
 				var over:Null<{owner:String, name:String}> = operatorFor(op, a, b);
