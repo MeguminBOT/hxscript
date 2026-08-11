@@ -97,6 +97,18 @@ class Emitter {
 	/** The type of each instance field, by class then slot. */
 	var memberTypes:StringMap<Array<Int>>;
 
+	/** What each instance field starts as, by class, for the fields declared with a value. */
+	var openings:StringMap<Array<{slot:Int, value:Expr}>>;
+
+	/** The accessors of each property, by class then name. A property is not a field. */
+	var props:StringMap<StringMap<{get:String, set:String}>>;
+
+	/** The names each class declares as statics, by class. */
+	var owned:StringMap<StringMap<Bool>>;
+
+	/** The package the batch sits in, which is what a class has to be resolved by. */
+	public var pack:String = '';
+
 	/** The class the body being written belongs to, or null when it is a static. */
 	var inside:Null<String>;
 
@@ -135,6 +147,9 @@ class Emitter {
 		classes = new StringMap();
 		members = new StringMap();
 		memberTypes = new StringMap();
+		openings = new StringMap();
+		props = new StringMap();
+		owned = new StringMap();
 		inside = null;
 		hostSlots = new StringMap();
 		collector = null;
@@ -187,21 +202,42 @@ class Emitter {
 		var fields:Array<Field> = [];
 		var protos:Array<Proto> = [];
 		var slots:StringMap<Int> = new StringMap();
+		var starts:Array<{slot:Int, value:Expr}> = [];
+		var accessors:StringMap<{get:String, set:String}> = new StringMap();
+		var statics:StringMap<Bool> = new StringMap();
 
 		for (f in c.fields) {
-			if (isStatic(f))
-				continue;
-
 			switch (f.kind) {
 				case KVar(v):
+					if (isStatic(f)) {
+						statics.set(f.name, true);
+						if (property(v))
+							accessors.set(f.name, {get: v.get, set: v.set});
+						continue;
+					}
+
+					if (property(v)) {
+						accessors.set(f.name, {get: v.get, set: v.set});
+						continue;
+					}
+
 					slots.set(f.name, fields.length);
+					if (v.expr != null)
+						starts.push({slot: fields.length, value: v.expr});
+
 					fields.push({name: module.stringId(f.name), type: typeOf(v.type)});
-				case _:
+
+				case KFunction(_):
+					if (isStatic(f))
+						statics.set(f.name, true);
 			}
 		}
 
 		members.set(c.name, slots);
 		memberTypes.set(c.name, [for (f in fields) f.type]);
+		openings.set(c.name, starts);
+		props.set(c.name, accessors);
+		owned.set(c.name, statics);
 
 		for (f in c.fields) {
 			var fn:Null<FunctionDecl> = switch (f.kind) {
@@ -262,9 +298,9 @@ class Emitter {
 									throw new Unsupported(key + ', whose signature this cannot express', decl.pos);
 								emitFunction(sig, fn, decl.pos, isStatic(f) ? null : c.name);
 
-							case KVar(v):
-								if (isStatic(f))
-									throw new Unsupported('the static ' + f.name + ', which is not a function', decl.pos);
+							// A static's storage and its starting value belong to the class the world
+							// already holds, so there is nothing to write here for one.
+							case KVar(_):
 						}
 					}
 
@@ -433,8 +469,17 @@ class Emitter {
 					case EIdent(name) if (lookup(name) != null):
 						into(value, lookup(name));
 
+					case EIdent(name) if (isStaticOf(owning, name)):
+						staticWrite(owning, name, value, e.pos);
+
+					case EIdent(name) if (inside != null && props.get(inside).exists(name)):
+						setField(thisExpr(e.pos), name, value, e.pos);
+
 					case EIdent(name) if (fieldOf(thisExpr(e.pos), name) != null):
 						setField(thisExpr(e.pos), name, value, e.pos);
+
+					case EField({e: EIdent(cls)}, name, _) if (isStaticOf(cls, name)):
+						staticWrite(cls, name, value, e.pos);
 
 					case EField(obj, name, _):
 						setField(obj, name, value, e.pos);
@@ -542,15 +587,15 @@ class Emitter {
 						throw new Unsupported(op + ' on something that is not a local', e.pos);
 				}
 
-			case ECall(_, _) | ENew(_, _):
-				var slot:Int = reg(infer(e));
-				into(e, slot);
-
 			case EParent(inner):
 				statement(inner);
 
+			// Anything that is a value is a statement too: it is run and its answer dropped. Writing
+			// this out rather than listing the forms keeps one refusal message instead of two saying
+			// the same thing, and means a construct only has to be taught once.
 			case _:
-				throw new Unsupported('this expression as a statement', e.pos);
+				var discard:Int = reg(infer(e));
+				into(e, discard);
 		}
 	}
 
@@ -786,11 +831,24 @@ class Emitter {
 					return;
 				}
 
+				if (isStaticOf(owning, name)) {
+					staticRead(owning, name, slot, e.pos);
+					return;
+				}
+
+				if (inside != null && props.get(inside).exists(name)) {
+					getField(thisExpr(e.pos), name, slot, e.pos);
+					return;
+				}
+
 				var own:Null<Int> = fieldOf(thisExpr(e.pos), name);
 				if (own == null)
 					throw new Unsupported(name + ', which is neither a local nor a field here', e.pos);
 
 				getField(thisExpr(e.pos), name, slot, e.pos);
+
+			case EField({e: EIdent(cls)}, name, _) if (isStaticOf(cls, name)):
+				staticRead(cls, name, slot, e.pos);
 
 			case EField(_, _, _) if (hostName(e) != null):
 				var host:{owner:String, field:String} = hostName(e);
@@ -855,6 +913,62 @@ class Emitter {
 
 			case EBinop('...', low, high):
 				callSupport('range', [dynOf(low), dynOf(high)], slot);
+
+			case EConst(CReg(pattern, flags)):
+				var p:Int = reg(tDyn);
+				ops.push({op: OGetGlobal, args: [p, constSlot('s' + pattern, pattern)]});
+
+				var f:Int = reg(tDyn);
+				ops.push({op: OGetGlobal, args: [f, constSlot('s' + flags, flags)]});
+
+				callSupport('regex', [p, f], slot);
+
+			// A block's value is whatever it ends with, and everything before that is a statement.
+			case EBlock(items):
+				if (items.length == 0) {
+					ops.push({op: ONull, args: [slot]});
+				} else {
+					push();
+					for (i in 0...items.length) {
+						if (i == items.length - 1)
+							into(items[i], slot);
+						else
+							statement(items[i]);
+					}
+					pop();
+				}
+
+			case EUnop(op, prefix, target) if (op == '++' || op == '--'):
+				var local:Null<Int> = switch (target.e) {
+					case EIdent(name): lookup(name);
+					case _: null;
+				}
+				if (local == null || regs[local] != tI32)
+					throw new Unsupported(op + ' on something that is not an integer local', e.pos);
+
+				var step:Opcode = op == '++' ? OIncr : ODecr;
+
+				// The difference between the two spellings is only which side of the step the value is
+				// read from.
+				if (prefix) {
+					ops.push({op: step, args: [local]});
+					move(local, slot);
+				} else {
+					move(local, slot);
+					ops.push({op: step, args: [local]});
+				}
+
+			// The left is answered with unless it is null, and only then is the right run at all.
+			case EBinop('??', a, b):
+				into(a, slot);
+
+				if (regs[slot] != tDyn) {
+					// A typed register cannot hold null, so there is nothing for the right to answer.
+				} else {
+					var over:Int = jump(OJNotNull, [slot]);
+					into(b, slot);
+					land([over]);
+				}
 
 			case EBinop(op, a, b) if (COMPARE.exists(op) || op == '&&' || op == '||'):
 				materialise(e, slot);
@@ -997,7 +1111,12 @@ class Emitter {
 			var self:Int = reg(method.sig.args[0]);
 			into(method.on, self);
 
-			var args:Array<Int> = [slot, method.sig.findex, self];
+			// A call writes what it declared, so it is given a register of that type and converted
+			// afterwards. Writing straight into the destination puts an integer in a pointer slot
+			// whenever the two disagree, which reads back as an address rather than as a number.
+			var landed:Int = regs[slot] == method.sig.ret ? slot : reg(method.sig.ret);
+			var args:Array<Int> = [landed, method.sig.findex, self];
+
 			for (i in 0...params.length) {
 				var holder:Int = reg(method.sig.args[i + 1]);
 				into(params[i], holder);
@@ -1005,6 +1124,9 @@ class Emitter {
 			}
 
 			ops.push({op: callFor(params.length + 1), args: args});
+
+			if (landed != slot)
+				move(landed, slot);
 			return;
 		}
 
@@ -1023,7 +1145,9 @@ class Emitter {
 		if (params.length != sig.args.length)
 			throw new Unsupported('a call given ' + params.length + ' of its ' + sig.args.length + ' arguments', pos);
 
-		var args:Array<Int> = [slot, sig.findex];
+		var landed:Int = regs[slot] == sig.ret ? slot : reg(sig.ret);
+		var args:Array<Int> = [landed, sig.findex];
+
 		for (i in 0...params.length) {
 			var holder:Int = reg(sig.args[i]);
 			into(params[i], holder);
@@ -1031,6 +1155,9 @@ class Emitter {
 		}
 
 		ops.push({op: callFor(params.length), args: args});
+
+		if (landed != slot)
+			move(landed, slot);
 	}
 
 	/**
@@ -1209,6 +1336,16 @@ class Emitter {
 
 		ops.push({op: ONew, args: [slot]});
 
+		// What a field was declared with is written before the constructor runs, so a constructor
+		// that reads one of its own fields sees what the declaration promised rather than the zero
+		// the allocation left.
+		var types:Array<Int> = memberTypes.get(cls);
+		for (start in openings.get(cls)) {
+			var v:Int = reg(types[start.slot]);
+			into(start.value, v);
+			ops.push({op: OSetField, args: [slot, start.slot, v]});
+		}
+
 		var sig:Null<Signature> = signatures.get(cls + '#new');
 		if (sig == null) {
 			if (params.length > 0)
@@ -1252,6 +1389,17 @@ class Emitter {
 	 * the field existed.
 	 */
 	function getField(obj:Expr, name:String, slot:Int, pos:Position):Void {
+		var cls:Null<String> = classNamed(infer(obj));
+		var reader:Null<{get:String, set:String}> = cls == null ? null : props.get(cls).get(name);
+
+		if (reader != null) {
+			if (reader.get != 'get')
+				throw new Unsupported('reading ' + name + ', which is declared ' + reader.get, pos);
+
+			emitCall({e: EField(obj, 'get_' + name, false), pos: pos}, [], slot, pos);
+			return;
+		}
+
 		var index:Null<Int> = fieldOf(obj, name);
 		if (index != null) {
 			var holder:Int = reg(typeOfExpr(obj));
@@ -1270,6 +1418,18 @@ class Emitter {
 
 	/** Writes a field write, by offset when the batch declared the field and by name otherwise. */
 	function setField(obj:Expr, name:String, value:Expr, pos:Position):Void {
+		var cls:Null<String> = classNamed(infer(obj));
+		var writer:Null<{get:String, set:String}> = cls == null ? null : props.get(cls).get(name);
+
+		if (writer != null) {
+			if (writer.set != 'set')
+				throw new Unsupported('writing ' + name + ', which is declared ' + writer.set, pos);
+
+			var discard:Int = reg(tDyn);
+			emitCall({e: EField(obj, 'set_' + name, false), pos: pos}, [value], discard, pos);
+			return;
+		}
+
 		var index:Null<Int> = fieldOf(obj, name);
 		if (index != null) {
 			var cls:String = classNamed(typeOfExpr(obj));
@@ -1729,6 +1889,91 @@ class Emitter {
 			case EParent(inner): calledName(inner);
 			case _: null;
 		}
+	}
+
+	/**
+	 * @return Whether a declaration is a property rather than a field.
+	 *
+	 * A property with an accessor on one side and nothing readable on the other stores nothing, so
+	 * giving it a slot would put storage behind it that reads and writes silently skip the accessor.
+	 * One with `default` or `null` on either side does store, and is a field that happens to be
+	 * announced.
+	 */
+	function property(v:VarDecl):Bool {
+		if (v.get == null && v.set == null)
+			return false;
+
+		var reads:String = v.get == null ? 'default' : v.get;
+		var writes:String = v.set == null ? 'default' : v.set;
+
+		return (reads == 'get' || reads == 'never') && (writes == 'set' || writes == 'never');
+	}
+
+	/**
+	 * The global holding one of the batch's own classes.
+	 *
+	 * A static belongs to the class rather than to any instance, and the class a script declared is
+	 * an object the world already holds, so its statics are read and written on that rather than
+	 * kept a second time here. That also means a static one of these writes is one the interpreter
+	 * sees, which matters while only part of a batch compiles.
+	 *
+	 * @param cls The class's name in this batch.
+	 * @return The global's index.
+	 */
+	function ownerSlot(cls:String):Int {
+		var path:String = pack.length > 0 ? pack + '.' + cls : cls;
+		return bind('o' + path, {index: 0, kind: BOwner, owner: path});
+	}
+
+	/** @return Whether a name is a static of a class of this batch. */
+	function isStaticOf(cls:String, name:String):Bool {
+		var here:Null<StringMap<Bool>> = owned.get(cls);
+		return here != null && here.exists(name);
+	}
+
+	/** Writes a read of a static, through its accessor when it has one. */
+	function staticRead(cls:String, name:String, slot:Int, pos:Position):Void {
+		var accessor:Null<{get:String, set:String}> = props.get(cls).get(name);
+
+		if (accessor != null) {
+			if (accessor.get != 'get')
+				throw new Unsupported('reading ' + name + ', which is declared ' + accessor.get, pos);
+
+			emitCall({e: EField({e: EIdent(cls), pos: pos}, 'get_' + name, false), pos: pos}, [], slot, pos);
+			return;
+		}
+
+		callSupport('get', [ownerOf(cls), named(name)], slot);
+	}
+
+	/** Writes a write of a static, through its accessor when it has one. */
+	function staticWrite(cls:String, name:String, value:Expr, pos:Position):Void {
+		var accessor:Null<{get:String, set:String}> = props.get(cls).get(name);
+
+		if (accessor != null) {
+			if (accessor.set != 'set')
+				throw new Unsupported('writing ' + name + ', which is declared ' + accessor.set, pos);
+
+			var discard:Int = reg(tDyn);
+			emitCall({e: EField({e: EIdent(cls), pos: pos}, 'set_' + name, false), pos: pos}, [value], discard, pos);
+			return;
+		}
+
+		callSupport('set', [ownerOf(cls), named(name), dynOf(value)], reg(tDyn));
+	}
+
+	/** @return A register holding one of the batch's classes. */
+	function ownerOf(cls:String):Int {
+		var slot:Int = reg(tDyn);
+		ops.push({op: OGetGlobal, args: [slot, ownerSlot(cls)]});
+		return slot;
+	}
+
+	/** @return A register holding a name, for the calls that take one. */
+	function named(name:String):Int {
+		var slot:Int = reg(tDyn);
+		ops.push({op: OGetGlobal, args: [slot, constSlot('s' + name, name)]});
+		return slot;
 	}
 
 	/** @return Whether a field is declared `static`. */

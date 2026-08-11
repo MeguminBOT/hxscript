@@ -32,6 +32,9 @@ enum abstract BindingKind(Int) to Int {
 
 	/** A value the emitter already had, because being handed one costs less than building it. */
 	var BConst = 2;
+
+	/** One of the batch's own classes, which is where its statics live. */
+	var BOwner = 3;
 }
 
 /**

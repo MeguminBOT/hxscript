@@ -110,6 +110,7 @@ class Backend {
 	 */
 	static function one(module:Module, env:Environment, report:Report):Void {
 		var emitter:Emitter = new Emitter();
+		emitter.pack = module.pack == null ? '' : module.pack.join('.');
 
 		try {
 			emitter.declare(module.decls, module.name);
@@ -193,6 +194,7 @@ class Backend {
 			case BHost: hostValue(binding.owner, binding.field, env);
 			case BSupport: Emitter.support(binding.field);
 			case BConst: binding.value;
+			case BOwner: env.resolve(binding.owner);
 		}
 	}
 

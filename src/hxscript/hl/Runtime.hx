@@ -165,6 +165,17 @@ class Runtime {
 		return v == null ? 0 : Std.int((v : Float));
 	}
 
+	/**
+	 * @return A regular expression.
+	 *
+	 * Made per evaluation rather than bound once as a constant, because matching leaves its result
+	 * on the object and one shared between every use of a literal would answer about the wrong
+	 * subject.
+	 */
+	public static function regex(pattern:String, flags:String):Dynamic {
+		return new EReg(pattern, flags);
+	}
+
 	/** @return A range as a value, which is what `a...b` is outside a `for`. */
 	public static function range(low:Dynamic, high:Dynamic):Dynamic {
 		return new IntIterator(toInt(low), toInt(high));
@@ -216,6 +227,22 @@ class Runtime {
 	/** Puts a named field on a value, which is how an object literal is filled. */
 	public static function setField(o:Dynamic, name:String, v:Dynamic):Void {
 		Reflect.setField(o, name, v);
+	}
+
+	/**
+	 * @return A named field of something a script declared.
+	 *
+	 * Through the library's own reflection rather than the standard one: a scripted class keeps its
+	 * statics somewhere the runtime cannot see, so asking the value itself is the only way to be
+	 * given what the interpreter would have been given.
+	 */
+	public static function get(o:Dynamic, name:String):Dynamic {
+		return hxscript.proxy.ReflectProxy.field(o, name);
+	}
+
+	/** Writes a named field of something a script declared. */
+	public static function set(o:Dynamic, name:String, v:Dynamic):Void {
+		hxscript.proxy.ReflectProxy.setField(o, name, v);
 	}
 
 	/** @return What sits at an index or a key, which is the same spelling over an array and a map. */

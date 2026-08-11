@@ -84,7 +84,11 @@ class CorpusProbe {
 		if (report.compiled.length == 0) {
 			refused++;
 			if (verbose) {
-				var why:String = report.skipped.length > 0 ? report.skipped[0].reason : (report.failed.length > 0 ? report.failed[0].reason : 'no reason given');
+				var why:String = 'no reason given';
+				if (report.skipped.length > 0)
+					why = report.skipped[0].reason + ' (line ' + report.skipped[0].line + ')';
+				else if (report.failed.length > 0)
+					why = report.failed[0].reason;
 				say(label, 'REFUSED ' + why);
 			}
 			return;
