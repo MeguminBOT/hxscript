@@ -432,7 +432,7 @@ Check the first one at startup rather than wondering, because without it every m
 skipped, which looks exactly like a compiler that refuses everything:
 
 ```haxe
-if (!hxscript.compile.Cppia.available)
+if (!hxscript.cppia.Backend.available)
     trace('built without -D hxscript_cppia; everything will be interpreted');
 ```
 
@@ -472,7 +472,7 @@ bytes, or decide something the facade decides for it.
 
 ```haxe
 var decls = new Parser().parseModule(source, 'Goblin', 0, ['mods']);
-var result = hxscript.compile.Cppia.compile([{name: 'mods.Goblin', decls: decls}]);
+var result = hxscript.cppia.Backend.compile([{name: 'mods.Goblin', decls: decls}]);
 
 if (result.bytes != null) {
     var module = cpp.cppia.Module.fromData(result.bytes.getData());
@@ -487,7 +487,7 @@ meant to be read.
 The three optional arguments are what the facade fills in for you:
 
 ```haxe
-Cppia.compile(inputs,
+Backend.compile(inputs,
     ['game.Player', 'game.World'],       // ambient: types usable without an import
     ['mods.Shared'],                     // external: scripted classes NOT in this batch
     ['player=game.Player::current']);    // statics: bare name -> a real host static
@@ -506,7 +506,7 @@ for (input in inputs) {
     if (result.compiled.indexOf(input.name) < 0)
         continue;   // skipped; it stays interpreted
 
-    for (path in Cppia.declaredPaths(input.decls)) {
+    for (path in Backend.declaredPaths(input.decls)) {
         var cls = module.resolveClass(path);
         if (cls != null)
             env.compiled.set(path, cls);

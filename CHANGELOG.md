@@ -15,19 +15,23 @@ carries on. Sorted by how likely you are to have written it.
 | `hxscript.runtime.ParserException` | `hxscript.error.ParserException` | caught a parse failure by type |
 | `hxscript.runtime.Error` | `hxscript.error.ErrorKind` | matched on an error kind |
 | `hxscript.ImportModule` | `hxscript.runtime.ImportModule` | used a shared prelude module |
-| `hxscript.compile.CppiaInput` | `hxscript.compile.Unit` | drove `Cppia.compile` yourself |
-| `hxscript.compile.CppiaResult` | `hxscript.compile.Result` | drove `Cppia.compile` yourself |
+| `hxscript.compile.CppiaInput` | `hxscript.compile.Unit` | drove the backend yourself |
+| `hxscript.compile.CppiaResult` | `hxscript.compile.Result` | drove the backend yourself |
+| `hxscript.compile.Cppia` | `hxscript.cppia.Backend` | called `Cppia.compile` or `Cppia.declaredPaths` |
 | `hxscript.runtime.CallStack` | `hxscript.runtime.ScriptStack` | typed a variable as the interpreter's stack |
 
 Internals renamed at the same time, unlikely to appear in a host: `CppiaEmitter`, `CppiaWriter`,
-`CppiaCapture` and `CppiaUnsupported` drop their prefix inside `hxscript.compile`; `KeepMacro`,
+`CppiaCapture` and `CppiaUnsupported` drop their prefix, and the first three move with the backend
+into `hxscript.cppia`, which now holds everything specific to compiling for hxcpp; `KeepMacro`,
 `ScriptedMacro` and `TypeCollectionMacro` become `Keep`, `Scripted` and `Index`; `HLMacro` becomes
 `Statics` and `proxy.HLMath` becomes `proxy.MathProxy`; `runtime.Mirror` becomes `runtime.Reference`;
 `types.DummyClass` becomes `types.ScriptedObject`; `tools.Tools` splits into `syntax.ExprTools` and
 `types.TypeTools`, and `tools.Defines` moves to `setup.Defines`.
 
-`Script`, `Environment`, `Module`, `Config`, `IScripted`, `Interp`, `ScriptedClass`,
-`compile.Compiler` and `compile.Cppia` keep their names.
+`Script`, `Environment`, `Module`, `Config`, `IScripted`, `Interp`, `ScriptedClass` and
+`compile.Compiler` keep their names. `Compiler` is still where a host configures compiling and asks
+for it, and still reports the same way, so a host that only ever called `Compiler` is unaffected by
+the backend moving out from under it.
 
 ### Breaking for scripts, if you tracked the repo rather than releases
 

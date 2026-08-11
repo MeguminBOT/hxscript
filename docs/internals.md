@@ -43,11 +43,17 @@ see that.
 
 ### class Compiler
 
-`Cppia.compile` turns declarations into bytecode and stops there, which leaves an embedder holding
-several steps that all have to be right: load the module, resolve every class it declared, record
-each against the world it came from, and turn substitution on. Miss the recording and nothing
-errors: the compile succeeded, the module loaded, the class is real, and every script still runs
-interpreted while the host reports otherwise. This does those steps.
+A backend turns declarations into bytecode and stops there, which leaves an embedder holding several
+steps that all have to be right: load the module, resolve every class it declared, record each
+against the world it came from, and turn substitution on. Miss the recording and nothing errors: the
+compile succeeded, the module loaded, the class is real, and every script still runs interpreted
+while the host reports otherwise. This does those steps.
+
+It is also the only part a host should have to know about. Which backend runs is decided by the
+build -- `-D hxscript_cppia` on hxcpp, `-D hxscript_hl` on HashLink -- and only one is ever compiled
+in, so `Compiler` names it as `Backend` and everything here is written once. The shape is shared:
+refuse when there is no backend, offer every module unless told otherwise, time the work, report.
+What differs is one call in the middle, which each backend answers as `run` and `substituting`.
 
 One call per world:
 
@@ -114,7 +120,7 @@ Read from the world's own map rather than from `built`. The two differ exactly w
 handed nothing because the work was done for a previous one, and answering from `built` there
 announces a substitution that cannot happen.
 
-## src/hxscript/compile/Cppia.hx
+## src/hxscript/cppia/Backend.hx
 
 ### public static function booleans(decls:Array<ModuleDecl>):Map<String, Map<String, Bool>>
 
@@ -144,7 +150,7 @@ All modules are declared before any is emitted, so they may refer to each other 
 Emission runs against a throwaway writer first, since a module that failed part-way through
 would otherwise leave a corrupt record behind.
 
-## src/hxscript/compile/Emitter.hx
+## src/hxscript/cppia/Emitter.hx
 
 ### function implementationOf(a:AbstractDecl, pack:String):ClassDecl
 
@@ -794,7 +800,7 @@ with one of its own adds it to `Config.callShims` directly; nothing here is in t
 Moved out when docstrings were capped at five lines of prose. Each heading names the file
 and the symbol the note belongs to.
 
-### src/hxscript/compile/Capture.hx :: class Capture
+### src/hxscript/cppia/Capture.hx :: class Capture
 
 cppia captures by value, copying the outer variable into the closure's frame, so later writes on
 either side are invisible to the other. A local that is both captured and assigned therefore
@@ -803,7 +809,7 @@ share the cell.
 
 Selection is by name rather than by binding, so sibling scopes reusing a name are all boxed.
 
-### src/hxscript/compile/Compiler.hx :: public static var jit:Bool = true;
+### src/hxscript/cppia/Backend.hx :: public static var jit:Bool = true;
 
 It is a process-wide switch rather than a per-module one, so it is set once and never unset by
 ordinary running. Leaving it on is the usual choice: it costs nothing measurable at load time
@@ -814,7 +820,7 @@ off has met a JIT fault rather than a bad module, and since that fault is cumula
 than caused by any one construct, the only useful response is to stop jitting for the rest of
 the process. That happens automatically and is reported.
 
-### src/hxscript/compile/Compiler.hx :: static function retryWithoutJit(result:Result, group:Array<Module>, env:Environment, report:Report):Bool
+### src/hxscript/cppia/Backend.hx :: static function retryWithoutJit(result:Result, group:Array<Module>, env:Environment, report:Report):Bool
 
 A module that the loader refuses with the JIT on and accepts with it off has met a JIT fault,
 and a JIT fault is cumulative: it belongs to how much has been jitted rather than to any one
@@ -822,7 +828,7 @@ construct, so narrowing would blame whichever module happened to tip it over. Gi
 JIT for the rest of the process is the only answer that stays true, and it is a good trade, since
 compiled without the JIT is still far ahead of interpreted.
 
-### src/hxscript/compile/Compiler.hx :: static function load(result:Result, offered:Array<Module>, env:Environment, report:Report):Null<String>
+### src/hxscript/cppia/Backend.hx :: static function load(result:Result, offered:Array<Module>, env:Environment, report:Report):Null<String>
 
 Guarded, and that is the point of it. The loader reports a fault by throwing, and what it
 throws is a bare string that names the fault and nothing inside the module, so an unguarded
@@ -830,14 +836,14 @@ load turns one unemittable construct in one script into the host process ending.
 worst case is that everything stays interpreted, which is the same degradation every other
 refusal already has.
 
-### src/hxscript/compile/Compiler.hx :: static function bind(module:Module, env:Environment):Bool
+### src/hxscript/cppia/Backend.hx :: static function bind(module:Module, env:Environment):Bool
 
 Skipping the work is not the same as skipping the binding. `built` outlives any one world, so a
 world made after a reload would otherwise find everything already compiled and be handed
 nothing: the classes exist, every report says so, and none of them is what runs, because the
 interpreter reads the world's own map and that map is empty.
 
-### src/hxscript/compile/Cppia.hx :: class Cppia
+### src/hxscript/cppia/Backend.hx :: class Backend
 
 Optional in two senses: nothing here is built unless `-D hxscript_cppia` is set, and any module
 the emitter cannot express is reported in `skipped` and left to the interpreter rather than
@@ -845,20 +851,20 @@ failing the batch.
 
 Loading the result needs a host built with `-D scriptable`, via `cpp.cppia.Module.fromData`.
 
-### src/hxscript/compile/Emitter.hx :: class Emitter
+### src/hxscript/cppia/Emitter.hx :: class Emitter
 
 cppia resolves names when the module links, so `emitIdent` must place each one as a local, a field
 of the enclosing class, or a type; anything else throws `Unsupported` rather than being
 guessed at. An unknown TYPE is not a refusal. It is emitted as `Dynamic`, costing dispatch speed
 for that expression alone.
 
-### src/hxscript/compile/Emitter.hx :: var classVars:StringMap<StringMap<String>>;
+### src/hxscript/cppia/Emitter.hx :: var classVars:StringMap<StringMap<String>>;
 
 Only fields that are plain variables are here. A field with a `get` or `set` accessor is left
 out on purpose: reaching it directly would read the storage behind the property and skip the
 accessor that gives it its meaning.
 
-### src/hxscript/compile/Emitter.hx :: var expectedArray:Null<String> = null;
+### src/hxscript/cppia/Emitter.hx :: var expectedArray:Null<String> = null;
 
 An array literal has nothing in it to say what it holds, so it was always built as the loose
 kind. That is fine until something reads it back through an annotation promising a specific
@@ -866,14 +872,14 @@ kind, because the read trusts the annotation and reinterprets the memory, which 
 than misbehaves. Carrying the target's type to the literal keeps the two descriptions of the
 same array in agreement.
 
-### src/hxscript/compile/Emitter.hx :: var moduleAbstracts:StringMap<String> = new StringMap();
+### src/hxscript/cppia/Emitter.hx :: var moduleAbstracts:StringMap<String> = new StringMap();
 
 An abstract has no runtime form, so a value of one is its underlying value and a method on it
 is a static taking that value as a leading `this`. Knowing which paths those are is what lets
 a call be routed there, and what each one boxes is what lets a slot holding one be typed as
 the thing it really holds.
 
-### src/hxscript/compile/Emitter.hx :: var temporaryArray:Null<String> = null;
+### src/hxscript/cppia/Emitter.hx :: var temporaryArray:Null<String> = null;
 
 A local's array type comes from what it was declared as, and a temporary is declared with no
 type at all, so it would be built untyped however specific its contents are. That matters when
@@ -881,7 +887,7 @@ the temporary is then read into a slot the loader believes holds a typed array: 
 wrong shape and yields nothing useful. This carries the type across the one step where there is
 no declaration to take it from.
 
-### src/hxscript/compile/Emitter.hx :: function ownView(decls:Array<ModuleDecl>):Void
+### src/hxscript/cppia/Emitter.hx :: function ownView(decls:Array<ModuleDecl>):Void
 
 Every module in the batch is declared into one table, so a name declared in one is visible from
 all of them, and a name the host also offers is decided by whichever was written last. Neither
@@ -892,13 +898,13 @@ A fresh emitter is built for each module and declares the batch before emitting 
 applying that module's own view last is enough to get the precedence right. Without it a
 script declaring `Damage` beside a host `Damage` silently linked the wrong one.
 
-### src/hxscript/compile/Emitter.hx :: function emitFun(args:Array<Argument>, body:Expr, ret:Null<CType>, pos:Position):Void
+### src/hxscript/cppia/Emitter.hx :: function emitFun(args:Array<Argument>, body:Expr, ret:Null<CType>, pos:Position):Void
 
 Captures are left to the loader, which walks the enclosing stack layout; this only has to nest
 and to keep variable ids unique. Default argument values become null-checks prepended to the
 body, since cppia accepts only constants in the signature.
 
-### src/hxscript/compile/Emitter.hx :: function accumulate(e:Expr, target:Expr):Expr
+### src/hxscript/cppia/Emitter.hx :: function accumulate(e:Expr, target:Expr):Expr
 
 Only the positions whose value the comprehension keeps are rewritten. In a block that is the
 last expression and nothing before it; in a loop it is the body, so nesting accumulates into
@@ -907,21 +913,21 @@ the same container; in an `if` it is each branch that exists.
 A `key => value` becomes a `set` rather than a `push`, which is what makes the map form work:
 the caller has already built `target` as a map when that is what the body yields.
 
-### src/hxscript/compile/Emitter.hx :: function accessCode(mode:Null<String>, pos:Position):String
+### src/hxscript/cppia/Emitter.hx :: function accessCode(mode:Null<String>, pos:Position):String
 
 Accessors are written as `V` rather than `C`. Both make the loader resolve `get_<name>` or
 `set_<name>` at link time, but only `V` also registers the field as a native property, and a
 by-name access, which is how this emitter reads fields, consults the accessor only for
 those. With `C` the read would silently return the storage slot instead.
 
-### src/hxscript/compile/Emitter.hx :: function storableType(path:String):Void
+### src/hxscript/cppia/Emitter.hx :: function storableType(path:String):Void
 
 A slot is only ever stored as bool, int, float, string or object, and everything that is not
 one of the first four is an object, so naming the exact class buys nothing, while naming one
 the loader cannot resolve leaves the slot with no store type at all and drops it to untyped
 access. Only the types that change the storage are written; the rest are `Dynamic`.
 
-### src/hxscript/compile/Emitter.hx :: function hostField(e:Expr):Bool
+### src/hxscript/cppia/Emitter.hx :: function hostField(e:Expr):Bool
 
 Only a field access qualifies, and only when its object cannot be shown to be a class from this
 batch: those have a known layout and are reached by offset. Everything else may be a property,
@@ -930,7 +936,7 @@ either.
 
 `this` is excluded because a scripted class's own fields are its own, whatever it extends.
 
-### src/hxscript/compile/Emitter.hx :: function nativeAbstract(path:String):Null<Class<Dynamic>>
+### src/hxscript/cppia/Emitter.hx :: function nativeAbstract(path:String):Null<Class<Dynamic>>
 
 A host abstract has no runtime class, so `BlendMode.ADD` cannot be emitted as a static access:
 the loader finds no `openfl.display.BlendMode` to link against and refuses the whole module with
@@ -941,7 +947,7 @@ whether a path is an abstract at all.
 Cached including the misses: nearly every path asked about is an ordinary class, and the answer
 is a type resolution.
 
-### src/hxscript/compile/Emitter.hx :: function abstractConstant(wrapper:Class<Dynamic>, name:String):Null<Dynamic>
+### src/hxscript/cppia/Emitter.hx :: function abstractConstant(wrapper:Class<Dynamic>, name:String):Null<Dynamic>
 
 This is not an optimisation, it is the only honest spelling. An enum abstract's constants are
 compile-time values, and compiled Haxe writes the underlying `1` or `"add"` at the call site, so
@@ -949,7 +955,7 @@ there is nothing at runtime for `BlendMode.ADD` to be. The wrapper holds each co
 getter returning a boxed value, which is right for the interpreter and wrong for anything handing
 it to a host API, so the box is opened here and the contents emitted.
 
-### src/hxscript/compile/Emitter.hx :: function declaredClass(path:String):Null<String>
+### src/hxscript/cppia/Emitter.hx :: function declaredClass(path:String):Null<String>
 
 Worth resolving because the alternative is `Dynamic`, and `Dynamic` decides how every later
 access to the value is performed: a field read becomes a lookup by name at runtime rather than

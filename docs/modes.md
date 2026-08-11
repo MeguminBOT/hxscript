@@ -46,14 +46,14 @@ interpreting saves you is `-D scriptable` and `-D hxscript_cppia`, and nothing e
 ### cppia
 
 The same declarations compiled to hxcpp's own bytecode. `Compiler.compile(env)` emits a module,
-loads it, and makes its classes the ones the world runs; `Cppia.compile` is the layer under that for
+loads it, and makes its classes the ones the world runs; `cppia.Backend.compile` is the layer under that for
 a host that wants the bytes rather than the effect. Either way what comes back is an ordinary
 `Class<Dynamic>`. [`embedding.md`](embedding.md#compiling-at-runtime)
 is the integration.
 
 Needs two defines. `-D scriptable` is hxcpp's, and makes the host's own types reachable from
 bytecode, which is what a compiled script calls into. `-D hxscript_cppia` is this library's, and is
-what compiles the emitter in at all: without it `Cppia.compile` reports every module skipped, which
+what compiles the emitter in at all: without it `cppia.Backend.compile` reports every module skipped, which
 looks exactly like a compiler that refuses everything.
 
 ### cppia with the JIT
@@ -108,7 +108,7 @@ are hot and interpret the rest.
 
 **Enable the JIT** whenever you are compiling at all.
 
-`Cppia.compile` reports what it emitted and what it skipped with a reason, so a host can decide per
+`cppia.Backend.compile` reports what it emitted and what it skipped with a reason, so a host can decide per
 module and interpret the remainder. Both modes produce the same class, so nothing downstream needs to
 know which one it got.
 
