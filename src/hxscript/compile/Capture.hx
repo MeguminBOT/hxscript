@@ -124,69 +124,107 @@ class Capture {
 	 * @param locals Receives every declared local.
 	 * @param inFunction Whether this subtree sits inside a nested function.
 	 */
-	function collect(e:Expr, assigned:StringMap<Bool>, captured:StringMap<Bool>, locals:StringMap<Bool>, inFunction:Bool):Void {
+	function collect(e:Expr, assigned:StringMap<Bool>, captured:StringMap<Bool>, locals:StringMap<Bool>, inFunction:Bool,
+			shadow:StringMap<Bool> = null):Void {
 		if (e == null)
 			return;
 
 		switch (e.e) {
 			case EIdent(v):
-				if (inFunction)
+				if (inFunction && !hidden(shadow, v))
 					captured.set(v, true);
 
 			case EVar(n, _, init, _, _, _):
-				locals.set(n, true);
-				collect(init, assigned, captured, locals, inFunction);
+				collect(init, assigned, captured, locals, inFunction, shadow);
+				declare(n, locals, shadow);
 
 			case EBinop(op, e1, e2):
 				if (op == '='
 					|| (op.length > 1 && op.charAt(op.length - 1) == '=' && op != '==' && op != '!=' && op != '>=' && op != '<=')) {
 					switch (e1.e) {
 						case EIdent(v):
-							assigned.set(v, true);
+							if (!hidden(shadow, v))
+								assigned.set(v, true);
 						case _:
 					}
 				}
-				collect(e1, assigned, captured, locals, inFunction);
-				collect(e2, assigned, captured, locals, inFunction);
+				collect(e1, assigned, captured, locals, inFunction, shadow);
+				collect(e2, assigned, captured, locals, inFunction, shadow);
 
 			case EUnop(op, _, inner):
 				if (op == '++' || op == '--') {
 					switch (inner.e) {
 						case EIdent(v):
-							assigned.set(v, true);
+							if (!hidden(shadow, v))
+								assigned.set(v, true);
 						case _:
 					}
 				}
-				collect(inner, assigned, captured, locals, inFunction);
+				collect(inner, assigned, captured, locals, inFunction, shadow);
 
 			case EFunction(fargs, fbody, fname, _, _):
 				if (fname != null)
-					locals.set(fname, true);
+					declare(fname, locals, shadow);
+
+				var inner:StringMap<Bool> = new StringMap();
+				if (shadow != null)
+					for (name in shadow.keys())
+						inner.set(name, true);
+
 				for (a in fargs)
-					locals.set(a.name, true);
-				collect(fbody, assigned, captured, locals, true);
+					inner.set(a.name, true);
+
+				collect(fbody, assigned, captured, locals, true, inner);
 
 			case EFor(v, it, body):
-				locals.set(v, true);
-				collect(it, assigned, captured, locals, inFunction);
-				collect(body, assigned, captured, locals, inFunction);
+				collect(it, assigned, captured, locals, inFunction, shadow);
+				declare(v, locals, shadow);
+				collect(body, assigned, captured, locals, inFunction, shadow);
 
 			case ETry(body, v, _, ecatch, extra):
-				locals.set(v, true);
-				collect(body, assigned, captured, locals, inFunction);
-				collect(ecatch, assigned, captured, locals, inFunction);
+				collect(body, assigned, captured, locals, inFunction, shadow);
+				declare(v, locals, shadow);
+				collect(ecatch, assigned, captured, locals, inFunction, shadow);
 				if (extra != null) {
 					for (x in extra) {
-						locals.set(x.v, true);
-						collect(x.expr, assigned, captured, locals, inFunction);
+						declare(x.v, locals, shadow);
+						collect(x.expr, assigned, captured, locals, inFunction, shadow);
 					}
 				}
 
 			case _:
 				each(e, function(child:Expr):Void {
-					collect(child, assigned, captured, locals, inFunction);
+					collect(child, assigned, captured, locals, inFunction, shadow);
 				});
 		}
+	}
+
+	/**
+	 * Records a declaration against whichever function actually declares it.
+	 *
+	 * A name declared inside a nested function belongs to that function. Recording it as a local of
+	 * the enclosing one made it look assigned and captured at the same time, which is the test for
+	 * boxing, so an unrelated local of the same name in a sibling closure was rewritten into a read
+	 * of a cell that was never a cell.
+	 *
+	 * @param name The declared name.
+	 * @param locals The enclosing function's locals.
+	 * @param shadow The nested function's own names, or null at the enclosing level.
+	 */
+	static inline function declare(name:String, locals:StringMap<Bool>, shadow:StringMap<Bool>):Void {
+		if (shadow != null)
+			shadow.set(name, true);
+		else
+			locals.set(name, true);
+	}
+
+	/**
+	 * @param shadow The names a nested function declares, or null.
+	 * @param name The name being mentioned.
+	 * @return Whether it refers to the nested function's own local rather than the enclosing one's.
+	 */
+	static inline function hidden(shadow:StringMap<Bool>, name:String):Bool {
+		return shadow != null && shadow.exists(name);
 	}
 
 	/** Rewrites every mention of a boxed name into an access on its cell. */
@@ -210,10 +248,18 @@ class Capture {
 
 			case EFunction(fargs, fbody, fname, ret, id):
 				var shadowed:Array<String> = [];
+
 				for (a in fargs) {
 					if (boxed.exists(a.name)) {
 						boxed.remove(a.name);
 						shadowed.push(a.name);
+					}
+				}
+
+				for (name in declaredIn(fbody)) {
+					if (boxed.exists(name)) {
+						boxed.remove(name);
+						shadowed.push(name);
 					}
 				}
 
@@ -227,6 +273,56 @@ class Capture {
 			case _:
 				return mapChildren(e, rewrite);
 		}
+	}
+
+	/**
+	 * The names a function body declares at its own level.
+	 *
+	 * Deeper functions are not descended into: each one shadows for itself when it is rewritten, so
+	 * looking inside here would hide a name from code that can still see the outer one.
+	 *
+	 * @param e The function body.
+	 * @return Every name it declares.
+	 */
+	function declaredIn(e:Expr):Array<String> {
+		var found:Array<String> = [];
+
+		function walk(node:Expr):Void {
+			if (node == null)
+				return;
+
+			switch (node.e) {
+				case EVar(n, _, init, _, _, _):
+					found.push(n);
+					walk(init);
+
+				case EFor(v, it, body):
+					found.push(v);
+					walk(it);
+					walk(body);
+
+				case ETry(body, v, _, ecatch, extra):
+					found.push(v);
+					walk(body);
+					walk(ecatch);
+					if (extra != null) {
+						for (x in extra) {
+							found.push(x.v);
+							walk(x.expr);
+						}
+					}
+
+				case EFunction(_, _, fname, _, _):
+					if (fname != null)
+						found.push(fname);
+
+				case _:
+					each(node, walk);
+			}
+		}
+
+		walk(e);
+		return found;
 	}
 
 	/** Visits every child expression of a node. */
