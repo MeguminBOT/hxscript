@@ -12,14 +12,19 @@
 #
 #     haxelib dev hxscript ../..
 #
-# Add libraries on the command line and they are wired, because a preset keys off the define that
-# `-lib` already sets. This is the fastest way to answer "can a script reach flixel":
+# Add libraries and they are wired, because a preset keys off the define that `-lib` already sets.
+# This is the fastest way to answer "can a script reach flixel":
 #
-#     haxe console.hxml -lib flixel -lib flixel-addons --macro flixel.system.macros.FlxDefines.run()
+#     haxe -lib flixel -lib flixel-addons --macro flixel.system.macros.FlxDefines.run() console.hxml
 #
-# `--run` rather than `-main ... --interp`, because only `--run` passes arguments through:
+# They go *before* this file, not after it. `--run` on the last line takes everything that follows as
+# arguments to the program, so a `-lib` written after it reaches Check rather than the compiler, and
+# the run reports the setup it would have had without it.
 #
-#     haxe console.hxml --run Check --projects ../some/other/folder
+# `--run` rather than `-main ... --interp`, because only `--run` passes arguments through. Check's own
+# arguments do go after, for the same reason:
+#
+#     haxe console.hxml --projects ../some/other/folder
 
 -lib hxscript
 -cp .
