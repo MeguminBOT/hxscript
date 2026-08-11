@@ -24,6 +24,7 @@ class AllCommon {
 		{name: 'StdProbe', run: StdProbe.run},
 		{name: 'InterpStringTest', run: InterpStringTest.run},
 		{name: 'LoopTest', run: LoopTest.run},
+		{name: 'ParentTest', run: ParentTest.run},
 		{name: 'PrinterTest', run: PrinterTest.run},
 		{name: 'RangeTest', run: RangeTest.run},
 		{name: 'ReturnTest', run: ReturnTest.run},
