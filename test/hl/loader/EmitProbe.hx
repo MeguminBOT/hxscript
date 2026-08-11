@@ -7,6 +7,30 @@ import hxscript.hl.Loader.Loaded;
 import hxscript.types.ScriptedClass;
 
 /**
+ * A host class a script reaches out to, standing in for whatever an embedder exposes.
+ *
+ * Deliberately one of our own rather than something from the standard library: on HashLink `Math`
+ * is not reachable by reflection at all, and `Std.int` is inline and so has no runtime field, so
+ * neither says anything about whether reaching the host works.
+ */
+@:keep
+class HostBits {
+	public static var answer:Int = 42;
+
+	public static function twice(n:Int):Int {
+		return n * 2;
+	}
+
+	public static function between(low:Int, high:Int):Int {
+		return low + high;
+	}
+
+	public static function scale(v:Float):Float {
+		return v * 1.5;
+	}
+}
+
+/**
  * Runs the same source interpreted and compiled and compares the answers.
  *
  * Agreeing is the whole claim. A construct the emitter refuses is reported and counted separately,
@@ -62,11 +86,20 @@ class EmitProbe {
 			return 'REJECTED ' + (Loader.error() ?? 'no reason given');
 		}
 
+		for (binding in emitter.bindings) {
+			var holder:Dynamic = Type.resolveClass(binding.owner);
+			Loader.set(loaded, binding.index, holder == null ? null : Reflect.field(holder, binding.field));
+		}
+
 		var fn:Dynamic = Loader.bind(loaded, entry);
 		if (fn == null)
 			return 'no closure';
 
-		return Std.string(Reflect.callMethod(null, fn, []));
+		try {
+			return Std.string(Reflect.callMethod(null, fn, []));
+		} catch (e:Dynamic) {
+			return 'threw ' + Std.string(e);
+		}
 	}
 
 	static function check(label:String, ret:String, body:String, extra:String = ''):Void {
@@ -89,6 +122,33 @@ class EmitProbe {
 		}
 	}
 
+	/**
+	 * Checks that both sides refuse a construct, without demanding they say the same thing.
+	 *
+	 * Some failures cannot read alike. A name the host does not offer is unknown to the interpreter
+	 * before anything runs, and is a null the compiled module reaches for at the point of use, so
+	 * the two describe the same absence from different distances. What matters is that neither
+	 * pretends it worked.
+	 *
+	 * @param label How to name the case.
+	 * @param ret The declared return type.
+	 * @param body The script body.
+	 * @param extra Anything the class needs beside it.
+	 */
+	static function throws(label:String, ret:String, body:String, extra:String = ''):Void {
+		var src:String = source(ret, body, extra);
+		var want:String = interpreted(src);
+		var got:String = compiled(src);
+
+		if (StringTools.startsWith(want, 'threw') && StringTools.startsWith(got, 'threw')) {
+			passed++;
+			say(label, 'both refuse it');
+		} else {
+			failed++;
+			say(label, 'compiled ' + got + ', interpreted ' + want);
+		}
+	}
+
 	static function say(label:String, what:String):Void {
 		var pad:String = label;
 		while (pad.length < 34)
@@ -98,6 +158,10 @@ class EmitProbe {
 	}
 
 	public static function main():Void {
+		// Both sides have to be able to reach the host, or a case that exercises reaching it is only
+		// measuring the interpreter failing.
+		hxscript.Config.globalImports.set('HostBits', hxscript.syntax.Expr.ImportMode.INormal);
+
 		Sys.println('-- the same source, interpreted and compiled --');
 
 		check('a constant', 'Int', 'return 42;');
@@ -165,6 +229,16 @@ class EmitProbe {
 			+ '\tpublic function new(x:Int, y:Int) { this.x = x; this.y = y; }\n');
 		check('a float field', 'Float', 'var v:Vec = new Vec(); v.n = 1.5; return v.n * 2.25;',
 			'}\nclass Vec {\n\tpublic var n:Float;\n\tpublic function new() { n = 0.0; }\n');
+
+		check('a host static call', 'Int', 'return HostBits.twice(21);');
+		check('a host call with two arguments', 'Int', 'return HostBits.between(40, 2);');
+		check('a host static read', 'Int', 'return HostBits.answer;');
+		check('a host call on a local', 'Int', 'var n:Int = 21; return HostBits.twice(n);');
+		check('a host call in a loop', 'Int', 'var t:Int = 0; for (i in 0...10) t += HostBits.twice(i); return t;');
+		check('a host call feeding another', 'Int', 'return HostBits.twice(HostBits.twice(10));');
+		check('a host result compared', 'Bool', 'return HostBits.twice(21) == 42;');
+		check('a host call returning a float', 'Float', 'return HostBits.scale(3.0);');
+		throws('a host name nothing answers to', 'Int', 'return Nowhere.gone(1);');
 
 		check('a string is refused', 'String', 'return "no";');
 		check('an array is refused', 'Int', 'var a = [1, 2]; return a[0];');

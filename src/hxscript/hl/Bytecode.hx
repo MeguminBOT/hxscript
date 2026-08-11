@@ -188,6 +188,18 @@ class Bytecode {
 	}
 
 	/**
+	 * Adds a global.
+	 *
+	 * @param type Its type. Only a pointer type may be written into after loading, which is what the
+	 *        VM roots and therefore what the collector can see.
+	 * @return Its index.
+	 */
+	public function global(type:Int):Int {
+		globals.push(type);
+		return globals.length - 1;
+	}
+
+	/**
 	 * Reserves the next function index.
 	 *
 	 * Indices are handed out before bodies are written, because a function that calls another needs

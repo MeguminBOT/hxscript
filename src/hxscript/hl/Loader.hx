@@ -81,6 +81,17 @@ class Loader {
 		return entry(module);
 	}
 
+	/**
+	 * Puts a value in one of a loaded module's globals.
+	 *
+	 * @param module The module.
+	 * @param index The global's index.
+	 * @param value What to put there.
+	 */
+	public static function set(module:Loaded, index:Int, value:Dynamic):Void {
+		setGlobal(module, index, value);
+	}
+
 	/** @return Why the last `load` failed, or null when it did not. */
 	public static function error():Null<String> {
 		var raw:hl.Bytes = lastError();
@@ -98,6 +109,8 @@ class Loader {
 	@:hlNative("hxscript", "entry_index") static function entry(module:Loaded):Int {
 		return -1;
 	}
+
+	@:hlNative("hxscript", "set_global") static function setGlobal(module:Loaded, index:Int, value:Dynamic):Void {}
 
 	@:hlNative("hxscript", "last_error") static function lastError():hl.Bytes {
 		return null;

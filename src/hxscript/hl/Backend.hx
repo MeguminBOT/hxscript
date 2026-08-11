@@ -150,6 +150,9 @@ class Backend {
 			return;
 		}
 
+		for (binding in emitter.bindings)
+			Loader.set(loaded, binding.index, hostValue(binding.owner, binding.field, env));
+
 		for (entry in exposed) {
 			var owner:Dynamic = env.resolve(entry.path);
 			if (!(owner is ScriptedClass))
@@ -175,6 +178,29 @@ class Backend {
 	 * is ever released.
 	 */
 	static var retained:Array<Loaded> = [];
+
+	/**
+	 * Finds what a script meant by a name the host owns.
+	 *
+	 * The world is asked first, so a name a host put in scope wins over a type that merely shares
+	 * its name, and the type table answers otherwise. A name nothing answers to leaves null in the
+	 * global rather than refusing the module, which is the same thing an interpreted script sees
+	 * when it names something that is not there.
+	 *
+	 * @param owner The owner's name, as the script wrote it.
+	 * @param field The field's name.
+	 * @param env The world.
+	 * @return The value, or null when nothing answers to it.
+	 */
+	static function hostValue(owner:String, field:String, env:Environment):Dynamic {
+		var holder:Dynamic = env.variables.exists(owner) ? env.variables.get(owner) : null;
+		if (holder == null)
+			holder = hxscript.types.TypeTools.resolve(owner, env);
+		if (holder == null)
+			return null;
+
+		return Reflect.field(holder, field);
+	}
 
 	/** @return The path a class in a module is resolved by. */
 	static function pathOf(module:Module, name:String):String {

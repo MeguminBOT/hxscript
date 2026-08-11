@@ -100,7 +100,30 @@ HL_PRIM vclosure *HL_NAME(closure)(hxs_module *h, int findex) {
 	return hl_alloc_closure_void(t, fun);
 }
 
+/**
+	Puts a value in one of a loaded module's globals.
+
+	This is how compiled code reaches the host: the emitter leaves a global for each host value a
+	script names, and these are filled once after loading rather than looked up per call. Only a
+	pointer-typed global may be written, which is every global the emitter makes, because
+	hl_module_init roots exactly those and a value written anywhere else would be invisible to the
+	collector.
+*/
+HL_PRIM void HL_NAME(set_global)(hxs_module *h, int index, vdynamic *value) {
+	hl_type *t;
+
+	if (h == NULL || index < 0 || index >= h->code->nglobals)
+		return;
+
+	t = h->code->globals[index];
+	if (!hl_is_ptr(t))
+		return;
+
+	*(vdynamic **)(h->m->globals_data + h->m->globals_indexes[index]) = value;
+}
+
 DEFINE_PRIM(_BYTES, last_error, _NO_ARG);
+DEFINE_PRIM(_VOID, set_global, _ABSTRACT(hxs_module) _I32 _DYN);
 DEFINE_PRIM(_ABSTRACT(hxs_module), load, _BYTES _I32);
 DEFINE_PRIM(_I32, entry_index, _ABSTRACT(hxs_module));
 DEFINE_PRIM(_DYN, closure, _ABSTRACT(hxs_module) _I32);

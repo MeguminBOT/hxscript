@@ -98,6 +98,18 @@ class Emitter {
 	/** The class the body being written belongs to, or null when it is a static. */
 	var inside:Null<String>;
 
+	/** The global each host value sits in, by the name a script writes. */
+	var hostSlots:StringMap<Int>;
+
+	/**
+	 * Every host value this module needs, in the order the globals were made.
+	 *
+	 * A compiled function cannot link to the host, so what it names is fetched once after loading
+	 * and left in a global. The alternative is a lookup per call, which is most of what makes the
+	 * interpreter slow in the first place.
+	 */
+	public var bindings(default, null):Array<{index:Int, owner:String, field:String}>;
+
 	var tVoid:Int;
 	var tI32:Int;
 	var tF64:Int;
@@ -119,6 +131,8 @@ class Emitter {
 		members = new StringMap();
 		memberTypes = new StringMap();
 		inside = null;
+		hostSlots = new StringMap();
+		bindings = [];
 
 		tVoid = module.prim(HVoid);
 		tI32 = module.prim(HI32);
@@ -553,6 +567,19 @@ class Emitter {
 	function into(e:Expr, slot:Int):Void {
 		var want:Int = regs[slot];
 
+		// A value on its way into a dynamic is boxed on the way rather than written raw. Writing an
+		// int into a pointer slot is not a wrong number, it is a pointer, and what reads it next is
+		// what falls over.
+		if (want == tDyn) {
+			var natural:Int = infer(e);
+			if (natural != tDyn) {
+				var raw:Int = reg(natural);
+				into(e, raw);
+				ops.push({op: OToDyn, args: [slot, raw]});
+				return;
+			}
+		}
+
 		switch (e.e) {
 			case EConst(CInt(v)):
 				if (want == tF64)
@@ -581,6 +608,10 @@ class Emitter {
 					throw new Unsupported(name + ', which is neither a local nor a field here', e.pos);
 
 				getField(thisExpr(e.pos), name, slot, e.pos);
+
+			case EField(_, _, _) if (hostName(e) != null):
+				var host:{owner:String, field:String} = hostName(e);
+				emitHostRead(host.owner, host.field, slot);
 
 			case EField(obj, name, _):
 				getField(obj, name, slot, e.pos);
@@ -647,8 +678,15 @@ class Emitter {
 		}
 
 		var sig:Null<Signature> = calledSignature(callee);
-		if (sig == null)
-			throw new Unsupported('a call to something that is not a function of this batch', pos);
+		if (sig == null) {
+			var host:Null<{owner:String, field:String}> = hostName(callee);
+			if (host != null) {
+				emitHostCall(host.owner, host.field, params, slot, pos);
+				return;
+			}
+
+			throw new Unsupported('a call to something this batch does not declare and the host does not offer', pos);
+		}
 
 		if (params.length != sig.args.length)
 			throw new Unsupported('a call given ' + params.length + ' of its ' + sig.args.length + ' arguments', pos);
@@ -661,6 +699,92 @@ class Emitter {
 		}
 
 		ops.push({op: callFor(params.length), args: args});
+	}
+
+	/**
+	 * The global holding a host value, making one the first time it is asked for.
+	 *
+	 * @param owner The host class's path.
+	 * @param field The static's name.
+	 * @return The global's index.
+	 */
+	function hostSlot(owner:String, field:String):Int {
+		var key:String = owner + '.' + field;
+		var known:Null<Int> = hostSlots.get(key);
+		if (known != null)
+			return known;
+
+		var index:Int = module.global(tDyn);
+		hostSlots.set(key, index);
+		bindings.push({index: index, owner: owner, field: field});
+		return index;
+	}
+
+	/**
+	 * Writes a read of something the host owns.
+	 *
+	 * @param owner The host class's path.
+	 * @param field The static's name.
+	 * @param slot Where to leave the value.
+	 */
+	function emitHostRead(owner:String, field:String, slot:Int):Void {
+		if (regs[slot] == tDyn) {
+			ops.push({op: OGetGlobal, args: [slot, hostSlot(owner, field)]});
+			return;
+		}
+
+		var held:Int = reg(tDyn);
+		ops.push({op: OGetGlobal, args: [held, hostSlot(owner, field)]});
+		ops.push({op: OSafeCast, args: [slot, held]});
+	}
+
+	/**
+	 * Writes a call to something the host owns.
+	 *
+	 * The closure is read from a global rather than linked, and every argument is boxed first: the
+	 * JIT turns a call through a `Dynamic` closure into `hl_dyn_call`, which insists on that and in
+	 * exchange marshals the arguments and the result to whatever the host actually declared. The
+	 * destination register's type is what the result is cast to, so a host result lands as the type
+	 * the script asked for.
+	 *
+	 * @param owner The host class's path.
+	 * @param field The static's name.
+	 * @param params The arguments.
+	 * @param slot Where to leave the result.
+	 * @param pos Where it appears.
+	 */
+	function emitHostCall(owner:String, field:String, params:Array<Expr>, slot:Int, pos:Position):Void {
+		var fn:Int = reg(tDyn);
+		ops.push({op: OGetGlobal, args: [fn, hostSlot(owner, field)]});
+
+		// Nothing here can know whether the host really offers this, and a global left null is what
+		// says it does not. Calling it would be an access violation with no message; this raises the
+		// null the way reaching for a missing name anywhere else does.
+		ops.push({op: ONullCheck, args: [fn]});
+
+		// The result lands in a dynamic and is cast out of it afterwards. Handing the call a typed
+		// destination looks like it should work and does not: the JIT casts that register from its own
+		// type to its own type, which is nothing, and the raw pointer stays there as a plausible
+		// number.
+		var returned:Int = reg(tDyn);
+		var args:Array<Int> = [returned, fn];
+
+		for (p in params) {
+			var raw:Int = reg(infer(p));
+			into(p, raw);
+
+			if (regs[raw] == tDyn) {
+				args.push(raw);
+				continue;
+			}
+
+			var boxed:Int = reg(tDyn);
+			ops.push({op: OToDyn, args: [boxed, raw]});
+			args.push(boxed);
+		}
+
+		ops.push({op: OCallClosure, args: args});
+		ops.push({op: regs[slot] == tDyn ? OMov : OSafeCast, args: [slot, returned]});
 	}
 
 	/**
@@ -951,12 +1075,16 @@ class Emitter {
 					throw new Unsupported('new ' + cls + ', which is not a class of this batch', e.pos);
 				self;
 
+			case EField(_, _, _) if (hostName(e) != null): tDyn;
+
 			case EField(obj, name, _):
 				var cls:Null<String> = classNamed(infer(obj));
 				var slot:Null<Int> = cls == null ? null : members.get(cls).get(name);
 				if (slot == null)
 					throw new Unsupported('the field ' + name + ', which is not one this batch declares', e.pos);
 				memberTypes.get(cls)[slot];
+
+			case ECall(callee, _) if (calledSignature(callee) == null && methodCall(callee) == null && hostName(callee) != null): tDyn;
 
 			case ECall(callee, _):
 				var method:Null<{on:Expr, sig:Signature}> = methodCall(callee);
@@ -992,6 +1120,39 @@ class Emitter {
 			case CTParent(inner): typeOf(inner);
 			case _: null;
 		}
+	}
+
+	/**
+	 * Works out whether an expression names something the host owns.
+	 *
+	 * Anything written `Owner.field` where `Owner` is capitalised and is not a class of this batch
+	 * is taken to be the host's. Whether it really is cannot be settled here: the answer comes when
+	 * the module is loaded and the binding is resolved, and a name nothing answers to leaves a null
+	 * in the global rather than failing to compile.
+	 *
+	 * @param e The expression.
+	 * @return The owner and field, or null when it is not that shape.
+	 */
+	function hostName(e:Expr):Null<{owner:String, field:String}> {
+		return switch (e.e) {
+			case EField({e: EIdent(owner)}, field, _) if (isTypeName(owner) && !classes.exists(owner) && !signatures.exists(owner + '.' + field)):
+				{owner: owner, field: field};
+
+			case ECall(callee, _):
+				hostName(callee);
+
+			case EParent(inner):
+				hostName(inner);
+
+			case _:
+				null;
+		}
+	}
+
+	/** @return Whether a name is written the way a type is, which is how a host owner is spotted. */
+	inline function isTypeName(name:String):Bool {
+		var head:String = name.charAt(0);
+		return head == head.toUpperCase() && head != head.toLowerCase();
 	}
 
 	/**
