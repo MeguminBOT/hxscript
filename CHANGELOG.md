@@ -29,6 +29,22 @@ Internals renamed at the same time, unlikely to appear in a host: `CppiaEmitter`
 `Script`, `Environment`, `Module`, `Config`, `IScripted`, `Interp`, `ScriptedClass`,
 `compile.Compiler` and `compile.Cppia` keep their names.
 
+### Breaking for scripts, if you tracked the repo rather than releases
+
+Three helpers are reachable from a script by a bare name, with no import, because the presets list
+them in `globals`. They were renamed with everything else, so a script written against the repo
+between 1.1.2 and now needs the new name. Nothing that shipped in 1.1.2 had them.
+
+| Script wrote | Now writes |
+| --- | --- |
+| `Decode.toIntArray(...)` | `BytesTools.toIntArray(...)` |
+| `Upload.quads(...)` | `TriangleTools.quads(...)` |
+| `Encode.sound(...)` | `SoundTools.sound(...)` |
+
+The failure is `Unknown identifier: Decode` at the call site, and under the bytecode compiler the
+module holding it is reported as `unresolved identifier` and left interpreted, along with everything
+that names it.
+
 ### Added
 
 - **Your own classes, without writing a bridge.** Mark a class `@:scriptable` and name its package
