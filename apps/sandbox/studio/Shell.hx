@@ -219,7 +219,7 @@ class Shell extends FlxState {
 		capture();
 		survive();
 
-		note('hxScript sandbox');
+		note('hxScript Sandbox: Lime HXCPP');
 		note('${Settings.name(Settings.run)} runs the selected project, ${Settings.name(Settings.back)} comes back here. Settings changes both.');
 		note('projects: ' + (Projects.root == null ? '(none)' : Projects.root));
 
@@ -1000,7 +1000,7 @@ class Shell extends FlxState {
 		try {
 			if (file == null) {
 				file = sys.io.File.write(Projects.beside('sandbox.log'), false);
-				file.writeString('hxScript sandbox log\n');
+				file.writeString('hxScript Sandbox: Lime HXCPP log\n');
 			}
 
 			file.writeString(text + '\n');

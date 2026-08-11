@@ -225,9 +225,9 @@ Two worked examples and one application, all runnable:
 - [`examples/workbench/`](examples/workbench) is a coding environment where you write, test and run
   any number of scripts with no rebuild. The program it ships is a playable game written entirely in
   script.
-- [`apps/sandbox/`](apps/sandbox) is a prototyping tool for lime, openfl and flixel, where a project
-  is a folder of `.hx` files it reads at runtime. Drop a folder in, press Run, edit, save, watch it
-  reload.
+- [`apps/sandbox/`](apps/sandbox) is the **hxScript Sandbox: Lime HXCPP**, a prototyping tool for
+  lime, openfl and flixel where a project is a folder of `.hx` files it reads at runtime. Drop a
+  folder in, press Run, edit, save, watch it reload.
 
 ## Documentation
 

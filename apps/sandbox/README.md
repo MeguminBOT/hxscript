@@ -1,4 +1,4 @@
-# hxScript Sandbox
+# hxScript Sandbox: Lime HXCPP
 
 A prototyping app for **lime, openfl and flixel**, where your project is a folder of `.hx` files read
 at runtime rather than code that has to be compiled in.
@@ -136,22 +136,6 @@ something that runs in it before you have written anything.
 | `openfl` | a scripted `openfl.display.Sprite` driving a few dozen more, with `Graphics`, `BlendMode` and a `TextField` |
 | `lime` | a `host.Project`: no framework under it, just the frame loop and `lime.ui.KeyCode` |
 | `plain` | a `static main()`: no framework at all, printing what a script can reach |
-
-### What about heaps, or HashLink?
-
-Neither runs here, and hxScript is not the reason. The scripting half is already done: hxScript's
-heaps preset bridges `h2d.Object` as a base a script may extend and puts the `h2d` and `hxd` types
-within reach. The host half is the problem, and both halves of it are outside this repository.
-
-Heaps' running backends are HashLink (`hlsdl`, `hldx`, `hlopenal`) and HTML5/WebGL; there is no hxcpp
-backend, and this application is an hxcpp binary, so there is nothing to link against. Heaps also owns
-its window and its GL context, as lime does. lime can build this app for HashLink, and `build.sh`
-already accepts that target, but even there the two would each create a window of their own. It is not
-a matter of adding a fifth row to the table above.
-
-The honest route is a second host built on HashLink with heaps where openfl is, sharing `studio/` and
-`host/` but not `Project.xml`. That wants a HashLink bytecode backend in hxScript first, since
-otherwise every project in it would be interpreted with no option to compile.
 
 ### The window
 

@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableDelayedExpansion
-rem Builds the hxScript sandbox on Windows.
+rem Builds the hxScript Sandbox (Lime HXCPP) on Windows.
 rem
 rem   build.bat                 release build
 rem   build.bat run             build, then launch it

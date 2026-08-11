@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the hxScript sandbox on Linux, macOS, or Windows under Git Bash.
+# Builds the hxScript Sandbox (Lime HXCPP) on Linux, macOS, or Windows under Git Bash.
 #
 #   ./build.sh                 release build for this platform
 #   ./build.sh run             build, then launch it

@@ -59,8 +59,8 @@ that names it.
   openfl, flixel, flixel-addons, flixel-ui or heaps force-compiles their packages, generates the
   bridges, gives their abstracts a runtime form and registers emulations for members with no runtime
   form. `-D hxscript_verbose` prints what it did.
-- **`apps/sandbox`**, a prototyping tool for lime, openfl and flixel whose projects are folders of
-  `.hx` files read at runtime.
+- **`apps/sandbox`**, the hxScript Sandbox, Lime HXCPP edition: a prototyping tool for lime, openfl
+  and flixel whose projects are folders of `.hx` files read at runtime.
 - **Per-library shim packages**: `hxscript.stdlib`, `hxscript.flixel`, `hxscript.openfl` and
   `hxscript.python` hold the closures standing in for members a target cannot reflect on.
 
