@@ -67,15 +67,15 @@ class Interp {
 		parent = val;
 		parentFields = new Map();
 
-		if(val != null) {
+		if (val != null) {
 			var cls:Dynamic = Type.getClass(val);
 
-			if(cls != null) { //A normal class
-				for(field in Type.getInstanceFields(cls)) {
+			if (cls != null) { // A normal class
+				for (field in Type.getInstanceFields(cls)) {
 					parentFields.set(field, true);
 				}
-			} else { //An anonymous structure
-				for(field in Reflect.fields(val)) {
+			} else { // An anonymous structure
+				for (field in Reflect.fields(val)) {
 					parentFields.set(field, true);
 				}
 			}
@@ -618,7 +618,7 @@ class Interp {
 			variables.set(name, v);
 		} else {
 			if (parent != null && parentFields.exists(name)) {
-				if(getMeta(':bypassAccessor') != null)
+				if (getMeta(':bypassAccessor') != null)
 					Reflect.setField(parent, name, v);
 				else
 					Reflect.setProperty(parent, name, v);
@@ -1365,7 +1365,7 @@ class Interp {
 		}
 
 		if (parent != null && parentFields.exists(id)) {
-			if(getMeta(':bypassAccessor') != null)
+			if (getMeta(':bypassAccessor') != null)
 				return Reflect.field(parent, id);
 			else
 				return Reflect.getProperty(parent, id);

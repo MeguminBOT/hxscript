@@ -1,7 +1,6 @@
 package hxscript;
 
 import hxscript.runtime.ImportModule;
-
 import hxscript.types.*;
 import hxscript.syntax.Parser;
 import hxscript.runtime.Interp;
