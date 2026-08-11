@@ -6,6 +6,9 @@ at runtime rather than code that has to be compiled in.
 Drop a folder into `projects/`, pick it in the list, press Run. Edit a script in whatever editor you
 already use, save, and it reloads. No rebuild, no Haxe toolchain, no wiring.
 
+**Folder** opens the selected project where your file manager can see it, and **Open error** opens the
+file the last error came from, so the round trip between the log and the editor is two clicks.
+
 ```
 ┌─ projects ────┬─ Flixel playground ────────────────┐
 │ ▸ flixel      │ kind      flixel                   │
@@ -110,7 +113,19 @@ program started. So the app owns the `Application` and hands the same lifecycle 
 When more than one class qualifies, the order is: `entry` in `project.json`, then a class marked
 `public static var entry:Bool = true`, then flixel state, openfl sprite, `host.Project`, `main`.
 
-### The three that ship
+### A project with no framework at all
+
+The last row of that table is worth its own paragraph, because it is the one people do not expect to
+be there. A class with a `static main()` and nothing else runs here: no window, no display object, no
+loop. That suits anything computing an answer rather than drawing one, such as a parser, a solver, a
+converter, or a scratch test of an idea you did not want to make a whole project for.
+
+It gets the standard library, `sys`, and the host's own tools. `log()` and `trace` both reach the
+**Console** window, which the button in the top bar opens, and `Probe.report(...)` answers whether a
+type or member is really reachable from a script rather than leaving you to find out from a null field
+later. When `main` returns, the shell comes back on its own unless the project left something running.
+
+### The four that ship
 
 `projects/` is created beside the executable on first run and seeded with these, so a fresh build has
 something that runs in it before you have written anything.
@@ -120,6 +135,23 @@ something that runs in it before you have written anything.
 | `flixel` | a scripted `FlxState` with two dozen scripted `FlxSprite`s, plus a module declaring a scripted enum, a scripted abstract with an operator, and a class |
 | `openfl` | a scripted `openfl.display.Sprite` driving a few dozen more, with `Graphics`, `BlendMode` and a `TextField` |
 | `lime` | a `host.Project`: no framework under it, just the frame loop and `lime.ui.KeyCode` |
+| `plain` | a `static main()`: no framework at all, printing what a script can reach |
+
+### What about heaps, or HashLink?
+
+Neither runs here, and hxScript is not the reason. The scripting half is already done: hxScript's
+heaps preset bridges `h2d.Object` as a base a script may extend and puts the `h2d` and `hxd` types
+within reach. The host half is the problem, and both halves of it are outside this repository.
+
+Heaps' running backends are HashLink (`hlsdl`, `hldx`, `hlopenal`) and HTML5/WebGL; there is no hxcpp
+backend, and this application is an hxcpp binary, so there is nothing to link against. Heaps also owns
+its window and its GL context, as lime does. lime can build this app for HashLink, and `build.sh`
+already accepts that target, but even there the two would each create a window of their own. It is not
+a matter of adding a fifth row to the table above.
+
+The honest route is a second host built on HashLink with heaps where openfl is, sharing `studio/` and
+`host/` but not `Project.xml`. That wants a HashLink bytecode backend in hxScript first, since
+otherwise every project in it would be interpreted with no option to compile.
 
 ### The window
 

@@ -1,0 +1,6 @@
+{
+	"title": "Plain Haxe",
+	"kind": "plain",
+	"entry": "Report",
+	"description": "No game framework at all: a static main() that runs, prints, and returns. The standard library, sys and the host's own tools are reachable by name. Output goes to the Console window, and the shell comes back when main returns."
+}
