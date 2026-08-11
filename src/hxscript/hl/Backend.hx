@@ -218,7 +218,12 @@ class Backend {
 		if (holder == null)
 			return null;
 
-		return Reflect.field(holder, field);
+		// An empty field asks for the owner itself, which is what a type used as a value wants: `is`
+		// and a catch clause name a type rather than anything on one.
+		if (field == '')
+			return holder;
+
+		return hxscript.proxy.ReflectProxy.field(holder, field);
 	}
 
 	/** @return The path a class in a module is resolved by. */

@@ -245,6 +245,37 @@ class Runtime {
 		hxscript.proxy.ReflectProxy.setField(o, name, v);
 	}
 
+	/**
+	 * @return Whether a catch clause takes a value.
+	 *
+	 * A clause naming nothing takes everything, which is also what a type nothing answers to does:
+	 * the interpreter treats an unresolvable annotation as catching rather than as never matching,
+	 * and a compiled clause has to agree or the two disagree about which one runs.
+	 */
+	public static function catches(v:Dynamic, type:Dynamic):Bool {
+		return type == null || isOfType(v, type);
+	}
+
+	/**
+	 * @return Whether a value is of a type, which is what `is` asks.
+	 *
+	 * Through the library's own test rather than the standard one, which knows nothing of a class a
+	 * script declared and refuses to be handed one.
+	 */
+	public static function isOfType(v:Dynamic, type:Dynamic):Bool {
+		return type != null && hxscript.proxy.StdProxy.isOfType(v, type);
+	}
+
+	/** @return Whether a value carries a named field, which is what an object pattern asks first. */
+	public static function has(o:Dynamic, name:String):Bool {
+		return o != null && hxscript.proxy.ReflectProxy.hasField(o, name);
+	}
+
+	/** @return Whether a value is an array of exactly this length, which an array pattern asks first. */
+	public static function sized(o:Dynamic, n:Int):Bool {
+		return (o is Array) && (o : Array<Dynamic>).length == n;
+	}
+
 	/** @return What sits at an index or a key, which is the same spelling over an array and a map. */
 	public static function index(o:Dynamic, i:Dynamic):Dynamic {
 		if (o is haxe.Constraints.IMap)

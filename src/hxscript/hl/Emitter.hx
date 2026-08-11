@@ -119,6 +119,16 @@ class Emitter {
 	var collector:Null<{slot:Int, pairs:Bool}>;
 
 	/**
+	 * How many traps are open around what is being written.
+	 *
+	 * A trap the VM is holding has to be given back before the function it belongs to goes away, and
+	 * returning out of the middle of a `try` skips the instruction that would have done it. Leaving
+	 * one behind does not fail here: it fails in whatever runs next and reaches for a handler that
+	 * belongs to a function that has already returned.
+	 */
+	var traps:Int;
+
+	/**
 	 * Every value this module needs handed to it, in the order the globals were made.
 	 *
 	 * A compiled function cannot link to anything outside its own module, so what it names is
@@ -153,6 +163,7 @@ class Emitter {
 		inside = null;
 		hostSlots = new StringMap();
 		collector = null;
+		traps = 0;
 		bindings = [];
 
 		tVoid = module.prim(HVoid);
@@ -394,6 +405,7 @@ class Emitter {
 		continues = [];
 		returns = sig.ret;
 		inside = host;
+		traps = 0;
 
 		push();
 
@@ -545,6 +557,15 @@ class Emitter {
 				else
 					forEach(name, it, body, e.pos);
 
+			case ESwitch(subject, cases, fallback):
+				emitSwitch(subject, cases, fallback, null, e.pos);
+
+			case EThrow(thrown):
+				ops.push({op: OThrow, args: [dynOf(thrown)]});
+
+			case ETry(body, name, t, handler, extra):
+				emitTry(body, name, t, handler, extra, null, e.pos);
+
 			case EForGen(spec, body):
 				switch (spec.e) {
 					case EBinop('in', {e: EBinop('=>', {e: EIdent(k)}, {e: EIdent(v)})}, source):
@@ -556,12 +577,14 @@ class Emitter {
 			case EReturn(value):
 				if (value == null) {
 					var slot:Int = reg(tVoid);
+					closeTraps();
 					ops.push({op: ORet, args: [slot]});
 					return;
 				}
 
 				var slot:Int = reg(returns);
 				into(value, slot);
+				closeTraps();
 				ops.push({op: ORet, args: [slot]});
 
 			case EBreak:
@@ -901,6 +924,21 @@ class Emitter {
 				land(toNo);
 				into(no, slot);
 				land([over]);
+
+			case ESwitch(subject, cases, fallback):
+				emitSwitch(subject, cases, fallback, slot, e.pos);
+
+			case ETry(body, name, t, handler, extra):
+				emitTry(body, name, t, handler, extra, slot, e.pos);
+
+			case EBinop('is', v, t):
+				// An instance this module made is its own, because a module HashLink loads gets its own
+				// type table. Asking the world whether one is a class the world declared gets a truthful
+				// no, which is a wrong answer to the question the script asked.
+				if (classes.exists(calledName(t) ?? ''))
+					throw new Unsupported('is ' + calledName(t) + ', whose instances this module makes its own', e.pos);
+
+				callSupport('isOfType', [dynOf(v), typeValue(t, e.pos)], slot);
 
 			case EArrayDecl(items):
 				emitArrayDecl(items, slot, e.pos);
@@ -1962,6 +2000,12 @@ class Emitter {
 		callSupport('set', [ownerOf(cls), named(name), dynOf(value)], reg(tDyn));
 	}
 
+	/** Gives back every trap open at this point, which a return has to do before it leaves. */
+	function closeTraps():Void {
+		for (i in 0...traps)
+			ops.push({op: OEndTrap, args: [1]});
+	}
+
 	/** @return A register holding one of the batch's classes. */
 	function ownerOf(cls:String):Int {
 		var slot:Int = reg(tDyn);
@@ -1974,6 +2018,260 @@ class Emitter {
 		var slot:Int = reg(tDyn);
 		ops.push({op: OGetGlobal, args: [slot, constSlot('s' + name, name)]});
 		return slot;
+	}
+
+	/** @return A dynamic register holding a number, for the calls that take one. */
+	function counted(v:Int):Int {
+		var raw:Int = reg(tI32);
+		ops.push({op: OInt, args: [raw, module.intId(v)]});
+
+		var slot:Int = reg(tDyn);
+		ops.push({op: OToDyn, args: [slot, raw]});
+		return slot;
+	}
+
+	/**
+	 * Writes a `switch`.
+	 *
+	 * Every case is a run of patterns, an optional guard, and a body. A pattern that fails and a
+	 * guard that fails go to the same place, which is what makes a guarded case fall through to a
+	 * later case that would also have matched rather than to the default.
+	 *
+	 * @param subject What is being matched, run once.
+	 * @param cases The cases in order.
+	 * @param fallback The default, or null when there is none.
+	 * @param slot Where to leave the value, or null when the switch is a statement.
+	 * @param pos Where it appears.
+	 */
+	function emitSwitch(subject:Expr, cases:Array<{values:Array<Expr>, expr:Expr, ?guard:Expr}>, fallback:Null<Expr>, slot:Null<Int>, pos:Position):Void {
+		var value:Int = dynOf(subject);
+		var done:Array<Int> = [];
+
+		for (c in cases) {
+			push();
+			var toNext:Array<Int> = [];
+
+			if (c.values.length == 1) {
+				match(c.values[0], value, toNext);
+			} else {
+				// Any one of them matching is enough, so each is tried and the ones that succeed all
+				// arrive at the body.
+				var hit:Array<Int> = [];
+
+				for (p in c.values) {
+					var missed:Array<Int> = [];
+					match(p, value, missed);
+					hit.push(jump(OJAlways));
+					land(missed);
+				}
+
+				toNext.push(jump(OJAlways));
+				land(hit);
+			}
+
+			if (c.guard != null)
+				condition(c.guard, false, toNext);
+
+			if (slot == null)
+				statement(c.expr);
+			else
+				into(c.expr, slot);
+
+			done.push(jump(OJAlways));
+			land(toNext);
+			pop();
+		}
+
+		if (fallback != null) {
+			if (slot == null)
+				statement(fallback);
+			else
+				into(fallback, slot);
+		} else if (slot != null) {
+			ops.push({op: ONull, args: [slot]});
+		}
+
+		land(done);
+	}
+
+	/**
+	 * Writes a `try` and its clauses.
+	 *
+	 * The trap is what the VM unwinds to, and it pops itself when it fires, so the ordinary path
+	 * ends the trap itself and the caught path does not. Clauses are tried in order and the first
+	 * whose type takes the value runs; a value none of them takes is thrown onward, which is what
+	 * leaves an exception a script did not ask about looking the same as one from a script that had
+	 * no `try` at all.
+	 *
+	 * @param body What is protected.
+	 * @param name The first clause's variable.
+	 * @param t The first clause's type, or null when it takes everything.
+	 * @param handler The first clause's body.
+	 * @param extra The clauses after it.
+	 * @param slot Where to leave the value, or null when the try is a statement.
+	 * @param pos Where it appears.
+	 */
+	function emitTry(body:Expr, name:String, t:Null<CType>, handler:Expr, extra:Null<Array<{v:String, t:Null<CType>, expr:Expr}>>, slot:Null<Int>,
+			pos:Position):Void {
+		var thrown:Int = reg(tDyn);
+		var trap:Int = ops.length;
+		ops.push({op: OTrap, args: [thrown, 0]});
+
+		traps++;
+		if (slot == null)
+			statement(body);
+		else
+			into(body, slot);
+		traps--;
+
+		ops.push({op: OEndTrap, args: [1]});
+		var done:Array<Int> = [jump(OJAlways)];
+
+		land([trap]);
+
+		var clauses:Array<{v:String, t:Null<CType>, expr:Expr}> = [{v: name, t: t, expr: handler}];
+		if (extra != null) {
+			for (c in extra)
+				clauses.push(c);
+		}
+
+		for (c in clauses) {
+			push();
+			var toNext:Array<Int> = [];
+
+			var wanted:Null<Int> = catchType(c.t, pos);
+			if (wanted != null) {
+				var takes:Int = reg(tBool);
+				callSupport('catches', [thrown, wanted], takes);
+				toNext.push(jump(OJFalse, [takes]));
+			}
+
+			var bound:Int = reg(tDyn);
+			ops.push({op: OMov, args: [bound, thrown]});
+			scopes[scopes.length - 1].set(c.v, bound);
+
+			if (slot == null)
+				statement(c.expr);
+			else
+				into(c.expr, slot);
+
+			done.push(jump(OJAlways));
+			land(toNext);
+			pop();
+		}
+
+		ops.push({op: ORethrow, args: [thrown]});
+		land(done);
+	}
+
+	/**
+	 * @return A register holding what a clause catches, or null when it catches everything.
+	 *
+	 * `Dynamic`, `Any` and `Exception` are the spellings that take anything, which is the
+	 * interpreter's list rather than one of this emitter's.
+	 */
+	function catchType(t:Null<CType>, pos:Position):Null<Int> {
+		if (t == null)
+			return null;
+
+		return switch (t) {
+			case CTPath(path, _):
+				var name:String = path[path.length - 1];
+				if (name == 'Dynamic' || name == 'Any' || name == 'Exception')
+					null;
+				else
+					typeNamed(path.join('.'));
+
+			case CTParent(inner):
+				catchType(inner, pos);
+
+			case _:
+				null;
+		}
+	}
+
+	/** @return A register holding the type an expression names. */
+	function typeValue(t:Expr, pos:Position):Int {
+		var name:Null<String> = calledName(t);
+		if (name == null)
+			throw new Unsupported('a type that is not written as a name', pos);
+		return typeNamed(name);
+	}
+
+	/**
+	 * @return A register holding a type, by the name a script wrote.
+	 *
+	 * A class of the batch is the one the world holds rather than the shape this module gave it, so
+	 * a value made here and a value made by the interpreter answer the same about what they are.
+	 */
+	function typeNamed(name:String):Int {
+		if (classes.exists(name))
+			return ownerOf(name);
+
+		var slot:Int = reg(tDyn);
+		ops.push({op: OGetGlobal, args: [slot, hostSlot(name, '')]});
+		return slot;
+	}
+
+	/**
+	 * Writes the test one pattern makes, and binds whatever it names.
+	 *
+	 * @param p The pattern.
+	 * @param value A register holding what it is matched against.
+	 * @param onFail Filled with the jumps taken when it does not match.
+	 */
+	function match(p:Expr, value:Int, onFail:Array<Int>):Void {
+		switch (p.e) {
+			case EParent(inner) | EMeta(_, _, inner):
+				match(inner, value, onFail);
+
+			// An alternative: the left is tried, and only what it rejects reaches the right.
+			case EBinop('|', a, b):
+				var missed:Array<Int> = [];
+				match(a, value, missed);
+
+				var hit:Int = jump(OJAlways);
+				land(missed);
+				match(b, value, onFail);
+				land([hit]);
+
+			case EIdent('_'):
+
+			// A bare lowercase name binds rather than compares, even when a local of that name is in
+			// scope. That is Haxe's rule and it is worth being sure of: comparing instead reads a
+			// value nothing here put there.
+			case EIdent(name) if (!isTypeName(name)):
+				var bound:Int = reg(tDyn);
+				move(value, bound);
+				scopes[scopes.length - 1].set(name, bound);
+
+			case EArrayDecl(items):
+				var right:Int = reg(tBool);
+				callSupport('sized', [value, counted(items.length)], right);
+				onFail.push(jump(OJFalse, [right]));
+
+				for (i in 0...items.length) {
+					var item:Int = reg(tDyn);
+					callSupport('index', [value, counted(i)], item);
+					match(items[i], item, onFail);
+				}
+
+			case EObject(fields):
+				for (f in fields) {
+					var there:Int = reg(tBool);
+					callSupport('has', [value, named(f.name)], there);
+					onFail.push(jump(OJFalse, [there]));
+
+					var held:Int = reg(tDyn);
+					callSupport('get', [value, named(f.name)], held);
+					match(f.e, held, onFail);
+				}
+
+			case _:
+				var same:Int = reg(tBool);
+				callSupport('eq', [value, dynOf(p)], same);
+				onFail.push(jump(OJFalse, [same]));
+		}
 	}
 
 	/** @return Whether a field is declared `static`. */
