@@ -26,11 +26,15 @@ mkdir -p "$BIN"
 
 # Whether a target has a runtime here. The rest are built and not run, which still catches every
 # compile and generator error, and is the entire failure mode this suite exists for.
+#
+# `hl` runs when the HashLink VM is on PATH. It is worth putting there: the target had nine failures
+# and fourteen gaps that only a real run could show, all of them one runtime cast.
 runs() {
   case "$1" in
     eval|cpp) return 0 ;;
     neko) command -v neko >/dev/null 2>&1 ;;
     python) command -v python >/dev/null 2>&1 ;;
+    hl) command -v hl >/dev/null 2>&1 ;;
     *) return 1 ;;
   esac
 }
@@ -41,6 +45,7 @@ runner() {
     cpp) echo "$BIN/cpp/common/AllCommon.exe" ;;
     neko) echo "neko $BIN/neko/all.n" ;;
     python) echo "python $BIN/python/all.py" ;;
+    hl) echo "hl $BIN/hl/all.hl" ;;
     *) echo "" ;;
   esac
 }

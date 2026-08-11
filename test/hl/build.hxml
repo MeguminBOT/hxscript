@@ -2,7 +2,11 @@
 #
 #   haxe test/hl/build.hxml
 #
-# No hl runtime here, so this is a generation check.
+#   hl bin_test/hl/all.hl
+#
+# `test/run.sh hl` does both when the HashLink VM is on PATH, and falls back to generation only when
+# it is not. Running it matters: the target generated cleanly the whole time it could not construct
+# a scripted class at all.
 -cp src
 -cp test/common
 -cp test/common/fixtures
