@@ -68,7 +68,7 @@ class Interp {
 		parentFields = new Map();
 
 		if(val != null) {
-			var cls:Class<Dynamic> = Type.getClass(val);
+			var cls:Dynamic = Type.getClass(val);
 
 			if(cls != null) { //A normal class
 				for(field in Type.getInstanceFields(cls)) {
