@@ -220,6 +220,7 @@ so a refusal costs speed rather than behaviour.
 | --- | --- |
 | a name it cannot resolve | an identifier or type that is neither in the batch, ambient, nor a host static |
 | a reference to a class compiled in another batch | it cannot link across batches, so it waits for one that holds both |
+| a reference to a scripted type that stays interpreted | there is nothing for the name to link to, and cppia resolves an unknown one to null and then uses it without looking |
 | a host superclass whose constructor shape is unknown | the type table has no entry for it, so a call to it cannot be padded |
 | a method or non-constant field *of a native abstract* | an abstract has no class to call a method on once compiled; its constants fold to their value |
 | a static extension whose receiver type is not known here | rewriting a call that was really a member call would change what the program does, so it is refused instead |
@@ -233,7 +234,7 @@ key-value loops, `??`, `%=`, `case a | b:`, and a `using` whose receiver type is
 matching compiles in full, over enum constructors, arrays, objects and nested shapes alike: a switch
 the `SWITCH` instruction cannot express is rewritten into an if-else chain rather than refused.
 
-The evidence is [`test/cpp/CppiaTest.hx`](../test/cpp/CppiaTest.hx), which runs 151 constructs
+The evidence is [`test/cpp/CppiaTest.hx`](../test/cpp/CppiaTest.hx), which runs 173 constructs
 interpreted and compiled and compares the answers. It reports 0 wrong, and one refusal that is
 asserted on purpose. That is a stronger claim than "nothing was refused": a construct that compiled
 to the wrong thing would show as `WRONG`, and two of them did during the work.

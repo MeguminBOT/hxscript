@@ -66,6 +66,60 @@ class SweepTest {
 			['propGetSet', 'var b:Prop = new Prop(); b.v = 4; return Std.string(b.v);', '8', '}\nclass Prop {\n\tvar raw:Int = 0;\n\tpublic var v(get, set):Int;\n\tpublic function new() {}\n\tfunction get_v():Int { return raw * 2; }\n\tfunction set_v(n:Int):Int { raw = n; return n; }\n'],
 			['enumPattern', 'var e:Colour = Red(3); switch (e) { case Red(n): return \'r\' + n; case Blue: return \'b\'; }', 'r3', '}\nenum Colour { Red(n:Int); Blue; }\nclass Unused2 {\n\tpublic function new() {}\n'],
 			['keyValueMap', 'var m:Map<String,Int> = [\'a\' => 1, \'b\' => 2]; var t:Int = 0; for (k => v in m) t += v; return Std.string(t);', '3', ''],
+
+			['intDivNeg', 'var a:Int = -7; var b:Int = 2; return Std.string(Std.int(a / b));', '-3', ''],
+			['modNeg', 'var a:Int = -7; var b:Int = 3; return Std.string(a % b);', '-1', ''],
+			['floorNeg', 'return Std.string(Math.floor(-1.5)) + \'/\' + Std.string(Std.int(-1.5));', '-2/-1', ''],
+			['shiftNeg', 'var n:Int = -8; return Std.string(n >> 1) + \'/\' + Std.string(n >>> 28);', '-4/15', ''],
+			['floatIntDiv', 'var a:Int = 7; var b:Int = 2; return Std.string(a / b);', '3.5', ''],
+
+			['boolReturn', 'return Std.string(yes()) + \'/\' + Std.string(yes() == true);', 'true/true', '\tstatic function yes():Bool { return true; }\n'],
+			['nullBoolReturn', 'var v:Null<Bool> = maybe(); return Std.string(v) + \'/\' + Std.string(v == true);', 'true/true', '\tstatic function maybe():Null<Bool> { return true; }\n'],
+			['nullIntReturn', 'var v:Null<Int> = maybe(); return Std.string(v == null) + \'/\' + Std.string(v);', 'false/0', '\tstatic function maybe():Null<Int> { return 0; }\n'],
+			['nullIntIsNull', 'var v:Null<Int> = none(); return Std.string(v == null);', 'true', '\tstatic function none():Null<Int> { return null; }\n'],
+			['boolField', 'var f:Flag = new Flag(); return Std.string(f.on) + \'/\' + Std.string(f.on == true);', 'true/true', '}\nclass Flag {\n\tpublic var on:Bool = true;\n\tpublic function new() {}\n'],
+
+			['optionalIntLeftOff', 'return Std.string(pad(1));', '1:none', '\tstatic function pad(a:Int, ?b:Int):String { return a + \':\' + (b == null ? \'none\' : Std.string(b)); }\n'],
+			['defaultArgValue', 'return Std.string(pad(1)) + \'/\' + Std.string(pad(1, 5));', '6/6', '\tstatic function pad(a:Int, b:Int = 5):Int { return a + b; }\n'],
+			['optionalStringLeftOff', 'return say(\'hi\');', 'hi!', '\tstatic function say(w:String, ?mark:String):String { return w + (mark == null ? \'!\' : mark); }\n'],
+
+			['closureOverLoopVar', 'var fs:Array<Void->Int> = []; for (i in 0...3) fs.push(function():Int return i); return Std.string(fs[0]() + fs[1]() + fs[2]());', '3', ''],
+			['closureOverWhileVar', 'var fs:Array<Void->Int> = []; var i:Int = 0; while (i < 3) { var k:Int = i; fs.push(function():Int return k); i++; } return Std.string(fs[0]() + fs[2]());', '2', ''],
+			['nestedClosureCapture', 'var n:Int = 1; var outer = function():Int { var inner = function():Int { n += 4; return n; }; return inner() + n; }; return Std.string(outer());', '10', ''],
+			['recursion', 'return Std.string(fib(10));', '55', '\tstatic function fib(n:Int):Int { return n < 2 ? n : fib(n - 1) + fib(n - 2); }\n'],
+
+			['doWhile', 'var i:Int = 0; var t:Int = 0; do { t += i; i++; } while (i < 3); return Std.string(t);', '3', ''],
+			['doWhileRunsOnce', 'var t:Int = 0; do { t = 9; } while (false); return Std.string(t);', '9', ''],
+			['breakInNested', 'var t:Int = 0; for (i in 0...3) { for (j in 0...3) { if (j == 1) break; t++; } } return Std.string(t);', '3', ''],
+			['continueSkips', 'var t:Int = 0; for (i in 0...5) { if (i % 2 == 0) continue; t += i; } return Std.string(t);', '4', ''],
+
+			['throwStringCaught', 'try { throw \'boom\'; } catch (e:String) { return \'got \' + e; }', 'got boom', ''],
+			['throwIntCaughtDynamic', 'try { throw 7; } catch (e:Dynamic) { return \'got \' + Std.string(e); }', 'got 7', ''],
+			['throwFromCallee', 'try { return blow(); } catch (e:String) { return \'caught \' + e; }', 'caught deep', '\tstatic function blow():String { throw \'deep\'; }\n'],
+			['catchOrder', 'try { throw \'s\'; } catch (e:Int) { return \'int\'; } catch (e:String) { return \'str\'; }', 'str', ''],
+			['finallyByReturn', 'var t:Array<String> = []; t.push(step(t)); return t.join(\',\');', 'in,done', '\tstatic function step(t:Array<String>):String { t.push(\'in\'); return \'done\'; }\n'],
+
+			['interfaceDispatch', 'var s:Shape = new Sq(); return Std.string(s.area());', '9', '}\ninterface Shape {\n\tpublic function area():Int;\n}\nclass Sq implements Shape {\n\tpublic function new() {}\n\tpublic function area():Int { return 9; }\n'],
+			['isAgainstInterface', 'var s:Dynamic = new Sq(); return Std.string(s is Shape);', 'true', '}\ninterface Shape {\n\tpublic function area():Int;\n}\nclass Sq implements Shape {\n\tpublic function new() {}\n\tpublic function area():Int { return 9; }\n'],
+			['safeCastToClass', 'var d:Dynamic = new Sq(); var s:Sq = cast(d, Sq); return Std.string(s.area());', '9', '}\nclass Sq {\n\tpublic function new() {}\n\tpublic function area():Int { return 9; }\n'],
+			['unsafeCast', 'var d:Dynamic = 5; var n:Int = cast d; return Std.string(n + 1);', '6', ''],
+
+			['staticInitOrder', 'return Std.string(Table.ready) + \'/\' + Std.string(Table.n);', 'true/7', '}\nclass Table {\n\tpublic static var ready:Bool = true;\n\tpublic static var n:Int = 7;\n'],
+			['stringSwitchNoDefault', 'var s:String = \'c\'; switch (s) { case \'a\': return \'A\'; case \'c\': return \'C\'; } return \'fell\';', 'C', ''],
+			['switchOnFloat', 'var f:Float = 2.5; switch (f) { case 2.5: return \'hit\'; default: return \'miss\'; }', 'hit', ''],
+			['stringCompare', 'return Std.string(\'abc\' < \'abd\') + \'/\' + Std.string(\'b\' > \'a\');', 'true/true', ''],
+			['stringOps', 'var s:String = \'a,b,c\'; return s.split(\',\').join(\'-\') + \'/\' + s.substr(2, 1) + \'/\' + Std.string(s.indexOf(\'c\'));', 'a-b-c/b/4', ''],
+			['parseIntBad', 'return Std.string(Std.parseInt(\'zz\') == null) + \'/\' + Std.string(Std.parseInt(\'12x\'));', 'true/12', ''],
+			['charCodeRoundTrip', 'return String.fromCharCode(\'A\'.charCodeAt(0) + 1);', 'B', ''],
+
+			['arrayFns', 'var a:Array<Int> = [3, 1, 2]; a.sort(function(x:Int, y:Int):Int return x - y); return a.join(\',\') + \'/\' + Std.string(a.indexOf(2));', '1,2,3/1', ''],
+			['arrayMapFilter', 'var a:Array<Int> = [1, 2, 3, 4]; return a.filter(function(v:Int):Bool return v % 2 == 0).map(function(v:Int):Int return v * 10).join(\',\');', '20,40', ''],
+			['arraySpliceInsert', 'var a:Array<Int> = [1, 2, 3]; a.insert(1, 9); a.splice(0, 1); return a.join(\',\');', '9,2,3', ''],
+			['mapRemoveExists', 'var m:Map<String,Int> = [\'a\' => 1]; m.remove(\'a\'); return Std.string(m.exists(\'a\')) + \'/\' + Std.string(m.get(\'a\'));', 'false/null', ''],
+
+			['reflectOnScripted', 'var b:Bag = new Bag(); Reflect.setProperty(b, \'n\', 4); return Std.string(Reflect.getProperty(b, \'n\'));', '4', '}\nclass Bag {\n\tpublic var n:Int = 0;\n\tpublic function new() {}\n'],
+			['typeGetClassName', 'var b:Bag = new Bag(); return Type.getClassName(Type.getClass(b));', 's.Bag', '}\nclass Bag {\n\tpublic function new() {}\n'],
+			['stringOfScripted', 'var b:Bag = new Bag(); return Std.string(b);', 'bag', '}\nclass Bag {\n\tpublic function new() {}\n\tpublic function toString():String { return \'bag\'; }\n'],
 		];
 
 		// Both sides need telling: the interpreter through Config, the emitter through its lists.
@@ -77,7 +131,33 @@ class SweepTest {
 		for (c in cases)
 			sweep(c[0], c[1], c[2], c[3]);
 
+		// Recorded rather than asserted: the interpreter WIDENS an Int that overflows, deliberately,
+		// because a script that never wrote `Int` should not have a value silently corrupted. Compiled
+		// code has the declared type and wraps, which is what Haxe does. Both are defensible and they
+		// do not agree.
+		divergence('intOverflow', 'var n:Int = 2147483647; return Std.string(n + 1);', '');
+
 		TestCase.log('  ' + refused + ' refused');
+	}
+
+	/**
+	 * Reports a construct the two modes answer differently on purpose.
+	 *
+	 * @param name The construct.
+	 * @param body The script body.
+	 * @param extra Anything the class needs beside it.
+	 */
+	static function divergence(name:String, body:String, extra:String):Void {
+		var src:String = 'package s;
+class C {
+	public static function go():Dynamic {
+'
+			+ body + '
+	}
+' + extra + '}
+';
+
+		TestCase.gap(name, 'interp=' + viaInterp(src) + ' cppia=' + viaCppia(src), 'the two to agree');
 	}
 
 	static function sweep(name:String, body:String, want:String, extra:String):Void {
