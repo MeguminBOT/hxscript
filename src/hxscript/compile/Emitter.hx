@@ -802,23 +802,6 @@ class Emitter {
 	function emitFun(args:Array<Argument>, body:Expr, ret:Null<CType>, pos:Position):Void {
 		pushScope();
 
-		w.pos(pos == null ? 0 : pos.line);
-		w.token('FUN');
-		w.type(ret == null ? '' : typeName(ret));
-		w.int(args.length);
-
-		for (a in args) {
-
-			noteArrayElement(a.name, a.t);
-			var id:Int = declareVar(a.name, a.t == null ? null : typeName(a.t));
-
-			w.str(a.name);
-			w.int(id);
-			w.bool(false);
-			storableType(a.t == null ? '' : typeName(a.t));
-			w.bool(false);
-		}
-
 		var prologue:Array<Expr> = [];
 		for (a in args) {
 			if (a.value != null) {
@@ -832,6 +815,24 @@ class Emitter {
 		var boxedBody:Expr = body;
 		var boxing = Capture.transform(args, {e: EBlock(prologue.concat([body])), pos: pos});
 		boxedBody = boxing.body;
+
+		w.pos(pos == null ? 0 : pos.line);
+		w.token('FUN');
+		w.type(ret == null ? '' : typeName(ret));
+		w.int(args.length);
+
+		for (a in args) {
+			var box:Bool = boxing.boxedArgs.indexOf(a.name) >= 0;
+
+			noteArrayElement(a.name, a.t);
+			var id:Int = declareVar(a.name, box || a.t == null ? null : typeName(a.t));
+
+			w.str(a.name);
+			w.int(id);
+			w.bool(false);
+			storableType(box || a.t == null ? '' : typeName(a.t));
+			w.bool(false);
+		}
 
 		var entry:Array<Expr> = [];
 		for (name in boxing.boxedArgs) {
