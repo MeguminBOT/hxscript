@@ -5,6 +5,7 @@ import flixel.FlxG;
 import flixel.FlxSprite;
 import flixel.math.FlxRect;
 import flixel.sound.FlxSound;
+import flixel.sound.FlxSoundGroup;
 
 /**
  * flixel members that have no runtime form, re-registered as real closures (flixel 6.2.0).
@@ -42,16 +43,21 @@ class Shims {
 
 		set('flixel.system.frontEnds.SoundFrontEnd.playMusic', function(o:Dynamic, args:Array<Dynamic>):Dynamic {
 			var asset:Dynamic = args[0];
-			var group:Dynamic = args.length > 1 ? args[1] : null;
-			var volume:Float = (args.length > 2 && args[2] != null) ? args[2] : 1.0;
-			var loop:Bool = (args.length > 3 && args[3] != null) ? args[3] : true;
+			var rest:Array<Dynamic> = args.slice(1);
+			var group:Dynamic = null;
+
+			if (rest.length > 0 && (rest[0] == null || Std.isOfType(rest[0], FlxSoundGroup)))
+				group = rest.shift();
+
+			var volume:Float = (rest.length > 0 && rest[0] != null) ? rest[0] : 1.0;
+			var loop:Bool = (rest.length > 1 && rest[1] != null) ? rest[1] : true;
 
 			var sound:FlxSound = FlxG.sound.create(asset, group);
 			sound.volume = volume;
 			sound.looped = loop;
 
-			if (args.length > 4 && args[4] != null)
-				sound.onComplete = args[4];
+			if (rest.length > 2 && rest[2] != null)
+				sound.onComplete = rest[2];
 
 			FlxG.sound.music = sound;
 			return sound.play();
