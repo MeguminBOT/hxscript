@@ -4,6 +4,7 @@ package hxscript.setup;
 import haxe.macro.Compiler;
 import haxe.macro.Context;
 import haxe.macro.Expr;
+import hxscript.setup.Extension.Outcome;
 import sys.FileSystem;
 import sys.io.File;
 
@@ -50,7 +51,48 @@ class Autowire {
 			var bridges:Array<Expr> = Bridges.generate(libs);
 
 			manifest(bridges, forced, globals, abstracts, [for (lib in libs) lib.title]);
+			extension();
 		});
+	}
+
+	/**
+	 * Builds the HashLink extension into the output directory, when this build wants one.
+	 *
+	 * A compiled script on HashLink needs `hxscript.hdll` beside what runs, and producing it is a C
+	 * compile against a matching hashlink source tree, which is not something a host should have to
+	 * know. Asking for `-D hxscript_hl` is taken as asking for the extension too.
+	 *
+	 * Never fails the build. Without the extension every script is interpreted, which is correct and
+	 * slower rather than broken, so what cannot be done here is reported as one sentence naming the
+	 * thing to install.
+	 */
+	static function extension():Void {
+		if (!Context.defined('hl') || !Context.defined('hxscript_hl') || Context.defined('hxscript_no_hdll'))
+			return;
+
+		var carried:String = null;
+		try {
+			carried = haxe.io.Path.directory(Context.resolvePath('hxscript/hl/hxscript.c'));
+		} catch (e:Dynamic) {
+			Context.warning('hxscript: could not find hxscript.c in the class path; the HashLink extension was not built', Context.currentPos());
+			return;
+		}
+
+		var into:String = haxe.io.Path.directory(Compiler.getOutput());
+		if (into == null || into.length == 0)
+			into = '.';
+
+		switch (Extension.ensure(into, carried)) {
+			case Ready(_):
+				if (Context.defined('hxscript_verbose'))
+					Context.info('hxscript: the HashLink extension is current', Context.currentPos());
+
+			case Built(path):
+				Context.info('hxscript: built ' + path, Context.currentPos());
+
+			case Missing(reason, remedy):
+				Context.warning('hxscript: ' + reason + ', so scripts will be interpreted. To compile them, ' + remedy, Context.currentPos());
+		}
 	}
 
 	/**

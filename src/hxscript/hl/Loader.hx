@@ -33,10 +33,16 @@ typedef Loaded = hl.Abstract<"hxs_module">;
  *
  * `hl_code_read` and `hl_module_init` are compiled into `hl.exe` rather than into `libhl`, so there
  * is no way to them from Haxe. `hxscript.hdll` carries hashlink's own copies and these are its
- * entry points; `src/hxscript/hl/build.sh` builds it.
+ * entry points; `hxscript.setup.Extension` builds it.
+ *
+ * Every native names the library as `?hxscript`, which is what makes shipping it a choice rather
+ * than a condition of starting. HashLink resolves a module's natives before any of its code runs, so
+ * without the mark a program built to be able to compile scripts would refuse to run at all on a
+ * machine that had not got the extension. With it, an absent or unusable library leaves these bound
+ * to a stub, `available` says so, and everything is interpreted.
  */
 class Loader {
-	/** Whether the extension is present, which is the only thing that decides if this can be used. */
+	/** Whether the extension is here and agrees with this VM, which is what decides if this can be used. */
 	public static var available(get, never):Bool;
 
 	static var probed:Null<Bool> = null;
@@ -44,12 +50,26 @@ class Loader {
 	static function get_available():Bool {
 		if (probed == null) {
 			try {
-				probed = hl.Api.isPrimLoaded(read);
+				probed = hl.Api.isPrimLoaded(read) && agrees();
 			} catch (e:Dynamic) {
 				probed = false;
 			}
 		}
 		return probed;
+	}
+
+	/**
+	 * @return The hashlink the extension was built against, or -1 when there is no extension.
+	 *
+	 * Reported rather than acted on. An extension that disagrees with the VM makes `available` false
+	 * on its own; this is for a host that wants to say which two things did not match.
+	 */
+	public static function builtFor():Int {
+		try {
+			return hl.Api.isPrimLoaded(builtVersion) ? builtVersion() : -1;
+		} catch (e:Dynamic) {
+			return -1;
+		}
 	}
 
 	/**
@@ -98,22 +118,30 @@ class Loader {
 		return raw == null ? null : @:privateAccess String.fromUTF8(raw);
 	}
 
-	@:hlNative("hxscript", "load") static function read(data:hl.Bytes, size:Int):Loaded {
+	@:hlNative("?hxscript", "load") static function read(data:hl.Bytes, size:Int):Loaded {
 		return null;
 	}
 
-	@:hlNative("hxscript", "closure") static function closure(module:Loaded, findex:Int):Dynamic {
+	@:hlNative("?hxscript", "closure") static function closure(module:Loaded, findex:Int):Dynamic {
 		return null;
 	}
 
-	@:hlNative("hxscript", "entry_index") static function entry(module:Loaded):Int {
+	@:hlNative("?hxscript", "entry_index") static function entry(module:Loaded):Int {
 		return -1;
 	}
 
-	@:hlNative("hxscript", "set_global") static function setGlobal(module:Loaded, index:Int, value:Dynamic):Void {}
+	@:hlNative("?hxscript", "set_global") static function setGlobal(module:Loaded, index:Int, value:Dynamic):Void {}
 
-	@:hlNative("hxscript", "last_error") static function lastError():hl.Bytes {
+	@:hlNative("?hxscript", "last_error") static function lastError():hl.Bytes {
 		return null;
+	}
+
+	@:hlNative("?hxscript", "agrees") static function agrees():Bool {
+		return false;
+	}
+
+	@:hlNative("?hxscript", "built_for") static function builtVersion():Int {
+		return -1;
 	}
 }
 #end

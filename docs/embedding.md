@@ -138,6 +138,7 @@ Each disables one step, for a host that would rather do it itself or is minimisi
 | `-D hxscript_no_bridges` | generating a bridge per scriptable base. The expensive step |
 | `-D hxscript_no_abstracts` | giving native abstracts a runtime form |
 | `-D hxscript_no_shims` | registering emulations for members with no runtime form |
+| `-D hxscript_no_hdll` | building the HashLink extension beside the output |
 
 ## Metadata
 
@@ -451,23 +452,77 @@ if (!hxscript.compile.Compiler.available)
 
 ### The HashLink extension
 
-HashLink needs one thing hxcpp does not: a `.hdll` beside the VM. Its bytecode loader is compiled
-into `hl.exe` rather than into `libhl`, so a host has no way to reach it. `hxscript.hdll` carries
-hashlink's own `code.c`, `module.c` and `jit.c` and calls them, which keeps the VM stock: ship the
-extension beside the others and run `hl game.hl` as before.
+HashLink needs one thing hxcpp does not: `hxscript.hdll` beside what runs. Its bytecode loader is
+compiled into `hl.exe` rather than into `libhl`, so a host has no way to reach it; the extension
+carries hashlink's own `code.c`, `module.c` and `jit.c` and calls them, which keeps the VM stock.
+Ship it beside the other `.hdll`s and run `hl game.hl` as before.
 
-```sh
-HL_SRC=/path/to/hashlink-src HL_BIN=/path/to/hashlink sh src/hxscript/hl/build.sh
+**The extension is optional at runtime, not just at build time.** A program built with
+`-D hxscript_hl` runs with or without it: missing, corrupt, or built for a different VM, the library
+reports itself unusable and every script is interpreted, exactly as if the define had never been set.
+Shipping the extension is a decision you can make per release, or leave to whoever is running it,
+rather than one baked into the binary.
+
+**You do not normally build it by hand.** `-D hxscript_hl` is taken as asking for the extension too,
+so a build produces it next to its own output and says so once:
+
+```
+hxscript: built bin/hxscript.hdll
 ```
 
-`HL_SRC` must be a hashlink source tree whose tag **matches** the VM in `HL_BIN`. The struct layouts
-in `hl.h` are shared with the running `libhl`, so a mismatched pair links and then misbehaves. The
-build deliberately does not carry `gc.c` or `allocator.c`: those are already in the running `libhl`,
-and a second copy would give loaded modules their own heap, leaving their objects invisible to the
-host's collector.
+What it works out for itself, all from this machine: the VM, from `HLPATH` or `hl` on the path or the
+usual install directories; its version, from `hl --version`; a hashlink source tree, from `HL_SRC` or
+from beside the VM; and a compiler, from `CC` or mingw-w64, `cc`, `gcc` or `clang`. Nothing is
+rebuilt when it is already current, and the version it was built for is recorded beside it so that
+upgrading HashLink rebuilds rather than leaving a stale one in place.
 
-Without the extension `Compiler.available` is false and every module is interpreted. Nothing crashes
-and nothing is silently wrong; you simply get the interpreter.
+**A build downloads nothing.** The one thing it cannot work out is the hashlink sources, because the
+binary distributions ship `hl.h` and none of the rest. If the machine has no tree, the build says so
+and stops there rather than going and getting one.
+
+That is what the scripts beside `hxscript.c` are for. They do the same work with no Haxe involved,
+and they are the only thing here that will fetch anything, after asking:
+
+```sh
+sh hdll.sh                     # ask about anything it cannot work out
+sh hdll.sh --out bin           # put it somewhere in particular
+sh hdll.sh --out bin --yes     # answer yes to everything, for a build machine
+```
+
+```bat
+hdll.bat --out bin
+```
+
+```
+No hashlink sources are on this machine, and they cannot be worked out: the binary
+distributions ship hl.h and none of code.c, module.c or jit.c, which this is built from.
+
+Fetch the hashlink 1.16.0 sources from https://github.com/HaxeFoundation/hashlink ? [y/N]
+```
+
+Answering no ends it with the version to go and get. With nobody there to answer, as on a build
+machine, it takes the no and says the same thing, so a script in CI never reaches the network unless
+`--yes` said it could. `--hl`, `--src` and `--out` set what it would otherwise look for, and `HLPATH`,
+`HL_SRC` and `CC` do the same from the environment.
+
+`haxelib run hxscript hdll [directory]` does the local-only half from wherever the library is
+installed, and `-D hxscript_no_hdll` turns the automatic step off.
+
+**Version matching is checked twice, not trusted once.** At build time `hl.h` carries `HL_VERSION`,
+so a source tree that does not match the VM is refused before anything is compiled. At runtime the
+extension puts values through libhl's own allocators and reads them back at the offsets it was
+compiled to expect; if they do not land there, `Compiler.available` is false and scripts are
+interpreted rather than run against a layout nobody agrees on.
+
+Both exist because the failure has no symptom where the mistake is. The extension does not merely
+call libhl, it shares structures with it: the jit it carries emits machine code holding literal byte
+offsets into objects libhl allocated. The compiler only sees the headers it was handed and the linker
+matches names rather than layouts, so a mismatched pair builds cleanly and then reads a field from
+the wrong place.
+
+The build deliberately does not carry `gc.c` or `allocator.c`. Those are already in the running
+`libhl`, and a second copy would give loaded modules their own heap, leaving their objects invisible
+to the host's collector.
 
 **The whole integration:**
 
@@ -650,8 +705,10 @@ load failure as "recompile from source", which is cheap and always correct.
 | Compiles "successfully", still interpreted | the classes were never registered against the world | `env.compiled.set(...)` and `env.substituting = true` |
 | A bare name compiles interpreted but not compiled | `Compiler.ambient` / `statics` were never set | set both from `Expose` (hxcpp; on HashLink `statics` has no equivalent) |
 | Every module reports skipped | built without the define | `-D hxscript_cppia`, or `-D hxscript_hl` |
-| `Compiler.available` is false on HashLink with the define set | `hxscript.hdll` is not beside the VM | build it with `src/hxscript/hl/build.sh` |
-| A HashLink module loads and then misbehaves | the `.hdll` was built against a different hashlink than the VM | rebuild it with `HL_SRC` matching `HL_BIN` |
+| `Compiler.available` is false on HashLink | no extension beside what runs, or one that does not match this VM | build it; a mismatched one is refused by the runtime layout check rather than corrupting memory |
+| The build warns that no VM was found | `hl` is not on the path | set `HLPATH` to the directory holding `libhl` |
+| The build warns that no sources were found | there is no hashlink checkout here | get the hashlink sources at the version it named and set `HL_SRC` |
+| The build warns that no C compiler was found | there is none | mingw-w64 on Windows, `xcode-select --install` on macOS, `build-essential` on Linux |
 | `is` against a scripted class is refused on HashLink | a loaded module's instances are its own type | expected; the module stays interpreted |
 | A field errors as already inherited | the script redeclares a base field | rename it, or `override` |
 | The setup did not do what you expected | | `-D hxscript_verbose` prints what it wired |

@@ -22,5 +22,6 @@
     "contributors": [
         "MeguminBOT"
     ],
-    "classPath": "src"
+    "classPath": "src",
+    "main": "hxscript.setup.Run"
 }

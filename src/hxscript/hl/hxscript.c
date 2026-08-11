@@ -30,6 +30,48 @@ static void hxs_module_finalize(hxs_module *h) {
 	}
 }
 
+/*
+	Whether this was built against the same hashlink the VM is running.
+
+	The extension does not merely call libhl, it shares structures with it: the jit compiled in here
+	emits machine code carrying literal byte offsets into objects libhl allocates. Those offsets come
+	from the hl.h this was compiled against, and nothing checks that it was the same hl.h libhl was.
+	The compiler only ever sees the headers it was handed, and the linker matches names rather than
+	layouts, so a mismatched pair builds cleanly and then reads a field from the wrong place.
+
+	libhl publishes no version to compare against, so the layouts are tested instead of trusted:
+	values are put through libhl's own allocators and read back at the offsets this build believes
+	in. Cheap, and it fails where the mistake is rather than somewhere unrelated later.
+*/
+HL_PRIM bool HL_NAME(agrees)(void) {
+	vclosure *c;
+	varray *a;
+	vdynamic *d;
+
+	c = hl_alloc_closure_void(&hlt_dyn, (void *)&hlt_i32);
+	if (c == NULL || c->t != &hlt_dyn || c->fun != (void *)&hlt_i32 || c->hasValue != 0)
+		return false;
+
+	a = hl_alloc_array(&hlt_i32, 3);
+	if (a == NULL || a->at != &hlt_i32 || a->size != 3)
+		return false;
+
+	d = hl_alloc_dynamic(&hlt_i32);
+	if (d == NULL || d->t != &hlt_i32)
+		return false;
+
+	d->v.i = 0x5A5A5A5A;
+	if (hl_dyn_casti(&d, &hlt_dyn, &hlt_i32) != 0x5A5A5A5A)
+		return false;
+
+	return true;
+}
+
+/** @return The hashlink this was built against, for a host that wants to say so in a report. */
+HL_PRIM int HL_NAME(built_for)(void) {
+	return HL_VERSION;
+}
+
 /** The last failure's message, for a host that wants to report rather than guess. */
 static char *hxs_last_error = NULL;
 
@@ -122,6 +164,8 @@ HL_PRIM void HL_NAME(set_global)(hxs_module *h, int index, vdynamic *value) {
 	*(vdynamic **)(h->m->globals_data + h->m->globals_indexes[index]) = value;
 }
 
+DEFINE_PRIM(_BOOL, agrees, _NO_ARG);
+DEFINE_PRIM(_I32, built_for, _NO_ARG);
 DEFINE_PRIM(_BYTES, last_error, _NO_ARG);
 DEFINE_PRIM(_VOID, set_global, _ABSTRACT(hxs_module) _I32 _DYN);
 DEFINE_PRIM(_ABSTRACT(hxs_module), load, _BYTES _I32);
