@@ -26,6 +26,9 @@ class CppiaTest {
 	 */
 	@:keep static var fixture:OpBlend = OpBlend.ADD;
 
+	/** Keeps the typedef fixture's target in the build, for the same reason. */
+	@:keep static var aliased:AliasTarget = null;
+
 	public static function run():Void {
 		// Always on, because it is a different code path: an expression the JIT has no generator for
 		// emits nothing at all rather than falling back, so a construct can pass every test here and
@@ -323,6 +326,31 @@ class CppiaTest {
 		check('switch array destructure', 'var a = [1, 2]; switch (a) { case [x, y]: return x * 10 + y; default: return 0; }', '12');
 		check('switch object pattern', 'var o = {k: 3}; switch (o) { case {k: 3}: return "hit"; default: return "miss"; }', 'hit');
 		check('switch nested array', 'var a = [[1, 2]]; switch (a) { case [[x, y]]: return x + y; default: return 0; }', '3');
+
+		check('sibling closures share a name', 'var out = [];'
+			+ ' var a = function() return [for (i in 0...3) i].join(",");'
+			+ ' var b = function() { var i = 0; while (i < 3) i++; return i; };'
+			+ ' out.push(a()); out.push(b()); return out.join("/");', '0,1,2/3');
+
+		check('sibling closures, for and for', 'var a = function() { var t = 0; for (i in 0...4) t += i; return t; };'
+			+ ' var b = function() { var i = 9; return i; };'
+			+ ' return a() + "/" + b();', '6/9');
+
+		check('capture still boxes', 'var n = 1; var bump = function() n = n + 10; bump(); return n;', '11');
+
+		check('capture boxes an argument', 'return taker(5);', '15',
+			'static function taker(n:Int):Int { var bump = function() n = n + 10; bump(); return n; }');
+
+		check('is operator', 'var s:Dynamic = "x"; return s is String;', 'true');
+		check('is operator, false', 'var s:Dynamic = 5; return s is String;', 'false');
+		check('is operator on a scripted class', 'var v:Dynamic = new T(); return v is T;', 'true',
+			'public function new() {}');
+
+		check('new through a host typedef', 'var v = new AliasFixture(); return v.n;', '7',
+			'', 'import AliasTarget.AliasFixture;');
+
+		check('host typedef of a typedef', 'var v = new AliasTwice(); return v.n;', '7',
+			'', 'import AliasTarget.AliasTwice;');
 
 		TestCase.log('  refused by the emitter: ' + refused);
 	}
