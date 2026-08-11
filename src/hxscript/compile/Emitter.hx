@@ -80,6 +80,9 @@ class Emitter {
 	/** Full path for each short type name in view, from imports, declarations and ambient types. */
 	var typePaths:StringMap<String>;
 
+	/** How many typedef hops to follow before giving up, so a cycle cannot spin. */
+	static inline var TYPEDEF_DEPTH:Int = 8;
+
 	/** Paths this batch declares, which can be linked directly rather than resolved as host types. */
 	var moduleClasses:StringMap<Bool>;
 
@@ -3193,10 +3196,46 @@ class Emitter {
 	 */
 	function resolveType(name:String, pos:Position):String {
 		if (typePaths.exists(name))
-			return typePaths.get(name);
+			return nativePath(typePaths.get(name));
 		if (name.indexOf('.') >= 0)
-			return name;
+			return nativePath(name);
 		throw new Unsupported('unresolved type ' + name, pos);
+	}
+
+	/**
+	 * Follows a typedef to the class it aliases, which is the only spelling cppia can load.
+	 *
+	 * A typedef has no runtime class. `import flixel.group.FlxSpriteGroup` puts that path in the
+	 * table, so `new FlxSpriteGroup()` emitted `NEW flixel.group.FlxSpriteGroup`, a name nothing
+	 * answers to, and the loader resolved it to null. Interpreted that is a reported error; under
+	 * the hxcpp JIT it was a null dereference during code generation, which ends the process with
+	 * no message, because the JIT reads the resolved type without checking it.
+	 *
+	 * Aliases are followed to the end rather than one step, since a typedef may name another.
+	 *
+	 * @param path The path as written or imported.
+	 * @return The aliased class's compile path, or the path unchanged when it is not a typedef.
+	 */
+	function nativePath(path:String):String {
+		var seen:Int = 0;
+		var current:String = path;
+
+		while (seen < TYPEDEF_DEPTH) {
+			var infos:Array<hxscript.types.TypeCollection.TypeInfo> = hxscript.types.TypeCollection.main.fromPath(current);
+			if (infos == null || infos.length == 0)
+				infos = hxscript.types.TypeCollection.main.fromCompilePath(current);
+			if (infos == null || infos.length == 0)
+				return current;
+
+			var info = infos[0];
+			if (info.typedefType == null)
+				return hxscript.types.TypeCollection.compilePath(info);
+
+			current = hxscript.types.TypeCollection.compilePath(info.typedefType);
+			seen++;
+		}
+
+		return current;
 	}
 
 	/** The dotted path a type annotation names, or the empty string when it is not a plain path. */
