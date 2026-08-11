@@ -1289,7 +1289,10 @@ class Parser extends Lexer {
 			decls.push(parseModuleDecl(decls, importModule));
 		}
 
-		if (!importModule) {
+		// An empty module declares nothing to place, so it cannot be in the wrong package. Hosts that
+		// want parse errors reported have to build the module before its error handlers exist, which
+		// means building it empty and parsing after, and that was raising here every time.
+		if (!importModule && decls.length > 0) {
 			pack ??= [];
 			var fullPack = pack.join('.');
 			var thisPack = (switch (decls[0]?.d) {
