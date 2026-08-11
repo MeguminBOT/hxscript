@@ -107,6 +107,24 @@ class Emitter {
 	/** The names each class declares as statics, by class. */
 	var owned:StringMap<StringMap<Bool>>;
 
+	/**
+	 * Types the batch declares that are not classes, and the enum each constructor belongs to.
+	 *
+	 * An enum, an abstract or a typedef is built by the interpreter when the module starts, so
+	 * nothing is written here for one. What compiled code needs is a way to reach the one the world
+	 * holds, which is the same way it reaches a class of the batch.
+	 */
+	var declared:StringMap<Bool>;
+
+	/** Which enum each constructor name belongs to, so a bare one can be resolved. */
+	var constructors:StringMap<String>;
+
+	/** Whether the module declares fields of its own, outside any class. */
+	var loose:Bool;
+
+	/** Types the module brought into scope with `using`, whose statics stand in as methods. */
+	var usings:Array<String>;
+
 	/** The package the batch sits in, which is what a class has to be resolved by. */
 	public var pack:String = '';
 
@@ -161,6 +179,10 @@ class Emitter {
 		openings = new StringMap();
 		props = new StringMap();
 		owned = new StringMap();
+		declared = new StringMap();
+		constructors = new StringMap();
+		loose = false;
+		usings = [];
 		inside = null;
 		hostSlots = new StringMap();
 		collector = null;
@@ -188,6 +210,27 @@ class Emitter {
 			switch (decl.d) {
 				case DClass(c):
 					classes.set(c.name, module.reserveType());
+
+				case DEnum(e):
+					declared.set(e.name, true);
+					for (name in e.names)
+						constructors.set(name, e.name);
+
+				case DAbstract(a):
+					declared.set(a.name, true);
+
+				case DInterface(i):
+					declared.set(i.name, true);
+
+				case DTypedef(t):
+					declared.set(t.name, true);
+
+				case DField(_):
+					loose = true;
+
+				case DUsing(path):
+					usings.push(path.join('.'));
+
 				case _:
 			}
 		}
@@ -318,10 +361,10 @@ class Emitter {
 						}
 					}
 
-				case DPackage(_) | DImport(_, _):
+				case DPackage(_) | DImport(_, _) | DUsing(_) | DEnum(_) | DAbstract(_) | DInterface(_) | DTypedef(_) | DField(_):
 
 				case _:
-					throw new Unsupported('a declaration that is not a class', decl.pos);
+					throw new Unsupported('a declaration this cannot express', decl.pos);
 			}
 		}
 	}
@@ -495,11 +538,15 @@ class Emitter {
 			case EVar(n, t, init, get, set, _):
 				if (get != null || set != null)
 					throw new Unsupported('a local with accessors', e.pos);
-				if (init == null)
-					throw new Unsupported('a local declared without a value', e.pos);
+				if (init == null) {
+					var empty:Int = reg(tDyn);
+					ops.push({op: ONull, args: [empty]});
+					scopes[scopes.length - 1].set(n, empty);
+					return;
+				}
 
-				var declared:Null<Int> = t == null ? null : typeOf(t);
-				var slot:Int = reg(declared == null ? infer(init) : declared);
+				var announced:Null<Int> = t == null ? null : typeOf(t);
+				var slot:Int = reg(announced == null ? infer(init) : announced);
 				into(init, slot);
 				scopes[scopes.length - 1].set(n, slot);
 
@@ -525,6 +572,9 @@ class Emitter {
 
 					case EArray(obj, at):
 						callSupport('setIndex', [dynOf(obj), dynOf(at), dynOf(value)], reg(tDyn));
+
+					case EIdent(name) if (loose):
+						callSupport('set', [looseOwner(), named(name), dynOf(value)], reg(tDyn));
 
 					case EIdent(name):
 						throw new Unsupported('an assignment to ' + name + ', which is not a local here', e.pos);
@@ -630,17 +680,12 @@ class Emitter {
 				continues[continues.length - 1].push(jump(OJAlways));
 
 			case EUnop(op, _, target) if (op == '++' || op == '--'):
-				switch (target.e) {
-					case EIdent(name):
-						var slot:Null<Int> = lookup(name);
-						if (slot == null)
-							throw new Unsupported(name + ', which is not a local here', e.pos);
-						if (regs[slot] != tI32)
-							throw new Unsupported(op + ' on something that is not an Int', e.pos);
-						ops.push({op: op == '++' ? OIncr : ODecr, args: [slot]});
-					case _:
-						throw new Unsupported(op + ' on something that is not a local', e.pos);
-				}
+				var slot:Null<Int> = stepping(target);
+
+				if (slot != null)
+					ops.push({op: op == '++' ? OIncr : ODecr, args: [slot]});
+				else
+					statement(stepped(op, target, e.pos));
 
 			case EParent(inner):
 				statement(inner);
@@ -877,6 +922,12 @@ class Emitter {
 			case EIdent('false'):
 				ops.push({op: OBool, args: [slot, 0]});
 
+			case EIdent('null'):
+				var held:Int = landing(slot);
+				ops.push({op: ONull, args: [held]});
+				if (held != slot)
+					move(held, slot);
+
 			case EIdent(name):
 				var from:Null<Int> = lookup(name);
 				if (from != null) {
@@ -894,18 +945,42 @@ class Emitter {
 					return;
 				}
 
-				var own:Null<Int> = fieldOf(thisExpr(e.pos), name);
-				if (own == null)
+				if (fieldOf(thisExpr(e.pos), name) != null) {
+					getField(thisExpr(e.pos), name, slot, e.pos);
+					return;
+				}
+
+				if (constructors.exists(name)) {
+					callSupport('get', [ownerOf(constructors.get(name)), named(name)], slot);
+					return;
+				}
+
+				if (!loose)
 					throw new Unsupported(name + ', which is neither a local nor a field here', e.pos);
 
-				getField(thisExpr(e.pos), name, slot, e.pos);
+				callSupport('get', [looseOwner(), named(name)], slot);
 
 			case EField({e: EIdent(cls)}, name, _) if (isStaticOf(cls, name)):
 				staticRead(cls, name, slot, e.pos);
 
+			case EField({e: EIdent(t)}, name, _) if (declared.exists(t)):
+				callSupport('get', [ownerOf(t), named(name)], slot);
+
 			case EField(_, _, _) if (hostName(e) != null):
 				var host:{owner:String, field:String} = hostName(e);
 				emitHostRead(host.owner, host.field, slot);
+
+			case EField(obj, name, true):
+				var target:Int = dynOf(obj);
+				var held:Int = landing(slot);
+				ops.push({op: ONull, args: [held]});
+
+				var over:Int = jump(OJNull, [target]);
+				ops.push({op: ODynGet, args: [held, target, module.stringId(name)]});
+				land([over]);
+
+				if (held != slot)
+					move(held, slot);
 
 			case EField(obj, name, _):
 				getField(obj, name, slot, e.pos);
@@ -1004,12 +1079,18 @@ class Emitter {
 				}
 
 			case EUnop(op, prefix, target) if (op == '++' || op == '--'):
-				var local:Null<Int> = switch (target.e) {
-					case EIdent(name): lookup(name);
-					case _: null;
+				var local:Null<Int> = stepping(target);
+
+				if (local == null) {
+					if (prefix) {
+						statement(stepped(op, target, e.pos));
+						into(target, slot);
+					} else {
+						into(target, slot);
+						statement(stepped(op, target, e.pos));
+					}
+					return;
 				}
-				if (local == null || regs[local] != tI32)
-					throw new Unsupported(op + ' on something that is not an integer local', e.pos);
 
 				var step:Opcode = op == '++' ? OIncr : ODecr;
 
@@ -1194,6 +1275,18 @@ class Emitter {
 			return;
 		}
 
+		var maker:Null<{owner:String, name:String}> = constructorOf(callee);
+		if (maker != null) {
+			var given:Int = reg(tDyn);
+			callSupport('array', [], given);
+
+			for (p in params)
+				callSupport('push', [given, dynOf(p)], reg(tDyn));
+
+			callSupport('enumOf', [ownerOf(maker.owner), named(maker.name), given], slot);
+			return;
+		}
+
 		var sig:Null<Signature> = calledSignature(callee);
 		if (sig == null) {
 			var host:Null<{owner:String, field:String}> = hostName(callee);
@@ -1336,23 +1429,65 @@ class Emitter {
 	 * @param pos Where it appears.
 	 */
 	function emitDynCall(callee:Expr, params:Array<Expr>, slot:Int, pos:Position):Void {
-		var fn:Int;
-
 		switch (callee.e) {
-			case EField(obj, name, _):
-				var host:Int = dynOf(obj);
-				fn = reg(tDyn);
-				ops.push({op: ODynGet, args: [fn, host, module.stringId(name)]});
-
 			case EParent(inner):
 				emitDynCall(inner, params, slot, pos);
-				return;
+
+			case EField(obj, name, maybe):
+				var target:Int = dynOf(obj);
+
+				if (maybe == true) {
+					var held:Int = landing(slot);
+					ops.push({op: ONull, args: [held]});
+
+					var over:Int = jump(OJNull, [target]);
+					sendTo(target, name, params, held);
+					land([over]);
+
+					if (held != slot)
+						move(held, slot);
+					return;
+				}
+
+				sendTo(target, name, params, slot);
 
 			case _:
-				fn = dynOf(callee);
+				through(dynOf(callee), params, slot);
+		}
+	}
+
+	/**
+	 * Writes a call of a named method on a value.
+	 *
+	 * Asked of the value itself rather than of the instruction that reads a field, because a class a
+	 * script declared keeps its members somewhere the VM cannot see, and a static extension is not
+	 * on the value at all.
+	 *
+	 * @param target A register holding the receiver.
+	 * @param name The method's name.
+	 * @param params Its arguments.
+	 * @param slot Where to leave the result.
+	 */
+	function sendTo(target:Int, name:String, params:Array<Expr>, slot:Int):Void {
+		var given:Int = reg(tDyn);
+		callSupport('array', [], given);
+
+		for (p in params)
+			callSupport('push', [given, dynOf(p)], reg(tDyn));
+
+		var extensions:Int = reg(tDyn);
+		if (usings.length == 0) {
+			ops.push({op: ONull, args: [extensions]});
+		} else {
+			callSupport('array', [], extensions);
+			for (u in usings) {
+				var holder:Int = reg(tDyn);
+				ops.push({op: OGetGlobal, args: [holder, hostSlot(u, '')]});
+				callSupport('push', [extensions, holder], reg(tDyn));
+			}
 		}
 
-		through(fn, params, slot);
+		callSupport('send', [target, named(name), given, extensions], slot);
 	}
 
 	/**
@@ -1400,8 +1535,19 @@ class Emitter {
 	 */
 	function emitNew(cls:String, params:Array<Expr>, slot:Int, pos:Position):Void {
 		var self:Null<Int> = classes.get(cls);
-		if (self == null)
-			throw new Unsupported('new ' + cls + ', which is not a class of this batch', pos);
+
+		if (self == null) {
+			if (!declared.exists(cls))
+				throw new Unsupported('new ' + cls + ', which is neither a type of this batch nor one the host offers', pos);
+
+			var given:Int = reg(tDyn);
+			callSupport('array', [], given);
+			for (p in params)
+				callSupport('push', [given, dynOf(p)], reg(tDyn));
+
+			callSupport('make', [ownerOf(cls), given], slot);
+			return;
+		}
 
 		ops.push({op: ONew, args: [slot]});
 
@@ -1663,7 +1809,14 @@ class Emitter {
 		}
 
 		if (a == tDyn) {
-			ops.push({op: OSafeCast, args: [to, from]});
+			if (b == tI32)
+				callSupport('toInt', [from], to);
+			else if (b == tF64)
+				callSupport('toFloat', [from], to);
+			else if (b == tBool)
+				callSupport('toBool', [from], to);
+			else
+				ops.push({op: OSafeCast, args: [to, from]});
 			return;
 		}
 
@@ -1707,7 +1860,21 @@ class Emitter {
 			pass.push(a);
 
 		ops.push({op: OCallClosure, args: pass});
-		move(returned, slot);
+		unbox(returned, slot);
+	}
+
+	/**
+	 * Takes a dynamic result out into whatever register was asked for.
+	 *
+	 * Kept apart from `move` because `move` reaches for one of these calls when it has to open an
+	 * abstract, and a call that used `move` to land its own answer would ask for itself forever.
+	 * What comes back from a support call is never an abstract, so the plain cast is enough.
+	 */
+	function unbox(from:Int, to:Int):Void {
+		if (from == to)
+			return;
+
+		ops.push({op: regs[from] == regs[to] ? OMov : OSafeCast, args: [to, from]});
 	}
 
 	/** @return A fresh register of the given type. */
@@ -1894,7 +2061,8 @@ class Emitter {
 	 */
 	function hostName(e:Expr):Null<{owner:String, field:String}> {
 		return switch (e.e) {
-			case EField({e: EIdent(owner)}, field, _) if (isTypeName(owner) && !classes.exists(owner) && !signatures.exists(owner + '.' + field)):
+			case EField({e: EIdent(owner)}, field,
+				_) if (isTypeName(owner) && !classes.exists(owner) && !declared.exists(owner) && !signatures.exists(owner + '.' + field)):
 				{owner: owner, field: field};
 
 			case ECall(callee, _):
@@ -2041,16 +2209,72 @@ class Emitter {
 		callSupport('set', [ownerOf(cls), named(name), dynOf(value)], reg(tDyn));
 	}
 
+	/**
+	 * @return The register `++` or `--` can step in place, or null when it has to be written out.
+	 *
+	 * Only an integer local can be stepped by an instruction. A static, a field or an array element
+	 * is somewhere the instruction cannot reach, and a float is not what it counts in.
+	 */
+	function stepping(target:Expr):Null<Int> {
+		var slot:Null<Int> = switch (target.e) {
+			case EIdent(name): lookup(name);
+			case EParent(inner): stepping(inner);
+			case _: null;
+		}
+
+		return (slot != null && regs[slot] == tI32) ? slot : null;
+	}
+
+	/** @return The assignment a step means, for the places no instruction can step. */
+	function stepped(op:String, target:Expr, pos:Position):Expr {
+		var one:Expr = {e: EConst(CInt(1)), pos: pos};
+		var moved:Expr = {e: EBinop(op == '++' ? '+' : '-', target, one), pos: pos};
+		return {e: EBinop('=', target, moved), pos: pos};
+	}
+
 	/** Gives back every trap open at this point, which a return has to do before it leaves. */
 	function closeTraps():Void {
 		for (i in 0...traps)
 			ops.push({op: OEndTrap, args: [1]});
 	}
 
-	/** @return A register holding one of the batch's classes. */
+	/**
+	 * @return Which enum constructor a call names, or null when it names something else.
+	 *
+	 * Both spellings answer here: the qualified one, and the bare one an import brings into scope.
+	 */
+	function constructorOf(callee:Expr):Null<{owner:String, name:String}> {
+		return switch (callee.e) {
+			case EParent(inner):
+				constructorOf(inner);
+
+			case EField({e: EIdent(t)}, name, _) if (declared.exists(t) && constructors.get(name) == t):
+				{owner: t, name: name};
+
+			case EIdent(name) if (lookup(name) == null && constructors.exists(name)):
+				{owner: constructors.get(name), name: name};
+
+			case _:
+				null;
+		}
+	}
+
+	/** @return A register holding one of the batch's own types. */
 	function ownerOf(cls:String):Int {
 		var slot:Int = reg(tDyn);
 		ops.push({op: OGetGlobal, args: [slot, ownerSlot(cls)]});
+		return slot;
+	}
+
+	/**
+	 * @return A register holding what carries the module's own fields.
+	 *
+	 * A function or a variable written outside any class belongs to the module rather than to
+	 * anything in it, and the world keeps one holder per module for exactly those.
+	 */
+	function looseOwner():Int {
+		var slot:Int = reg(tDyn);
+		ops.push({op: OGetGlobal, args: [slot, bind('module', {index: 0, kind: BModule})]});
 		return slot;
 	}
 
@@ -2452,6 +2676,23 @@ class Emitter {
 				var bound:Int = reg(tDyn);
 				move(value, bound);
 				scopes[scopes.length - 1].set(name, bound);
+
+			case ECall({e: EIdent(ctor)}, binds) if (constructors.exists(ctor)):
+				var made:Int = reg(tDyn);
+				callSupport('ctor', [value], made);
+
+				var right:Int = reg(tBool);
+				callSupport('eq', [made, named(ctor)], right);
+				onFail.push(jump(OJFalse, [right]));
+
+				var given:Int = reg(tDyn);
+				callSupport('params', [value], given);
+
+				for (i in 0...binds.length) {
+					var item:Int = reg(tDyn);
+					callSupport('index', [given, counted(i)], item);
+					match(binds[i], item, onFail);
+				}
 
 			case EArrayDecl(items):
 				var right:Int = reg(tBool);

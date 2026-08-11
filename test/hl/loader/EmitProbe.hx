@@ -96,7 +96,7 @@ class EmitProbe {
 					hxscript.hl.Emitter.support(binding.field);
 				case BConst:
 					binding.value;
-				case BOwner:
+				case BOwner | BModule:
 					// Nothing here declares statics, and there is no world to resolve a class against
 					// without one. The corpus probe goes through the backend, which has both.
 					null;

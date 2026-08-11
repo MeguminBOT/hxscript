@@ -23,8 +23,10 @@
 package hxscript.hl;
 
 #if hxscript_hl
+import hxscript.proxy.TypeProxy.ICustomEnumValueType;
 import hxscript.types.AbstractTools;
 import hxscript.types.AbstractValue;
+import hxscript.types.ScriptedAbstractValue;
 
 /**
  * What compiled code calls for the things it cannot say in instructions.
@@ -104,8 +106,12 @@ class Runtime {
 
 	/** @return Whether two values are equal, by the rule the interpreter uses. */
 	public static function eq(a:Dynamic, b:Dynamic):Bool {
+		if (a is ICustomEnumValueType && b is ICustomEnumValueType)
+			return (a : ICustomEnumValueType).eq(b);
+
 		if (a is AbstractValue || b is AbstractValue)
 			return cmp('==', a, b);
+
 		return a == b;
 	}
 
@@ -237,7 +243,49 @@ class Runtime {
 	 * given what the interpreter would have been given.
 	 */
 	public static function get(o:Dynamic, name:String):Dynamic {
+		if (o is ScriptedAbstractValue) {
+			var boxed:ScriptedAbstractValue = cast o;
+			if (boxed.owner != null)
+				return boxed.owner.getField(boxed.boxed, name);
+		}
+
 		return hxscript.proxy.ReflectProxy.field(o, name);
+	}
+
+	/**
+	 * Calls a named member of a value, whatever kind of value it is.
+	 *
+	 * An abstract is the reason this is not a field read followed by a call: its members are statics
+	 * that take the boxed value first, so there is nothing on the value to read.
+	 *
+	 * @param o The receiver.
+	 * @param name The member's name.
+	 * @param args Its arguments.
+	 * @return What it answered.
+	 */
+	public static function invoke(o:Dynamic, name:String, args:Array<Dynamic>):Dynamic {
+		if (o is ScriptedAbstractValue) {
+			var boxed:ScriptedAbstractValue = cast o;
+			if (boxed.owner != null)
+				return boxed.owner.callField(boxed.boxed, name, args);
+		}
+
+		var own:Dynamic = get(o, name);
+		return own == null ? null : Reflect.callMethod(o, own, args);
+	}
+
+	/** @return A value as a `Float`, opening an abstract to what it wraps first. */
+	public static function toFloat(v:Dynamic):Float {
+		if (v is AbstractValue)
+			return toFloat(AbstractTools.underlying(v));
+		return v == null ? 0.0 : (v : Float);
+	}
+
+	/** @return A value as a `Bool`, which nothing but `true` answers. */
+	public static function toBool(v:Dynamic):Bool {
+		if (v is AbstractValue)
+			return toBool(AbstractTools.underlying(v));
+		return v == true;
 	}
 
 	/** Writes a named field of something a script declared. */
@@ -266,6 +314,75 @@ class Runtime {
 		return type != null && hxscript.proxy.StdProxy.isOfType(v, type);
 	}
 
+	/**
+	 * @return A new instance of a type a script declared.
+	 *
+	 * Through the library's own construction, which is what knows how to build a scripted class or
+	 * an abstract. A module cannot build one itself: what it allocated would be its own type rather
+	 * than the one the world holds.
+	 */
+	public static function make(type:Dynamic, args:Dynamic):Dynamic {
+		if (type is hxscript.types.ScriptedAbstract)
+			return (type : hxscript.types.ScriptedAbstract).create((args : Array<Dynamic>));
+
+		return hxscript.proxy.TypeProxy.createInstance(type, (args : Array<Dynamic>));
+	}
+
+	/**
+	 * Calls a method on a value, falling back to whatever the module brought into scope with `using`.
+	 *
+	 * Whether a name is the value's own method or a static that takes it first cannot be settled
+	 * before the value exists, so both are tried in the order Haxe tries them.
+	 *
+	 * @param o The receiver.
+	 * @param name The method's name.
+	 * @param args Its arguments.
+	 * @param extensions The types `using` brought in, or null when there were none.
+	 * @return What the method answered.
+	 */
+	public static function send(o:Dynamic, name:String, args:Dynamic, extensions:Dynamic):Dynamic {
+		if (o != null && (o is ScriptedAbstractValue || get(o, name) != null))
+			return invoke(o, name, (args : Array<Dynamic>));
+
+		if (extensions != null) {
+			for (holder in (extensions : Array<Dynamic>)) {
+				var shared:Dynamic = holder == null ? null : get(holder, name);
+				if (shared == null)
+					continue;
+
+				var all:Array<Dynamic> = [o].concat((args : Array<Dynamic>));
+				return Reflect.callMethod(holder, shared, all);
+			}
+		}
+
+		throw 'Cannot call ' + name;
+	}
+
+	/**
+	 * @return An enum value.
+	 *
+	 * Built here rather than by calling what the constructor's name resolves to. A constructor that
+	 * takes arguments answers as a var-args builder, and going through one loses the arguments by
+	 * the time anything asks the value what it was made with.
+	 *
+	 * @param type The enum.
+	 * @param name The constructor's name.
+	 * @param args What it was given.
+	 */
+	public static function enumOf(type:Dynamic, name:String, args:Dynamic):Dynamic {
+		return hxscript.proxy.TypeProxy.createEnum(type, name, (args : Array<Dynamic>));
+	}
+
+	/** @return The name of the constructor a value was made with, or null when it is not an enum value. */
+	public static function ctor(v:Dynamic):Dynamic {
+		return (v is ICustomEnumValueType) ? (v : ICustomEnumValueType).constructor : hxscript.proxy.TypeProxy.enumConstructor(v);
+	}
+
+	/** @return What a constructor was given, positionally. */
+	public static function params(v:Dynamic):Dynamic {
+		return (v is ICustomEnumValueType) ? (v : ICustomEnumValueType).arguments : hxscript.proxy.TypeProxy.enumParameters(v);
+	}
+
 	/** @return Whether a value carries a named field, which is what an object pattern asks first. */
 	public static function has(o:Dynamic, name:String):Bool {
 		return o != null && hxscript.proxy.ReflectProxy.hasField(o, name);
@@ -282,6 +399,8 @@ class Runtime {
 			return (o : haxe.Constraints.IMap<Dynamic, Dynamic>).get(i);
 		if (o is AbstractValue)
 			return index(AbstractTools.underlying(o), i);
+		if (o is Array)
+			return (o : Array<Dynamic>)[toInt(i)];
 		return o[i];
 	}
 
@@ -298,6 +417,11 @@ class Runtime {
 
 		if (o is AbstractValue)
 			return setIndex(AbstractTools.underlying(o), i, v);
+
+		if (o is Array) {
+			(o : Array<Dynamic>)[toInt(i)] = v;
+			return v;
+		}
 
 		o[i] = v;
 		return v;
@@ -355,12 +479,12 @@ class Runtime {
 	static function arith(op:String, a:Dynamic, b:Dynamic):Dynamic {
 		var m:String = AbstractTools.opMethod(a, op);
 		if (m != null)
-			return Reflect.callMethod(a, Reflect.field(a, m), [b]);
+			return invoke(a, m, [b]);
 
 		if (op == '+' || op == '*') {
 			m = AbstractTools.opMethod(b, op);
 			if (m != null)
-				return Reflect.callMethod(b, Reflect.field(b, m), [a]);
+				return invoke(b, m, [a]);
 		}
 
 		var l:Dynamic = AbstractTools.underlying(a);
@@ -389,7 +513,7 @@ class Runtime {
 	static function cmp(op:String, a:Dynamic, b:Dynamic):Bool {
 		var m:String = AbstractTools.opMethod(a, op);
 		if (m != null)
-			return Reflect.callMethod(a, Reflect.field(a, m), [b]) == true;
+			return invoke(a, m, [b]) == true;
 
 		var l:Dynamic = AbstractTools.underlying(a);
 		var r:Dynamic = AbstractTools.underlying(b);

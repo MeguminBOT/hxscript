@@ -154,7 +154,7 @@ class Backend {
 		}
 
 		for (binding in emitter.bindings)
-			Loader.set(loaded, binding.index, valueFor(binding, env));
+			Loader.set(loaded, binding.index, valueFor(binding, module, env));
 
 		for (entry in exposed) {
 			var owner:Dynamic = env.resolve(entry.path);
@@ -186,15 +186,17 @@ class Backend {
 	 * Finds the value a bound global should be filled with.
 	 *
 	 * @param binding What the emitter asked for.
+	 * @param module The module being compiled.
 	 * @param env The world.
 	 * @return The value, or null when nothing answers to it.
 	 */
-	static function valueFor(binding:Binding, env:Environment):Dynamic {
+	static function valueFor(binding:Binding, module:Module, env:Environment):Dynamic {
 		return switch (binding.kind) {
 			case BHost: hostValue(binding.owner, binding.field, env);
 			case BSupport: Emitter.support(binding.field);
 			case BConst: binding.value;
 			case BOwner: env.resolve(binding.owner);
+			case BModule: module.moduleFields;
 		}
 	}
 
