@@ -137,6 +137,32 @@ something that runs in it before you have written anything.
 | `lime` | a `host.Project`: no framework under it, just the frame loop and `lime.ui.KeyCode` |
 | `plain` | a `static main()`: no framework at all, printing what a script can reach |
 
+### If a project behaves differently once it is compiled
+
+Scripts run interpreted, as bytecode, or as bytecode with the JIT, chosen in Settings. The three
+should agree, and a module the compiler will not take is reported in the log and quietly interpreted,
+which costs speed and nothing else. A short list of constructs answers differently instead, and those
+say nothing at all: see
+[Where compiled code still differs](../../docs/modes.md#where-compiled-code-still-differs) for what
+they are and what to do about each.
+
+**The check takes ten seconds**: set the run mode to interpreted. If the behaviour changes back, it is
+the compiler rather than your script, and bytecode-without-the-JIT is worth trying next.
+
+To investigate without a window, `--probe` compiles a project headlessly:
+
+```
+Sandbox.exe --probe my-thing                    compile it, report what was skipped
+Sandbox.exe --probe my-thing --nojit            the same batch without the JIT
+Sandbox.exe --probe my-thing --only A,B,C       narrow the batch to those modules
+Sandbox.exe --probe my-thing --interp --call Main.go   run a static, interpreted
+```
+
+Running the same `--call` in each mode and diffing the output is how the differences above were
+found. The line it prints after the call says how much the interpreter did: near zero means the code
+really ran compiled, and a large number means a module fell back and the comparison is measuring the
+interpreter against itself.
+
 ### The window
 
 A project is given a fixed **1366x768** canvas, whatever the window is doing, so `FlxG.width` and

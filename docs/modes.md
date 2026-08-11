@@ -28,6 +28,7 @@ cppia](#runtime-translation-and-how-it-differs-from-haxes-cppia) is the comparis
   [what it makes possible](#what-runtime-translation-makes-possible),
   [what Haxe's does better](#what-haxes-does-better)
 - [What the compiler refuses](#what-the-compiler-refuses)
+- [Where compiled code still differs](#where-compiled-code-still-differs)
 - [What is not known](#what-is-not-known)
 
 ## The three modes
@@ -238,6 +239,44 @@ The evidence is [`test/cpp/CppiaTest.hx`](../test/cpp/CppiaTest.hx), which runs 
 interpreted and compiled and compares the answers. It reports 0 wrong, and one refusal that is
 asserted on purpose. That is a stronger claim than "nothing was refused": a construct that compiled
 to the wrong thing would show as `WRONG`, and two of them did during the work.
+
+## Where compiled code still differs
+
+A refusal is safe: it is reported and the module is interpreted, so the program is slower and not
+wrong. What follows is the other kind, where compiled code runs and answers differently, and says
+nothing while it does it. The list is short and each entry says how to keep the module compiled.
+
+**The check takes ten seconds.** Run the script interpreted. If the behaviour changes back, it is
+this page rather than your script, and bytecode without the JIT is worth trying next.
+
+| construct | interpreted | compiled | keep it compiled by |
+| --- | --- | --- | --- |
+| `Int` arithmetic that overflows | widens to `Float`: `2147483647 + 1` is `2147483648` | wraps, as Haxe does: `-2147483648` | nothing to do; compiled is the one that matches Haxe |
+| reading a `Bool` field by reflection | `true` | `1` | reading the field directly, which is corrected |
+| a `Bool` instance field with no type annotation, under the JIT | `true` | `1` | writing `:Bool`, which is corrected |
+
+The first is deliberate on the interpreter's side: a script that never wrote `Int` should not have a
+value silently corrupted, and without a declared type the interpreter cannot tell which case it is
+in. The other two are cppia's own: it has no boolean, and folds `Bool` into its integer type. A
+field the emitter knows is `Bool` is read back through a comparison, which restores it; a field it
+was never told about, and a read that bypasses the field entirely, are the two places left where
+the integer shows.
+
+`test/cpp/SweepTest.hx` runs both modes over the constructs a script actually uses and reports any
+that disagree, so this list is generated rather than remembered.
+
+### One upstream fault worth knowing
+
+Adding a comparison to a string ends the process under the hxcpp JIT:
+
+```haxe
+var n:Int = 1;
+trace('' + (n == 1));   // segfault with cpp.cppia.Host.enableJit(true)
+```
+
+The emitter routes that shape through `Std.string` so a script cannot reach it, but the fault is in
+`hx::CppiaJitCompiler::convert` and any cppia reaches it, including bytecode Haxe's own `-cppia`
+built. It has nothing to do with this library beyond avoiding it.
 
 ## What is not known
 
