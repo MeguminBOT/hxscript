@@ -25,6 +25,8 @@ package hxscript.hl;
 #if hxscript_hl
 import haxe.ds.StringMap;
 import hxscript.hl.TypeKind;
+import hxscript.hl.Binding;
+import hxscript.hl.Binding.BindingKind;
 import hxscript.hl.Bytecode.Instruction;
 import hxscript.compile.Unsupported;
 import hxscript.hl.TypeEntry.Field;
@@ -98,17 +100,17 @@ class Emitter {
 	/** The class the body being written belongs to, or null when it is a static. */
 	var inside:Null<String>;
 
-	/** The global each host value sits in, by the name a script writes. */
+	/** The global each bound value sits in, by what identifies it. */
 	var hostSlots:StringMap<Int>;
 
 	/**
-	 * Every host value this module needs, in the order the globals were made.
+	 * Every value this module needs handed to it, in the order the globals were made.
 	 *
-	 * A compiled function cannot link to the host, so what it names is fetched once after loading
-	 * and left in a global. The alternative is a lookup per call, which is most of what makes the
-	 * interpreter slow in the first place.
+	 * A compiled function cannot link to anything outside its own module, so what it names is
+	 * fetched once after loading and left in a global. The alternative is a lookup per use, which is
+	 * most of what makes the interpreter slow in the first place.
 	 */
-	public var bindings(default, null):Array<{index:Int, owner:String, field:String}>;
+	public var bindings(default, null):Array<Binding>;
 
 	var tVoid:Int;
 	var tI32:Int;
@@ -188,12 +190,8 @@ class Emitter {
 
 			switch (f.kind) {
 				case KVar(v):
-					var t:Null<Int> = typeOf(v.type);
-					if (t == null)
-						continue;
-
 					slots.set(f.name, fields.length);
-					fields.push({name: module.stringId(f.name), type: t});
+					fields.push({name: module.stringId(f.name), type: typeOf(v.type)});
 				case _:
 			}
 		}
@@ -210,25 +208,16 @@ class Emitter {
 				continue;
 
 			var args:Array<Int> = [];
-			var ok:Bool = true;
 
 			if (!isStatic(f))
 				args.push(self);
 
-			for (a in fn.args) {
-				var t:Null<Int> = typeOf(a.t);
-				if (t == null) {
-					ok = false;
-					break;
-				}
-				args.push(t);
-			}
-			if (!ok)
-				continue;
+			for (a in fn.args)
+				args.push(typeOf(a.t));
 
-			var ret:Null<Int> = fn.ret == null ? tVoid : typeOf(fn.ret);
-			if (ret == null)
-				continue;
+			// A function that declares no return type still returns something, unless it is a
+			// constructor. Reading it as `Void` would compile away the value it hands back.
+			var ret:Int = fn.ret != null ? typeOf(fn.ret) : (f.name == 'new' ? tVoid : tDyn);
 
 			var sig:Signature = {
 				findex: module.reserve(),
@@ -272,8 +261,6 @@ class Emitter {
 							case KVar(v):
 								if (isStatic(f))
 									throw new Unsupported('the static ' + f.name + ', which is not a function', decl.pos);
-								if (typeOf(v.type) == null)
-									throw new Unsupported('the field ' + f.name + ', whose type this cannot express', decl.pos);
 						}
 					}
 
@@ -319,16 +306,27 @@ class Emitter {
 		var result:Int = slots.length;
 		slots.push(sig.ret);
 
-		var boxed:Int = slots.length;
-		slots.push(tDyn);
-
 		var pass:Array<Int> = [result, sig.findex];
 		for (i in 0...sig.args.length)
 			pass.push(i);
 
 		body.push({op: callFor(sig.args.length), args: pass});
-		body.push({op: OToDyn, args: [boxed, result]});
-		body.push({op: ORet, args: [boxed]});
+
+		// Only a value with a type of its own needs boxing. Boxing one that is already dynamic wraps
+		// the pointer rather than the value, and what comes back reads as its own address.
+		if (sig.ret == tDyn) {
+			body.push({op: ORet, args: [result]});
+		} else if (sig.ret == tVoid) {
+			var empty:Int = slots.length;
+			slots.push(tDyn);
+			body.push({op: ONull, args: [empty]});
+			body.push({op: ORet, args: [empty]});
+		} else {
+			var boxed:Int = slots.length;
+			slots.push(tDyn);
+			body.push({op: OToDyn, args: [boxed, result]});
+			body.push({op: ORet, args: [boxed]});
+		}
 
 		module.add({
 			type: module.typeId(TFun(sig.args, tDyn)),
@@ -373,13 +371,22 @@ class Emitter {
 
 		statement(fn.expr);
 
+		// Whether every path returns is not worked out here, so a body that can fall off its end gets
+		// the value Haxe would have given it. Refusing instead would turn a `while (true)` whose exit
+		// is a `return` into a module nobody compiles.
 		if (ops.length == 0 || ops[ops.length - 1].op != ORet) {
-			if (sig.ret == tVoid) {
-				var slot:Int = reg(tVoid);
-				ops.push({op: ORet, args: [slot]});
-			} else {
-				throw new Unsupported('a function that can end without returning a value', pos);
-			}
+			var slot:Int = reg(sig.ret);
+
+			if (sig.ret == tI32)
+				ops.push({op: OInt, args: [slot, module.intId(0)]});
+			else if (sig.ret == tF64)
+				ops.push({op: OFloat, args: [slot, module.floatId(0)]});
+			else if (sig.ret == tBool)
+				ops.push({op: OBool, args: [slot, 0]});
+			else if (sig.ret != tVoid)
+				ops.push({op: ONull, args: [slot]});
+
+			ops.push({op: ORet, args: [slot]});
 		}
 
 		pop();
@@ -590,6 +597,12 @@ class Emitter {
 			case EConst(CFloat(v)):
 				ops.push({op: OFloat, args: [slot, module.floatId(v)]});
 
+			case EConst(CString(s, _)):
+				var held:Int = landing(slot);
+				ops.push({op: OGetGlobal, args: [held, constSlot('s' + s, s)]});
+				if (held != slot)
+					move(held, slot);
+
 			case EIdent('true'):
 				ops.push({op: OBool, args: [slot, 1]});
 
@@ -622,6 +635,15 @@ class Emitter {
 			case EParent(inner):
 				into(inner, slot);
 
+			case EMeta(_, _, inner):
+				into(inner, slot);
+
+			case ECheckType(inner, _) | ECast(inner, _):
+				into(inner, slot);
+
+			case EUnop('-', _, inner) if (infer(inner) == tDyn):
+				callSupport('neg', [dynOf(inner)], slot);
+
 			case EUnop('-', _, inner):
 				var v:Int = reg(infer(inner));
 				into(inner, v);
@@ -629,21 +651,46 @@ class Emitter {
 
 			case EUnop('!', _, inner):
 				var v:Int = reg(tBool);
-				into(inner, v);
+				truth(inner, v);
 				ops.push({op: ONot, args: [slot, v]});
+
+			// HashLink has no complement instruction. Haxe defines it as flipping every bit, which is
+			// what exclusive-or against all of them does.
+			case EUnop('~', _, inner):
+				var v:Int = reg(tI32);
+				into(inner, v);
+
+				var mask:Int = reg(tI32);
+				ops.push({op: OInt, args: [mask, module.intId(-1)]});
+				ops.push({op: OXor, args: [slot, v, mask]});
+
+			case ETernary(cond, yes, no):
+				var toNo:Array<Int> = [];
+				condition(cond, false, toNo);
+				into(yes, slot);
+
+				var over:Int = jump(OJAlways);
+				land(toNo);
+				into(no, slot);
+				land([over]);
 
 			case EBinop(op, a, b) if (COMPARE.exists(op) || op == '&&' || op == '||'):
 				materialise(e, slot);
 
+			case EBinop(op, a, b) if (SUPPORT.exists(op) && (infer(a) == tDyn || infer(b) == tDyn)):
+				callSupport(SUPPORT.get(op), [dynOf(a), dynOf(b)], slot);
+
 			case EBinop(op, a, b):
-				var code:Null<Opcode> = arithmetic(op, want == tF64);
+				var code:Null<Opcode> = arithmetic(op);
 				if (code == null)
 					throw new Unsupported('the operator ' + op, e.pos);
 
-				var left:Int = reg(want);
+				var shared:Int = INTEGRAL.indexOf(op) >= 0 ? tI32 : want;
+
+				var left:Int = reg(shared);
 				into(a, left);
 
-				var right:Int = reg(op == '<<' || op == '>>' || op == '>>>' ? tI32 : want);
+				var right:Int = reg(op == '<<' || op == '>>' || op == '>>>' ? tI32 : shared);
 				into(b, right);
 
 				ops.push({op: code, args: [slot, left, right]});
@@ -685,7 +732,8 @@ class Emitter {
 				return;
 			}
 
-			throw new Unsupported('a call to something this batch does not declare and the host does not offer', pos);
+			emitDynCall(callee, params, slot, pos);
+			return;
 		}
 
 		if (params.length != sig.args.length)
@@ -709,15 +757,56 @@ class Emitter {
 	 * @return The global's index.
 	 */
 	function hostSlot(owner:String, field:String):Int {
-		var key:String = owner + '.' + field;
+		return bind('h' + owner + '.' + field, {index: 0, kind: BHost, owner: owner, field: field});
+	}
+
+	/**
+	 * The global holding one of `Runtime`'s statics.
+	 *
+	 * @param field Which one.
+	 * @return The global's index.
+	 */
+	function supportSlot(field:String):Int {
+		return bind('s' + field, {index: 0, kind: BSupport, field: field});
+	}
+
+	/**
+	 * The global holding a value the emitter already has.
+	 *
+	 * A string is the reason this exists. Building one in bytecode would make it this module's own
+	 * `String` rather than the host's, and it would have to be built at every use; being handed one
+	 * costs a global read instead. Strings do not change, so one global serves every use of a
+	 * literal.
+	 *
+	 * @param key What distinguishes this value from another of the same shape.
+	 * @param value The value.
+	 * @return The global's index.
+	 */
+	function constSlot(key:String, value:Dynamic):Int {
+		return bind('c' + key, {index: 0, kind: BConst, value: value});
+	}
+
+	/**
+	 * Finds or makes the global for a binding.
+	 *
+	 * @param key What identifies it, so asking twice gives one global.
+	 * @param binding What to record when it is new. Its index is filled in here.
+	 * @return The global's index.
+	 */
+	function bind(key:String, binding:Binding):Int {
 		var known:Null<Int> = hostSlots.get(key);
 		if (known != null)
 			return known;
 
-		var index:Int = module.global(tDyn);
-		hostSlots.set(key, index);
-		bindings.push({index: index, owner: owner, field: field});
-		return index;
+		binding.index = module.global(tDyn);
+		hostSlots.set(key, binding.index);
+		bindings.push(binding);
+		return binding.index;
+	}
+
+	/** @return A value for one of this module's support bindings. */
+	public static function support(field:String):Dynamic {
+		return Reflect.field(Runtime, field);
 	}
 
 	/**
@@ -756,35 +845,69 @@ class Emitter {
 	function emitHostCall(owner:String, field:String, params:Array<Expr>, slot:Int, pos:Position):Void {
 		var fn:Int = reg(tDyn);
 		ops.push({op: OGetGlobal, args: [fn, hostSlot(owner, field)]});
+		through(fn, params, slot);
+	}
 
-		// Nothing here can know whether the host really offers this, and a global left null is what
-		// says it does not. Calling it would be an access violation with no message; this raises the
-		// null the way reaching for a missing name anywhere else does.
+	/**
+	 * Writes a call to something whose identity is only known while running.
+	 *
+	 * A method on a host object, or a local holding a function. The receiver is asked for the field
+	 * by name and what comes back is called, which is what the interpreter does too, one instruction
+	 * at a time instead of one tree walk at a time.
+	 *
+	 * @param callee What is being called.
+	 * @param params The arguments.
+	 * @param slot Where to leave the result.
+	 * @param pos Where it appears.
+	 */
+	function emitDynCall(callee:Expr, params:Array<Expr>, slot:Int, pos:Position):Void {
+		var fn:Int;
+
+		switch (callee.e) {
+			case EField(obj, name, _):
+				var host:Int = dynOf(obj);
+				fn = reg(tDyn);
+				ops.push({op: ODynGet, args: [fn, host, module.stringId(name)]});
+
+			case EParent(inner):
+				emitDynCall(inner, params, slot, pos);
+				return;
+
+			case _:
+				fn = dynOf(callee);
+		}
+
+		through(fn, params, slot);
+	}
+
+	/**
+	 * Writes the call itself, once whatever is being called is in a register.
+	 *
+	 * Every argument is boxed first and the result lands in a dynamic. That is not a choice: the JIT
+	 * turns a call through a dynamic closure into `hl_dyn_call`, which insists on it and in exchange
+	 * marshals the arguments and the result to whatever was really declared. Handing the call a
+	 * typed destination looks like it should work and does not, because the JIT then casts that
+	 * register from its own type to its own type, which is nothing, and the raw pointer stays there
+	 * as a plausible number.
+	 *
+	 * @param fn A dynamic register holding what to call.
+	 * @param params The arguments.
+	 * @param slot Where to leave the result.
+	 */
+	function through(fn:Int, params:Array<Expr>, slot:Int):Void {
+		// Nothing here can know whether what was named really exists, and a global or a field left
+		// null is what says it does not. Calling it would be an access violation with no message;
+		// this raises the null the way reaching for a missing name anywhere else does.
 		ops.push({op: ONullCheck, args: [fn]});
 
-		// The result lands in a dynamic and is cast out of it afterwards. Handing the call a typed
-		// destination looks like it should work and does not: the JIT casts that register from its own
-		// type to its own type, which is nothing, and the raw pointer stays there as a plausible
-		// number.
 		var returned:Int = reg(tDyn);
 		var args:Array<Int> = [returned, fn];
 
-		for (p in params) {
-			var raw:Int = reg(infer(p));
-			into(p, raw);
-
-			if (regs[raw] == tDyn) {
-				args.push(raw);
-				continue;
-			}
-
-			var boxed:Int = reg(tDyn);
-			ops.push({op: OToDyn, args: [boxed, raw]});
-			args.push(boxed);
-		}
+		for (p in params)
+			args.push(dynOf(p));
 
 		ops.push({op: OCallClosure, args: args});
-		ops.push({op: regs[slot] == tDyn ? OMov : OSafeCast, args: [slot, returned]});
+		move(returned, slot);
 	}
 
 	/**
@@ -837,31 +960,48 @@ class Emitter {
 		return slots == null ? null : slots.get(name);
 	}
 
-	/** Writes a field read. */
+	/**
+	 * Writes a field read, by offset when the batch declared the field and by name otherwise.
+	 *
+	 * Reading by name is what makes a host object usable: `ODynGet` asks the value itself, so a
+	 * string's length or an object's member is one instruction whether or not anything here knew
+	 * the field existed.
+	 */
 	function getField(obj:Expr, name:String, slot:Int, pos:Position):Void {
 		var index:Null<Int> = fieldOf(obj, name);
-		if (index == null)
-			throw new Unsupported('the field ' + name + ', which is not one this batch declares', pos);
+		if (index != null) {
+			var holder:Int = reg(typeOfExpr(obj));
+			into(obj, holder);
+			ops.push({op: OField, args: [slot, holder, index]});
+			return;
+		}
 
-		var holder:Int = reg(typeOfExpr(obj));
-		into(obj, holder);
-		ops.push({op: OField, args: [slot, holder, index]});
+		var host:Int = dynOf(obj);
+		var held:Int = landing(slot);
+		ops.push({op: ODynGet, args: [held, host, module.stringId(name)]});
+
+		if (held != slot)
+			move(held, slot);
 	}
 
-	/** Writes a field write. */
+	/** Writes a field write, by offset when the batch declared the field and by name otherwise. */
 	function setField(obj:Expr, name:String, value:Expr, pos:Position):Void {
 		var index:Null<Int> = fieldOf(obj, name);
-		if (index == null)
-			throw new Unsupported('the field ' + name + ', which is not one this batch declares', pos);
+		if (index != null) {
+			var cls:String = classNamed(typeOfExpr(obj));
+			var holder:Int = reg(typeOfExpr(obj));
+			into(obj, holder);
 
-		var cls:String = classNamed(typeOfExpr(obj));
-		var holder:Int = reg(typeOfExpr(obj));
-		into(obj, holder);
+			var v:Int = reg(memberTypes.get(cls)[index]);
+			into(value, v);
 
-		var v:Int = reg(memberTypes.get(cls)[index]);
-		into(value, v);
+			ops.push({op: OSetField, args: [holder, index, v]});
+			return;
+		}
 
-		ops.push({op: OSetField, args: [holder, index, v]});
+		var host:Int = dynOf(obj);
+		var v:Int = dynOf(value);
+		ops.push({op: ODynSet, args: [host, module.stringId(name), v]});
 	}
 
 	/** @return An expression naming the instance the body being written belongs to. */
@@ -942,6 +1082,17 @@ class Emitter {
 					land(fall);
 				}
 
+			// A comparison with a dynamic on either side is one the instructions cannot make, because
+			// what it means depends on what is in there: two strings compare by their contents, two
+			// abstracts through whichever `@:op` method they declare.
+			case EBinop(op, a, b) if (COMPARE.exists(op) && (infer(a) == tDyn || infer(b) == tDyn)):
+				var answer:Int = reg(tBool);
+				var equality:Bool = op == '==' || op == '!=';
+				callSupport(equality ? 'eq' : ORDERING.get(op), [dynOf(a), dynOf(b)], answer);
+
+				var same:Bool = op == '!=' ? !wanted : wanted;
+				exits.push(jump(same ? OJTrue : OJFalse, [answer]));
+
 			case EBinop(op, a, b) if (COMPARE.exists(op)):
 				var shared:Int = widest(infer(a), infer(b));
 
@@ -956,25 +1107,86 @@ class Emitter {
 
 			case _:
 				var v:Int = reg(tBool);
-				into(e, v);
+				truth(e, v);
 				exits.push(jump(wanted ? OJTrue : OJFalse, [v]));
 		}
 	}
 
-	/** Copies one register to another, converting between Int and Float where that is what is meant. */
+	/**
+	 * Copies one register to another, converting where the two ends disagree about the type.
+	 *
+	 * This is the seam between the typed tier and the dynamic one, and the place a wrong answer
+	 * hides rather than raises: writing an `Int` straight into a pointer slot is not a wrong number,
+	 * it is a pointer, and what reads it next is what falls over.
+	 */
 	function move(from:Int, to:Int):Void {
 		if (from == to)
 			return;
 
-		if (regs[from] == tI32 && regs[to] == tF64) {
+		var a:Int = regs[from];
+		var b:Int = regs[to];
+
+		if (a == b) {
+			ops.push({op: OMov, args: [to, from]});
+			return;
+		}
+
+		if (a == tI32 && b == tF64) {
 			ops.push({op: OToSFloat, args: [to, from]});
 			return;
 		}
 
-		if (regs[from] != regs[to])
-			throw new Unsupported('a value of one type where another was declared', null);
+		if (a == tF64 && b == tI32) {
+			ops.push({op: OToInt, args: [to, from]});
+			return;
+		}
 
-		ops.push({op: OMov, args: [to, from]});
+		if (b == tDyn) {
+			ops.push({op: OToDyn, args: [to, from]});
+			return;
+		}
+
+		if (a == tDyn) {
+			ops.push({op: OSafeCast, args: [to, from]});
+			return;
+		}
+
+		throw new Unsupported('a value of one type where another was declared', null);
+	}
+
+	/** @return A fresh dynamic register holding an expression's value. */
+	function dynOf(e:Expr):Int {
+		var slot:Int = reg(tDyn);
+		into(e, slot);
+		return slot;
+	}
+
+	/**
+	 * @return Where a dynamic result should land: the destination itself when it can hold one, and
+	 *         a register of its own when it cannot.
+	 */
+	inline function landing(slot:Int):Int {
+		return regs[slot] == tDyn ? slot : reg(tDyn);
+	}
+
+	/**
+	 * Writes a call to one of `Runtime`'s statics.
+	 *
+	 * @param field Which one.
+	 * @param args Registers holding its arguments, each already dynamic.
+	 * @param slot Where to leave the result.
+	 */
+	function callSupport(field:String, args:Array<Int>, slot:Int):Void {
+		var fn:Int = reg(tDyn);
+		ops.push({op: OGetGlobal, args: [fn, supportSlot(field)]});
+
+		var returned:Int = reg(tDyn);
+		var pass:Array<Int> = [returned, fn];
+		for (a in args)
+			pass.push(a);
+
+		ops.push({op: OCallClosure, args: pass});
+		move(returned, slot);
 	}
 
 	/** @return A fresh register of the given type. */
@@ -1039,11 +1251,13 @@ class Emitter {
 	}
 
 	/**
-	 * Works out what type an expression produces.
+	 * Works out which register type an expression's value needs.
+	 *
+	 * Answers dynamic for anything it does not recognise rather than refusing. Being wrong about a
+	 * type here costs the speed of a typed register; refusing costs the whole module its bytecode.
 	 *
 	 * @param e The expression.
 	 * @return Its type.
-	 * @throws Unsupported If it produces something with no type here.
 	 */
 	function infer(e:Expr):Int {
 		return switch (e.e) {
@@ -1051,6 +1265,8 @@ class Emitter {
 			case EConst(CFloat(_)): tF64;
 			case EIdent('true') | EIdent('false'): tBool;
 			case EParent(inner): infer(inner);
+			case EMeta(_, _, inner): infer(inner);
+			case ECheckType(inner, t): typeOf(t);
 			case EUnop('!', _, _): tBool;
 			case EUnop(_, _, inner): infer(inner);
 
@@ -1060,31 +1276,34 @@ class Emitter {
 					regs[slot];
 				} else {
 					var own:Null<Int> = inside == null ? null : members.get(inside).get(name);
-					if (own == null)
-						throw new Unsupported(name + ', which is neither a local nor a field here', e.pos);
-					memberTypes.get(inside)[own];
+					own == null ? tDyn : memberTypes.get(inside)[own];
 				}
 
 			case EBinop(op, a, b) if (COMPARE.exists(op) || op == '&&' || op == '||'): tBool;
-			case EBinop(op, a, b) if (op == '<<' || op == '>>' || op == '>>>'): infer(a);
-			case EBinop(_, a, b): widest(infer(a), infer(b));
+
+			// Haxe fixes what these produce whatever they are given: the bitwise operators are always
+			// integers, and a division is always a float even between two integers.
+			case EBinop(op, _, _) if (INTEGRAL.indexOf(op) >= 0): tI32;
+			case EBinop('/', _, _): tF64;
+
+			case EBinop(_, a, b):
+				var l:Int = infer(a);
+				var r:Int = infer(b);
+				(l == tDyn || r == tDyn) ? tDyn : widest(l, r);
+
+			case ETernary(_, yes, no):
+				var l:Int = infer(yes);
+				var r:Int = infer(no);
+				l == r ? l : ((l == tI32 && r == tF64) || (l == tF64 && r == tI32) ? tF64 : tDyn);
 
 			case ENew(cls, _):
 				var self:Null<Int> = classes.get(cls);
-				if (self == null)
-					throw new Unsupported('new ' + cls + ', which is not a class of this batch', e.pos);
-				self;
-
-			case EField(_, _, _) if (hostName(e) != null): tDyn;
+				self == null ? tDyn : self;
 
 			case EField(obj, name, _):
 				var cls:Null<String> = classNamed(infer(obj));
 				var slot:Null<Int> = cls == null ? null : members.get(cls).get(name);
-				if (slot == null)
-					throw new Unsupported('the field ' + name + ', which is not one this batch declares', e.pos);
-				memberTypes.get(cls)[slot];
-
-			case ECall(callee, _) if (calledSignature(callee) == null && methodCall(callee) == null && hostName(callee) != null): tDyn;
+				slot == null ? tDyn : memberTypes.get(cls)[slot];
 
 			case ECall(callee, _):
 				var method:Null<{on:Expr, sig:Signature}> = methodCall(callee);
@@ -1092,13 +1311,10 @@ class Emitter {
 					method.sig.ret;
 				} else {
 					var sig:Null<Signature> = calledSignature(callee);
-					if (sig == null)
-						throw new Unsupported('a call to something that is not a function of this batch', e.pos);
-					sig.ret;
+					sig == null ? tDyn : sig.ret;
 				}
 
-			case _:
-				throw new Unsupported('this expression, whose type is not known here', e.pos);
+			case _: tDyn;
 		}
 	}
 
@@ -1107,18 +1323,26 @@ class Emitter {
 		return (a == tF64 || b == tF64) ? tF64 : a;
 	}
 
-	/** @return The type an annotation names, or null when it is one this cannot express. */
-	function typeOf(t:Null<CType>):Null<Int> {
+	/**
+	 * @return The type an annotation names.
+	 *
+	 * Anything with no register type of its own answers dynamic rather than refusing. That is what
+	 * makes a script compile at all: a value whose type this cannot express is still a value the
+	 * host owns and can be held, read and called, so the only thing lost by not knowing its type is
+	 * the speed of a typed register.
+	 */
+	function typeOf(t:Null<CType>):Int {
 		if (t == null)
-			return null;
+			return tDyn;
 
 		return switch (t) {
 			case CTPath(['Int'], _): tI32;
 			case CTPath(['Float'], _): tF64;
 			case CTPath(['Bool'], _): tBool;
 			case CTPath(['Void'], _): tVoid;
+			case CTPath([name], _) if (classes.exists(name)): classes.get(name);
 			case CTParent(inner): typeOf(inner);
-			case _: null;
+			case _: tDyn;
 		}
 	}
 
@@ -1232,13 +1456,19 @@ class Emitter {
 		}
 	}
 
-	/** @return The instruction for an arithmetic operator, or null when there is none. */
-	function arithmetic(op:String, floating:Bool):Null<Opcode> {
+	/**
+	 * @return The instruction for an arithmetic operator, or null when there is none.
+	 *
+	 * The instruction is the same whether the operands are integers or floats: what it does is
+	 * decided by the registers it is given, which is why the operand type is worked out before this
+	 * is asked.
+	 */
+	function arithmetic(op:String):Null<Opcode> {
 		return switch (op) {
 			case '+': OAdd;
 			case '-': OSub;
 			case '*': OMul;
-			case '/': floating ? OSDiv : OSDiv;
+			case '/': OSDiv;
 			case '%': OSMod;
 			case '&': OAnd;
 			case '|': OOr;
@@ -1249,6 +1479,33 @@ class Emitter {
 			case _: null;
 		}
 	}
+
+	/**
+	 * Writes an expression as a boolean.
+	 *
+	 * A dynamic cannot simply be cast: one holding anything but a boolean would throw rather than
+	 * answer, and the interpreter answers false.
+	 *
+	 * @param e The expression.
+	 * @param slot A boolean register to leave the answer in.
+	 */
+	function truth(e:Expr, slot:Int):Void {
+		if (infer(e) == tDyn) {
+			callSupport('truthy', [dynOf(e)], slot);
+			return;
+		}
+
+		into(e, slot);
+	}
+
+	/** The `Runtime` static each operator becomes when either operand is dynamic. */
+	static var SUPPORT:StringMap<String> = ['+' => 'add', '-' => 'sub', '*' => 'mul', '/' => 'div', '%' => 'mod'];
+
+	/** The operators Haxe defines on integers however they are spelled. */
+	static var INTEGRAL:Array<String> = ['&', '|', '^', '<<', '>>', '>>>'];
+
+	/** The `Runtime` static each comparison becomes when either operand is dynamic. */
+	static var ORDERING:StringMap<String> = ['<' => 'lt', '<=' => 'lte', '>' => 'gt', '>=' => 'gte'];
 
 	/** The jump each comparison becomes when it is taken. */
 	static var COMPARE:StringMap<Opcode> = [

@@ -29,6 +29,8 @@ import hxscript.compile.Report;
 import hxscript.compile.Skip;
 import hxscript.Module;
 #if hxscript_hl
+import hxscript.hl.Binding;
+import hxscript.hl.Binding.BindingKind;
 import hxscript.hl.Loader;
 import hxscript.syntax.Expr;
 import hxscript.types.ScriptedClass;
@@ -151,7 +153,7 @@ class Backend {
 		}
 
 		for (binding in emitter.bindings)
-			Loader.set(loaded, binding.index, hostValue(binding.owner, binding.field, env));
+			Loader.set(loaded, binding.index, valueFor(binding, env));
 
 		for (entry in exposed) {
 			var owner:Dynamic = env.resolve(entry.path);
@@ -178,6 +180,21 @@ class Backend {
 	 * is ever released.
 	 */
 	static var retained:Array<Loaded> = [];
+
+	/**
+	 * Finds the value a bound global should be filled with.
+	 *
+	 * @param binding What the emitter asked for.
+	 * @param env The world.
+	 * @return The value, or null when nothing answers to it.
+	 */
+	static function valueFor(binding:Binding, env:Environment):Dynamic {
+		return switch (binding.kind) {
+			case BHost: hostValue(binding.owner, binding.field, env);
+			case BSupport: Emitter.support(binding.field);
+			case BConst: binding.value;
+		}
+	}
 
 	/**
 	 * Finds what a script meant by a name the host owns.

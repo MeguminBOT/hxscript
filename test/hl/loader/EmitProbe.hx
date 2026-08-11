@@ -1,6 +1,7 @@
 import hxscript.Environment;
 import hxscript.Module;
 import hxscript.compile.Unsupported;
+import hxscript.hl.Binding.BindingKind;
 import hxscript.hl.Emitter;
 import hxscript.hl.Loader;
 import hxscript.hl.Loader.Loaded;
@@ -87,8 +88,15 @@ class EmitProbe {
 		}
 
 		for (binding in emitter.bindings) {
-			var holder:Dynamic = Type.resolveClass(binding.owner);
-			Loader.set(loaded, binding.index, holder == null ? null : Reflect.field(holder, binding.field));
+			Loader.set(loaded, binding.index, switch (binding.kind) {
+				case BHost:
+					var holder:Dynamic = Type.resolveClass(binding.owner);
+					holder == null ? null : Reflect.field(holder, binding.field);
+				case BSupport:
+					hxscript.hl.Emitter.support(binding.field);
+				case BConst:
+					binding.value;
+			});
 		}
 
 		var fn:Dynamic = Loader.bind(loaded, entry);
@@ -240,7 +248,11 @@ class EmitProbe {
 		check('a host call returning a float', 'Float', 'return HostBits.scale(3.0);');
 		throws('a host name nothing answers to', 'Int', 'return Nowhere.gone(1);');
 
-		check('a string is refused', 'String', 'return "no";');
+		check('a string', 'String', 'return "no";');
+		check('a string joined to a number', 'String', 'var n:Int = 2; return "n" + n;');
+		check('a string compared', 'Bool', 'var s:String = "a"; return s == "a";');
+		check('a string field', 'Int', 'var s:String = "abc"; return s.length;');
+		check('a string method', 'String', 'var s:String = "ab"; return s.toUpperCase();');
 		check('an array is refused', 'Int', 'var a = [1, 2]; return a[0];');
 
 		Sys.println('== ' + passed + ' passed, ' + failed + ' failed ==, ' + refused + ' refused');
