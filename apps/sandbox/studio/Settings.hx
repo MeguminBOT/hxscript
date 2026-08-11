@@ -133,14 +133,28 @@ class Settings {
 		if (!debugger)
 			flixel.FlxG.debugger.visible = false;
 
-		if (fps > 0) {
-			flixel.FlxG.updateFramerate = fps;
-			flixel.FlxG.drawFramerate = fps;
-		}
+		var rate:Int = fps > 0 ? fps : windowRate();
+		flixel.FlxG.updateFramerate = rate;
+		flixel.FlxG.drawFramerate = rate;
 
 		#if hxscript_cppia
 		hxscript.compile.Compiler.jit = (mode == JIT);
 		#end
+	}
+
+	/**
+	 * The window's own refresh rate, for `fps == 0`.
+	 *
+	 * Asked of lime rather than assumed to be 60, since "Window" meaning 60 on a 144 Hz display is
+	 * the setting not doing what it says.
+	 *
+	 * @return The rate, or 60 when the window cannot be asked.
+	 */
+	static function windowRate():Int {
+		var window = lime.app.Application.current == null ? null : lime.app.Application.current.window;
+		var rate:Float = window == null ? 0 : window.displayMode.refreshRate;
+
+		return rate > 0 ? Math.round(rate) : 60;
 	}
 
 	/**
