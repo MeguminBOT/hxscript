@@ -8,9 +8,13 @@ rem   build.bat --debug         debug build
 rem   build.bat --clean         wipe the build output first
 rem   build.bat linux           build for a named target: windows ^| linux ^| mac
 rem
-rem One environment variable, optional:
+rem Run setup\windows.bat once first. It installs the haxelibs, including hxscript and SmidrUI from
+rem git, into a haxelib repository belonging to this folder.
 rem
-rem   SMIDR_PATH   where SmidrUI is checked out, if it is not a sibling of this repository
+rem Two environment variables, both optional:
+rem
+rem   HXSCRIPT_PATH  where hxscript is checked out, if it is not this repository
+rem   SMIDR_PATH     where SmidrUI is checked out, if it is not a sibling of this repository
 rem
 rem The point of this over calling lime directly is the checks. A missing haxelib fails inside lime
 rem with a stack trace naming a file in lime rather than the library you have not installed, and the
@@ -66,46 +70,59 @@ for /f "delims=" %%v in ('haxe --version 2^>^&1') do (
 
 call haxelib path lime >nul 2>&1
 if errorlevel 1 (
-	echo lime is not installed. Run:  haxelib install lime
+	echo lime is not installed. Run the setup script first:  setup\windows.bat
 	exit /b 1
 )
 
-rem ---- the dev haxelibs ------------------------------------------------------
+rem ---- the libraries ---------------------------------------------------------
 rem
-rem hxscript is this repository, and SmidrUI is not on haxelib at all, so both have to be pointed at
-rem a checkout. Doing it here rather than documenting it means the build works on a fresh clone.
+rem setup\windows.bat installs every one of these, including hxscript and SmidrUI from git, into a
+rem haxelib repository belonging to this folder. It is the thing to run on a machine that has not
+rem built this before, and this script does not do its job: what happens here is only the checkout
+rem override.
+rem
+rem If hxscript or SmidrUI is checked out where this can find it, haxelib is pointed at that
+rem checkout, so somebody working on either library builds against their edits rather than against
+rem what setup installed. HXSCRIPT_PATH and SMIDR_PATH name a checkout that is somewhere else;
+rem neither is needed when the library is a sibling of this repository.
 
 for %%p in ("%REPO%") do set "REPO=%%~fp"
-echo hxscript    %REPO%
-call haxelib dev hxscript "%REPO%" >nul
 
-set "SMIDR=%SMIDR_PATH%"
+set "HXSCRIPT=%HXSCRIPT_PATH%"
 
-if "%SMIDR%"=="" (
-	for %%g in ("%REPO%\..\SmidrUI" "%REPO%\..\smidr") do (
-		if exist "%%~fg\src\smidr" set "SMIDR=%%~fg"
+if "!HXSCRIPT!"=="" (
+	for %%g in ("%REPO%" "%REPO%\..\hxscript" "%REPO%\..\hxScript") do (
+		if exist "%%~fg\src\hxscript" if "!HXSCRIPT!"=="" set "HXSCRIPT=%%~fg"
 	)
 )
 
-if "%SMIDR%"=="" (
-	call haxelib path smidr >nul 2>&1
-	if errorlevel 1 (
-		echo SmidrUI not found. Clone it and point this at it:
-		echo   git clone https://github.com/MeguminBOT/SmidrUI
-		echo   set SMIDR_PATH=C:\path\to\SmidrUI ^&^& build.bat
-		exit /b 1
-	)
-	echo smidr       ^(from haxelib^)
+if not "!HXSCRIPT!"=="" (
+	echo hxscript    !HXSCRIPT!
+	call haxelib dev hxscript "!HXSCRIPT!" >nul
 ) else (
+	echo hxscript    ^(haxelib^)
+)
+
+set "SMIDR=%SMIDR_PATH%"
+
+if "!SMIDR!"=="" (
+	for %%g in ("%REPO%\..\SmidrUI" "%REPO%\..\smidr") do (
+		if exist "%%~fg\src\smidr" if "!SMIDR!"=="" set "SMIDR=%%~fg"
+	)
+)
+
+if not "!SMIDR!"=="" (
 	echo smidr       !SMIDR!
 	call haxelib dev smidr "!SMIDR!" >nul
+) else (
+	echo smidr       ^(haxelib^)
 )
 
 rem ---- the rest of the haxelibs ----------------------------------------------
 
 set "MISSING="
 
-for %%l in (openfl flixel flixel-addons flixel-ui) do (
+for %%l in (lime openfl flixel flixel-addons flixel-ui hxscript smidr) do (
 	call haxelib path %%l >nul 2>&1
 	if errorlevel 1 set "MISSING=!MISSING! %%l"
 )
@@ -114,8 +131,9 @@ if not "!MISSING!"=="" (
 	echo.
 	echo Missing haxelibs:!MISSING!
 	echo.
-	echo Install them with:
-	for %%l in (!MISSING!) do echo   haxelib install %%l
+	echo Run the setup script, which installs all of them into a repository of this folder's own:
+	echo.
+	echo   setup\windows.bat
 	exit /b 1
 )
 
@@ -168,5 +186,6 @@ echo build.bat --debug         debug build
 echo build.bat --clean         wipe the build output first
 echo build.bat linux           build for a named target: windows ^| linux ^| mac
 echo.
-echo SMIDR_PATH   where SmidrUI is checked out, if it is not a sibling of this repository
+echo HXSCRIPT_PATH  where hxscript is checked out, if it is not this repository
+echo SMIDR_PATH     where SmidrUI is checked out, if it is not a sibling of this repository
 exit /b 0

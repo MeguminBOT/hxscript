@@ -28,14 +28,23 @@ already use, save, and it reloads. No rebuild, no Haxe toolchain, no wiring.
 
 ## Building it
 
+Once, to install the haxelibs into a repository belonging to this folder, so nothing here disturbs
+what the rest of your machine builds against:
+
+```
+sh setup/unix.sh    # Linux, macOS, or Git Bash on Windows
+setup\windows.bat   # cmd, on Windows
+```
+
+Then, as often as you like:
+
 ```
 ./build.sh          # Linux, macOS, or Git Bash on Windows
 build.bat           # cmd, on Windows
 ```
 
-Both check the toolchain and the haxelibs first and name anything missing, rather than failing inside
-lime with a stack trace about a file you have never opened. They also point the two dev haxelibs at
-their checkouts, so a fresh clone builds without any setup of its own.
+The build scripts check the toolchain and the haxelibs first and name anything missing, rather than
+failing inside lime with a stack trace about a file you have never opened.
 
 | | |
 | --- | --- |
@@ -44,11 +53,14 @@ their checkouts, so a fresh clone builds without any setup of its own.
 | `./build.sh --clean` | wipe `export/` first |
 | `./build.sh linux` | a named target: `windows`, `linux`, `mac` |
 
-[SmiðrUI](https://github.com/MeguminBOT/SmidrUI) is not on haxelib, so clone it beside this
-repository or say where it is:
+Setup installs [hxscript](https://github.com/MeguminBOT/hxscript) and
+[SmiðrUI](https://github.com/MeguminBOT/SmidrUI) from git rather than from a release, because this app
+is written against both as they currently are. If you have either checked out and want to build
+against your edits, the build scripts find a checkout of hxscript at this repository and one of
+SmiðrUI beside it, and point haxelib at what they find. Say where it is if it is somewhere else:
 
 ```
-SMIDR_PATH=/path/to/SmidrUI ./build.sh        # bash
+HXSCRIPT_PATH=/path/to/hxscript SMIDR_PATH=/path/to/SmidrUI ./build.sh
 set SMIDR_PATH=C:\path\to\SmidrUI && build.bat
 ```
 

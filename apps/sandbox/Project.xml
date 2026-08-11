@@ -4,8 +4,9 @@
 		The hxScript sandbox: a prototyping app for lime, openfl and flixel projects, where the
 		projects are scripts read at runtime rather than code that has to be compiled in.
 
-		Build it with the scripts beside this file, which check the toolchain and the haxelibs first
-		and tell you what is missing rather than failing inside lime:
+		Install the haxelibs once with setup/unix.sh or setup\windows.bat, then build it with the
+		scripts beside this file, which check the toolchain first and tell you what is missing
+		rather than failing inside lime:
 
 		    ./build.sh          bash, on Linux, macOS, or Git Bash on Windows
 		    build.bat           cmd, on Windows

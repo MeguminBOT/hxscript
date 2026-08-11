@@ -8,10 +8,14 @@
 #   ./build.sh linux           build for a named target: windows | linux | mac
 #   ./build.sh linux run --debug        they combine, in any order
 #
-# Two environment variables, both optional:
+# Run setup/unix.sh once first. It installs the haxelibs, including hxscript and SmiðrUI from git,
+# into a haxelib repository belonging to this folder.
 #
-#   SMIDR_PATH   where SmiðrUI is checked out, if it is not a sibling of this repository
-#   LIME_TARGET  a default target, if you do not want to type one
+# Three environment variables, all optional:
+#
+#   HXSCRIPT_PATH  where hxscript is checked out, if it is not this repository
+#   SMIDR_PATH     where SmiðrUI is checked out, if it is not a sibling of this repository
+#   LIME_TARGET    a default target, if you do not want to type one
 #
 # The point of this script over calling lime directly is the checks. A missing haxelib fails inside
 # lime with a stack trace naming a file in lime rather than the library you have not installed, and
@@ -82,57 +86,61 @@ say "haxe        $(haxe --version 2>&1 | head -1)"
 lime() { haxelib run lime "$@"; }
 
 if ! haxelib path lime >/dev/null 2>&1; then
-	die "lime is not installed. Run:  haxelib install lime"
+	die "lime is not installed. Run the setup script first:  sh setup/unix.sh"
 fi
 
-# ---- the dev haxelibs -------------------------------------------------------
+# ---- the libraries ----------------------------------------------------------
 #
-# hxscript is this repository, and SmiðrUI is not on haxelib at all, so both have to be pointed at a
-# checkout. Doing it here rather than documenting it means the build works on a fresh clone.
+# setup/unix.sh installs every one of these, including hxscript and SmiðrUI from git, into a haxelib
+# repository belonging to this folder. It is the thing to run on a machine that has not built this
+# before, and this script does not do its job: what happens here is only the checkout override.
+#
+# If hxscript or SmiðrUI is checked out where this can find it, haxelib is pointed at that checkout,
+# so somebody working on either library builds against their edits rather than against what setup
+# installed. HXSCRIPT_PATH and SMIDR_PATH name a checkout that is somewhere else; neither is needed
+# when the library is a sibling of this repository.
 
-say "hxscript    $(native "$repo")"
-haxelib dev hxscript "$(native "$repo")" >/dev/null
+# $1 haxelib name, $2 title for the line it prints, $3 a directory that exists inside a real
+# checkout, $4.. candidate paths, most specific first.
+override() {
+	name="$1"
+	title="$2"
+	marker="$3"
+	shift 3
 
-smidr="${SMIDR_PATH:-}"
-
-if [ -z "$smidr" ]; then
-	for guess in "$repo/../SmidrUI" "$repo/../smidr" "$HOME/SmidrUI"; do
-		if [ -d "$guess/src/smidr" ]; then
-			smidr="$(cd "$guess" && pwd)"
-			break
+	for guess in "$@"; do
+		if [ -n "$guess" ] && [ -d "$guess/$marker" ]; then
+			found="$(cd "$guess" && pwd)"
+			say "$title$(native "$found")"
+			haxelib dev "$name" "$(native "$found")" >/dev/null
+			return 0
 		fi
 	done
-fi
 
-if [ -z "$smidr" ]; then
-	if haxelib path smidr >/dev/null 2>&1; then
-		say "smidr       (from haxelib)"
-	else
-		die "SmiðrUI not found. Clone it and point this at it:
-  git clone https://github.com/MeguminBOT/SmidrUI
-  SMIDR_PATH=/path/to/SmidrUI ./build.sh"
-	fi
-else
-	say "smidr       $(native "$smidr")"
-	haxelib dev smidr "$(native "$smidr")" >/dev/null
-fi
+	return 1
+}
 
-# ---- the rest of the haxelibs ----------------------------------------------
+override hxscript "hxscript    " "src/hxscript" \
+	"${HXSCRIPT_PATH:-}" "$repo" "$repo/../hxscript" "$repo/../hxScript" \
+	|| say "hxscript    (haxelib)"
+
+override smidr "smidr       " "src/smidr" \
+	"${SMIDR_PATH:-}" "$repo/../SmidrUI" "$repo/../smidr" \
+	|| say "smidr       (haxelib)"
 
 missing=""
 
-for lib in openfl flixel flixel-addons flixel-ui; do
+for lib in lime openfl flixel flixel-addons flixel-ui hxscript smidr; do
 	haxelib path "$lib" >/dev/null 2>&1 || missing="$missing $lib"
 done
 
 if [ -n "$missing" ]; then
-	printf '\nMissing haxelibs:%s\n\nInstall them with:\n' "$missing" >&2
+	die "
+Missing haxelibs:$missing
 
-	for lib in $missing; do
-		printf '  haxelib install %s\n' "$lib" >&2
-	done
+Run the setup script, which installs all of them into a repository of this folder's own:
 
-	exit 1
+  sh setup/unix.sh"
 fi
 
 # ---- build ------------------------------------------------------------------
