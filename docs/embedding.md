@@ -118,10 +118,14 @@ Everything the library reads. Only the first group is likely to concern you.
 
 | Flag | Effect |
 | --- | --- |
-| `-D hxscript_cppia` | compile the emitter into the build. Without it every module reports as skipped |
+| `-D hxscript_cppia` | hxcpp: compile the cppia emitter into the build |
 | `-D scriptable` | hxcpp's own flag, which makes your types reachable from bytecode |
+| `-D hxscript_hl` | HashLink: compile the HashLink emitter into the build |
 
-Both are hxcpp-only. On any other target the compiler does not exist and every script is interpreted.
+Two targets have a compiler and no others do; everywhere else every script is interpreted. Only one
+emitter is ever in a build, so nothing has to choose between them at runtime. Without the flag for
+your target every module reports as skipped, which looks exactly like a compiler that refuses
+everything.
 
 ### Turning parts of the setup off
 
@@ -413,14 +417,16 @@ its own stack with no link to its caller, so that frame does not appear in the c
 
 ## Compiling at runtime
 
-Optional, and **hxcpp only**. On that target a module can be translated to cppia bytecode and loaded
-as a real class instead of being walked as a tree; everywhere else scripts are interpreted and this
-section does not apply. [`modes.md`](modes.md) covers what that is worth and when it repays the cost;
-this section is the wiring.
+Optional, and only on **hxcpp** and **HashLink**. On those a module can be turned into bytecode the
+target loads and runs, instead of being walked as a tree; everywhere else scripts are interpreted and
+this section does not apply. [`modes.md`](modes.md) covers what that is worth and when it repays the
+cost; this section is the wiring.
 
 **Nothing here happens on its own.** The defines make the compiler *available*, and that is all. If
 you never ask, every script is interpreted exactly as before. What to compile, when, and what to do
 about a module the compiler will not take are decisions only the host can make.
+
+On hxcpp:
 
 ```
 -D hxscript_cppia
@@ -428,13 +434,40 @@ about a module the compiler will not take are decisions only the host can make.
 -dce no
 ```
 
-Check the first one at startup rather than wondering, because without it every module reports as
-skipped, which looks exactly like a compiler that refuses everything:
+On HashLink:
+
+```
+-D hxscript_hl
+-dce no
+```
+
+Check at startup rather than wondering. `Compiler.available` answers for whichever target you built
+for, and on HashLink it also answers for the extension below, which is not a build-time question:
 
 ```haxe
-if (!hxscript.cppia.Backend.available)
-    trace('built without -D hxscript_cppia; everything will be interpreted');
+if (!hxscript.compile.Compiler.available)
+    trace('no compiler in this build; everything will be interpreted');
 ```
+
+### The HashLink extension
+
+HashLink needs one thing hxcpp does not: a `.hdll` beside the VM. Its bytecode loader is compiled
+into `hl.exe` rather than into `libhl`, so a host has no way to reach it. `hxscript.hdll` carries
+hashlink's own `code.c`, `module.c` and `jit.c` and calls them, which keeps the VM stock: ship the
+extension beside the others and run `hl game.hl` as before.
+
+```sh
+HL_SRC=/path/to/hashlink-src HL_BIN=/path/to/hashlink sh src/hxscript/hl/build.sh
+```
+
+`HL_SRC` must be a hashlink source tree whose tag **matches** the VM in `HL_BIN`. The struct layouts
+in `hl.h` are shared with the running `libhl`, so a mismatched pair links and then misbehaves. The
+build deliberately does not carry `gc.c` or `allocator.c`: those are already in the running `libhl`,
+and a second copy would give loaded modules their own heap, leaving their objects invisible to the
+host's collector.
+
+Without the extension `Compiler.available` is false and every module is interpreted. Nothing crashes
+and nothing is silently wrong; you simply get the interpreter.
 
 **The whole integration:**
 
@@ -459,16 +492,44 @@ interpreter, so the call is safe on any world and safe to repeat. Calling it aga
 binds what it built last time rather than compiling twice. Both paths produce the same class, so
 nothing downstream needs to know which one it got.
 
-> **The two `Compiler` lines are the trap.** Anything you give scripts through `Config` or through
-> `@:scriptAmbient` is injected into an *interpreter*, and compiled code does not have one. A bare
-> name that resolved fine interpreted refuses to compile unless the compiler is told where it really
-> lives. Setting one side only gives a script that works until the day it is compiled, or the
+> **The two `Compiler` lines are the trap on hxcpp.** Anything you give scripts through `Config` or
+> through `@:scriptAmbient` is injected into an *interpreter*, and compiled code does not have one. A
+> bare name that resolved fine interpreted refuses to compile unless the compiler is told where it
+> really lives. Setting one side only gives a script that works until the day it is compiled, or the
 > reverse.
 
-Everything below is the same work spelled out, for a host that wants to compile a subset, cache the
-bytes, or decide something the facade decides for it.
+### What differs between the two
 
-### Driving it yourself
+The call above is the same on both. What it does underneath is not, and four of the differences are
+visible from outside.
+
+**A compiled class on hxcpp, a compiled function on HashLink.** cppia produces a real class and the
+world substitutes it wholesale, which is what `env.compiled` and `substituting` are for. The
+HashLink backend replaces each function on the `ScriptedClass` that declared it with the compiled
+one, so there is nothing to register and nothing to substitute. What comes back from a compiled
+module is an ordinary function value; the interpreter never learns which kind it got. A module is
+still emitted whole or not at all, for the same reason as on hxcpp.
+
+**`Compiler.ambient` and `Compiler.statics` are read on hxcpp only.** A compiled function on
+HashLink reaches a host name by asking the *world* when its module loads, so anything you put in
+`env.variables` or that `TypeTools` can resolve is found without being declared to the compiler.
+The gap that leaves: `statics`, which maps a bare name onto a host static, has no equivalent, so on
+HashLink a script naming one of those is refused and stays interpreted rather than resolving.
+
+**Bytes are not a currency on HashLink.** A loaded module's globals have to be filled from the world
+in the moment after it loads, so there is no useful step where you hold the bytes. `Compiler.compile`
+is the whole interface; the `Backend.compile(inputs, ...)` route below is cppia's.
+
+**One construct is refused on HashLink that compiles on hxcpp**: `v is C`, where `C` is a class the
+same batch declares. A module HashLink loads gets its own type table, so an instance it made is its
+own type and the world truthfully answers no to a question the script did not ask. Refusing leaves
+that module interpreted and right, which is the rule the whole backend follows: never a wrong
+answer. Everything else the cppia backend takes, this one takes too.
+
+Everything below is cppia, for a host that wants to compile a subset, cache the bytes, or decide
+something the facade decides for it.
+
+### Driving it yourself (hxcpp)
 
 ```haxe
 var decls = new Parser().parseModule(source, 'Goblin', 0, ['mods']);
@@ -549,7 +610,10 @@ per-module one:
 cpp.cppia.Host.enableJit(true);
 ```
 
-### Caching the bytes
+HashLink jits whatever it loads and has nothing to switch, so `Compiler.jit` is read there only on
+hxcpp and setting it is harmless.
+
+### Caching the bytes (hxcpp)
 
 `Compiler` holds compiled classes in memory for the life of the process, which is what makes a reload
 free, but writes nothing to disk. `result.bytes` is ordinary `haxe.io.Bytes`:
@@ -584,8 +648,11 @@ load failure as "recompile from source", which is cheap and always correct.
 | A native abstract's members do nothing | no runtime form | `@:build(hxscript.macro.Abstract.build())` on it |
 | Parse handler never fires | parsing happens in the constructor | construct empty, then `parse()` |
 | Compiles "successfully", still interpreted | the classes were never registered against the world | `env.compiled.set(...)` and `env.substituting = true` |
-| A bare name compiles interpreted but not compiled | `Compiler.ambient` / `statics` were never set | set both from `Expose` |
-| Every module reports skipped | built without the define | `-D hxscript_cppia` |
+| A bare name compiles interpreted but not compiled | `Compiler.ambient` / `statics` were never set | set both from `Expose` (hxcpp; on HashLink `statics` has no equivalent) |
+| Every module reports skipped | built without the define | `-D hxscript_cppia`, or `-D hxscript_hl` |
+| `Compiler.available` is false on HashLink with the define set | `hxscript.hdll` is not beside the VM | build it with `src/hxscript/hl/build.sh` |
+| A HashLink module loads and then misbehaves | the `.hdll` was built against a different hashlink than the VM | rebuild it with `HL_SRC` matching `HL_BIN` |
+| `is` against a scripted class is refused on HashLink | a loaded module's instances are its own type | expected; the module stays interpreted |
 | A field errors as already inherited | the script redeclares a base field | rename it, or `override` |
 | The setup did not do what you expected | | `-D hxscript_verbose` prints what it wired |
 
