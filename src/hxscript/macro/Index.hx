@@ -97,6 +97,9 @@ class Index {
 					if (k == 'typedef') {
 						info.typedefType = switch (d.type) {
 							case TInst(r, _): makeTypeInfo('class', r.get());
+							case TType(r, _): makeTypeInfo('typedef', r.get());
+							case TEnum(r, _): makeTypeInfo('enum', r.get());
+							case TAbstract(r, _): makeTypeInfo('abstract', r.get());
 							default: null;
 						}
 					}

@@ -56,11 +56,23 @@ class TypeTools {
 	 * @param env An optional world to consult for scripted types.
 	 * @return The resolved type, or null if unknown.
 	 */
-	public static inline function resolve(path:String, ?env:Environment):Dynamic {
-		var info = (TypeCollection.main.fromPath(path) ?? env?.types.fromPath(path));
-		if (info != null) {
+	public static function resolve(path:String, ?env:Environment):Dynamic {
+		var hops:Int = 0;
+
+		while (hops < TYPEDEF_DEPTH) {
+			var info = (TypeCollection.main.fromPath(path) ?? TypeCollection.main.fromCompilePath(path) ?? env?.types.fromPath(path));
+			if (info == null)
+				break;
+
 			var found:TypeInfo = info[0];
-			path = TypeCollection.compilePath(found.typedefType ?? found);
+			var next:String = TypeCollection.compilePath(found.typedefType ?? found);
+			if (found.typedefType == null || next == path) {
+				path = next;
+				break;
+			}
+
+			path = next;
+			hops++;
 		}
 
 		var type:Dynamic = env?.resolve(path);
@@ -70,6 +82,9 @@ class TypeTools {
 
 		return type;
 	}
+
+	/** How many typedef hops `resolve` follows before giving up, so a cycle cannot spin. */
+	static inline var TYPEDEF_DEPTH:Int = 8;
 
 	/**
 	 * Lists the importable types at a path (a package's types, or a single module/type). Classes,
