@@ -19,13 +19,30 @@ import studio.Shell;
  * window at all.
  */
 class Main {
+	/**
+	 * The resolution a project is given, whatever the window is doing.
+	 *
+	 * Pinned rather than taken from the stage. Passing zero to `FlxGame` makes flixel adopt the
+	 * stage's size, which with `allow-high-dpi` is the display's *physical* pixels, so the same
+	 * project would see 1366 wide on one machine and 2049 on the same window at 150% scaling. A
+	 * project reads `FlxG.width` to lay itself out, so that is a number that has to mean the same
+	 * thing everywhere.
+	 *
+	 * `ViewportScaleMode` fits this into the band between the bars and never magnifies it, so a
+	 * larger window gives a project room around itself rather than a stretched picture.
+	 */
+	public static inline var WIDTH:Int = 1366;
+
+	/** The height a project is given. */
+	public static inline var HEIGHT:Int = 768;
+
 	static function main():Void {
 		if (!Projects.open(argument('--projects')))
 			Api.log('could not open a projects folder at ' + Projects.root);
 
 		Shell.autoRun = argument('--run');
 
-		openfl.Lib.current.addChild(new FlxGame(0, 0, Shell.new, 60, 60, true));
+		openfl.Lib.current.addChild(new FlxGame(WIDTH, HEIGHT, Shell.new, 60, 60, true));
 	}
 
 	/**

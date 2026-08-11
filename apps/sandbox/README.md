@@ -139,11 +139,15 @@ something that runs in it before you have written anything.
 
 ### The window
 
-A project runs in a **viewport** between two bars, not over the whole window. It is fitted to the band
+A project is given a fixed **1366x768** canvas, whatever the window is doing, so `FlxG.width` and
+`FlxG.height` mean the same thing on every machine. Taking the stage size instead would hand a project
+the display's physical pixels, and the same window at 150% scaling would report 2049 wide.
+
+It runs in a **viewport** between two bars, not over the whole window. It is fitted to the band
 uniformly, so nothing is stretched or cut off, and **never magnified**, because a window bigger than the
 project is extra room around it, not a reason to blow it up, so the percentage in the readout is only
-ever how much was given up to fit. The project is told nothing about any of it: `FlxG.width` and
-`FlxG.height` still describe the space it draws into.
+ever how much was given up to fit. The two bars cost 54 pixels of height, so at the default window the
+canvas is drawn at 93%; from 1600x900 up it is 1:1.
 
 The fitting is a flixel **scale mode**, not a transform applied on top of one, and that distinction is
 the whole correctness argument. A scale mode owns `FlxG.game`'s position and each camera's scale and

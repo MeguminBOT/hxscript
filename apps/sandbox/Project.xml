@@ -25,7 +25,7 @@
 
 	<meta title="hxScript Sandbox: Lime HXCPP" package="dev.hxscript.sandbox.lime" version="1.0.0" company="MeguminBOT" />
 	<app main="Main" path="export" file="Sandbox" />
-	<window width="1120" height="720" fps="60" background="#16161c" resizable="true" vsync="true" />
+	<window width="1366" height="768" fps="60" background="#16161c" hardware="true" vsync="false" allow-high-dpi="true" />
 
 	<source path="." />
 
@@ -77,4 +77,20 @@
 
 	<!-- Uncomment to see exactly what the setup wired. Worth it once, and after any upgrade. -->
 	<!-- <haxedef name="hxscript_verbose" /> -->
+
+	<!-- HXCPP -->
+	<haxedef name="HXCPP_GC_MOVING"/>
+	<haxedef name="HXCPP_GC_DYNAMIC_SIZE"/>
+	<haxedef name="HXCPP_GC_BIG_BLOCKS"/>
+	<haxedef name="HXCPP_GC_DEBUG_LEVEL" value="1"/>
+	<haxedef name="HXCPP_CHECK_POINTER"/>
+	<haxedef name="HXCPP_STACK_LINE" />
+	<haxedef name="HXCPP_STACK_TRACE" />
+	<haxedef name="message.reporting" value="pretty" /> <!-- Haxe 4.3.0+: pretty | indent | classic -->
+
+
+	<!-- NAPE -->
+	<haxedef name="NAPE_RELEASE_BUILD" unless="debug" /> <!-- big perf win for Nape release builds -->
+
+
 </project>

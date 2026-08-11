@@ -11,7 +11,7 @@ import flixel.system.scaleModes.BaseScaleMode;
  * **flixel already owns that transform.** A scale mode sets `FlxG.game.x` and `y` and each camera's internal
  * scale on every measure, so a second transform applied on top compounds with it and is then overwritten the
  * next time the window changes. It happened to look right at startup only because both agreed on 1, then
- * went to 133% the moment the window went fullscreen, magnifying a 1120x720 game past its own resolution.
+ * went to 133% the moment the window went fullscreen, magnifying the game past its own resolution.
  *
  * So the rect is expressed the way flixel expresses one. Everything downstream follows for free: camera
  * scale, `FlxG.game`'s position, and mouse coordinates, which is the one that would otherwise have been
