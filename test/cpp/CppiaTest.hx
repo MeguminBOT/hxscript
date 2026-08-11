@@ -91,6 +91,16 @@ class CppiaTest {
 		check('enum switch', 'var c = Colour.Green; switch (c) { case Colour.Red: return "r"; case Colour.Green: return "g"; default: return "?"; }', 'g', '',
 			colour);
 		check('enum switch falls to default', 'var c = Colour.Rgb(1, 2, 3); switch (c) { case Colour.Red: return "r"; default: return "d"; }', 'd', '', colour);
+		check('enum-typed argument', 'return tag(Colour.Green);', 'Green', '
+			static function tag(c:Colour):String {
+				return Type.enumConstructor(c);
+			}
+		', colour);
+		check('enum-typed argument, dynamic', 'return tag(Colour.Green);', 'Green', '
+			static function tag(c:Dynamic):String {
+				return Type.enumConstructor(c);
+			}
+		', colour);
 		check('enum destructure binds parameters',
 			'var c = Colour.Rgb(1, 2, 3); switch (c) { case Rgb(r, g, b): return Std.string(r + g + b); default: return "no"; }', '6', '', colour);
 		check('enum destructure picks the right constructor',
@@ -108,6 +118,29 @@ class CppiaTest {
 		check('capture after a literal case', 'var a = 7; switch (a) { case 1: return "one"; case v: return Std.string(v * 2); }', '14');
 		check('switch multi value', 'var a = 3; switch (a) { case 1, 2: return "low"; case 3, 4: return "high"; default: return "?"; }', 'high');
 		check('switch on string', 'var s = "b"; switch (s) { case "a": return "A"; case "b": return "B"; default: return "?"; }', 'B');
+
+		var metres:String = 'abstract Metres(Float) from Float to Float {
+			public function new(v:Float) this = v;
+			@:op(A + B) public function plus(o:Metres):Metres return new Metres(this + (o : Float) + 100);
+			@:op(A * B) public function times(n:Float):Metres return new Metres(this * n);
+			public function describe():String return this + "m";
+		}';
+		check('scripted abstract method, annotated', 'var a:Metres = new Metres(2); return a.describe();', '2m', '', metres);
+		check('scripted abstract method, inferred', 'var a = new Metres(2); return a.describe();', '2m', '', metres);
+		check('scripted abstract method on a fresh value', 'return new Metres(2).describe();', '2m', '', metres);
+		check('scripted abstract operator runs its body', 'var a:Metres = new Metres(2); var b:Metres = new Metres(3); return (a + b).describe();', '105m',
+			'', metres);
+		check('scripted abstract operator, inferred operands', 'var a = new Metres(2); var b = new Metres(3); return (a + b).describe();', '105m', '', metres);
+		check('scripted abstract operator with a plain operand', 'var a:Metres = new Metres(2); return (a * 3).describe();', '6m', '', metres);
+		check('scripted abstract compound assignment', 'var a:Metres = new Metres(2); a += new Metres(3); return a.describe();', '105m', '', metres);
+		check('scripted abstract opens to its declared target', 'var a:Metres = new Metres(2); var f:Float = a; return Std.string(f + 1);', '3', '', metres);
+		check('scripted abstract cast to its declared target', 'var a:Metres = new Metres(2); return Std.string((a : Float));', '2', '', metres);
+		check('scripted abstract in an array', 'var a:Array<Metres> = [new Metres(2)]; return a[0].describe();', '2m', '', metres);
+		check('scripted abstract returned from a method', 'return grow(new Metres(1)).describe();', '102m', '
+			static function grow(m:Metres):Metres {
+				return m + new Metres(1);
+			}
+		', metres);
 
 		check('interval as a value', 'var it = 0...3; var t = 0; while (it.hasNext()) t += it.next(); return t;', '3');
 		check('interval bound to a local then looped', 'var it = 1...4; var t = 0; for (v in it) t += v; return t;', '6');

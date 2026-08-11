@@ -106,6 +106,53 @@ class Entry {
 }
 ';
 
+	/** A module declaring an enum and an abstract, for the consumers below. */
+	static var SHAPES:String = 'package w;
+enum Colour { Red; Green; Shade(n:Int); }
+abstract Metres(Float) from Float to Float {
+	public function new(v:Float) this = v;
+	@:op(A + B) public function plus(o:Metres):Metres return new Metres(this + (o : Float));
+	public function describe():String return this + "m";
+}
+';
+
+	static var SHAPES_ENTRY:String = 'package w;
+import w.Colour;
+import w.Metres;
+class Judge {
+	public function new() {}
+	public function judge(c:Colour):String {
+		return switch (c) { case Red: "r"; case Green: "g"; case Shade(n): "shade" + n; };
+	}
+	public function qualified(c:Colour):String {
+		return switch (c) { case Colour.Red: "r"; case Colour.Green: "g"; default: "other"; };
+	}
+	public function make():Colour {
+		return Shade(4);
+	}
+	public function add(a:Metres, b:Metres):String {
+		return (a + b).describe();
+	}
+}
+class ShapeEntry {
+	public static var made:Dynamic = null;
+	public static function go():Dynamic {
+		var judge:Judge = new Judge();
+		made = judge;
+
+		var parts:Array<String> = [];
+		parts.push(judge.judge(Shade(3)));
+		parts.push(judge.judge(Red));
+		parts.push(judge.judge(judge.make()));
+		parts.push(judge.qualified(Green));
+		parts.push(Std.string(judge.make()));
+		parts.push(Std.string(Type.enumConstructor(judge.make())));
+		parts.push(judge.add(new Metres(2), new Metres(3)));
+		return parts.join("/");
+	}
+}
+';
+
 	public static function run():Void {
 		cpp.cppia.Host.enableJit(true);
 
@@ -115,6 +162,10 @@ class Entry {
 		check('tables compiled, the rest interpreted', ['w.Tables'], false);
 		check('worker compiled without the class it reads', ['w.Worker'], false);
 
+		shapes('shapes: nothing compiled', [], false);
+		shapes('shapes: everything compiled', ['w.Colour', 'w.ShapeEntry'], true);
+		shapes('shapes: entry compiled, types interpreted falls back', ['w.ShapeEntry'], false);
+		shapes('shapes: types compiled, entry interpreted', ['w.Colour'], false);
 	}
 
 	/**
@@ -145,6 +196,36 @@ class Entry {
 		TestCase.ok(label + '   ' + got + (substituted ? '   (ran compiled)' : '   (ran interpreted)'), true);
 	}
 
+	/**
+	 * The enum-and-abstract world, run interpreted and compiled and compared.
+	 *
+	 * @param label How to name the case.
+	 * @param compile Paths the host is asked to compile.
+	 * @param expectSubstituted Whether the compiled classes should have been the ones that ran.
+	 */
+	static function shapes(label:String, compile:Array<String>, expectSubstituted:Bool = false):Void {
+		var sources:Array<{name:String, pack:Array<String>, code:String}> = [
+			{name: 'Colour', pack: ['w'], code: SHAPES},
+			{name: 'ShapeEntry', pack: ['w'], code: SHAPES_ENTRY}
+		];
+
+		var want:String = buildWorld(sources, 'w.ShapeEntry', []);
+		substituted = false;
+		var got:String = buildWorld(sources, 'w.ShapeEntry', compile);
+
+		if (want != got) {
+			TestCase.bad(label, 'interpreted ' + want + ', compiled ' + got);
+			return;
+		}
+
+		if (expectSubstituted != substituted) {
+			TestCase.bad(label, 'expected substitution=' + expectSubstituted + ', got ' + substituted);
+			return;
+		}
+
+		TestCase.ok(label + '   ' + got + (substituted ? '   (ran compiled)' : '   (ran interpreted)'), true);
+	}
+
 	/** Whether the last run actually built a compiled class rather than a scripted one. */
 	static var substituted:Bool = false;
 
@@ -155,13 +236,24 @@ class Entry {
 	 * @return The result, or the failure that stopped it.
 	 */
 	static function build(compile:Array<String>):String {
+		return buildWorld([
+			{name: 'Tables', pack: ['w'], code: TABLES},
+			{name: 'Worker', pack: ['w'], code: WORKER},
+			{name: 'Entry', pack: ['w'], code: ENTRY}
+		], 'w.Entry', compile);
+	}
+
+	/**
+	 * Builds a world from sources, compiles the named classes into it, and runs its entry's `go`.
+	 *
+	 * @param sources The modules the world holds.
+	 * @param entryPath The class whose static `go` is the entry, and whose `made` reports what ran.
+	 * @param compile Scripted paths to compile.
+	 * @return The result, or the failure that stopped it.
+	 */
+	static function buildWorld(sources:Array<{name:String, pack:Array<String>, code:String}>, entryPath:String, compile:Array<String>):String {
 		try {
 			var env:Environment = new Environment();
-			var sources:Array<{name:String, pack:Array<String>, code:String}> = [
-				{name: 'Tables', pack: ['w'], code: TABLES},
-				{name: 'Worker', pack: ['w'], code: WORKER},
-				{name: 'Entry', pack: ['w'], code: ENTRY}
-			];
 
 			var modules:Array<Module> = [];
 			for (source in sources) {
@@ -182,7 +274,7 @@ class Entry {
 			if (compile.length > 0)
 				compileInto(env, sources, compile);
 
-			var cls:ScriptedClass = cast env.resolve('w.Entry');
+			var cls:ScriptedClass = cast env.resolve(entryPath);
 			var result:String = Std.string(Reflect.callMethod(null, cls.reflectGetField('go'), []));
 
 			var made:Dynamic = cls.reflectGetField('made');
@@ -209,10 +301,13 @@ class Entry {
 			var path:String = source.pack.join('.') + '.' + source.name;
 			var decls = new hxscript.syntax.Parser().parseModule(source.code, source.name, 0, source.pack);
 
-			if (wanted.indexOf(path) >= 0)
+			if (wanted.indexOf(path) >= 0) {
 				inputs.push({name: source.name, decls: decls});
-			else
-				outside.push(path);
+				continue;
+			}
+
+			for (declared in Cppia.declaredPaths(decls))
+				outside.push(declared);
 		}
 
 		var result:Result = Cppia.compile(inputs, null, outside, ['bonus=CppiaWorldTest::bonus']);
@@ -223,7 +318,12 @@ class Entry {
 		loaded.boot();
 
 		#if hxscript_cppia
-		for (path in wanted) {
+		var declared:Array<hxscript.syntax.Expr.ModuleDecl> = [];
+		for (input in inputs)
+			for (d in input.decls)
+				declared.push(d);
+
+		for (path in Cppia.declaredPaths(declared)) {
 			var cls:Class<Dynamic> = loaded.resolveClass(path);
 			if (cls != null)
 				env.compiled.set(path, cls);
