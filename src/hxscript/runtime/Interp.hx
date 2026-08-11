@@ -61,7 +61,31 @@ class Interp {
 	public var variables:Map<String, Dynamic>;
 
 	/** The owning object (script, module, or instance) bound as context. */
-	public var parent:Dynamic = null;
+	public var parent(default, set):Dynamic;
+
+	function set_parent(val:Dynamic):Dynamic {
+		parent = val;
+		parentFields = new Map();
+
+		if(val != null) {
+			var cls:Class<Dynamic> = Type.getClass(val);
+
+			if(cls != null) { //A normal class
+				for(field in Type.getInstanceFields(cls)) {
+					parentFields.set(field, true);
+				}
+			} else { //An anonymous structure
+				for(field in Reflect.fields(val)) {
+					parentFields.set(field, true);
+				}
+			}
+		}
+
+		return this.parent;
+	}
+
+	/** All of the instance fields the parent context has. If no parent is set, then this will be blank. */
+	var parentFields:Map<String, Dynamic> = new Map();
 
 	/** The world this interpreter resolves types against. */
 	public var environment:Environment;
@@ -593,6 +617,15 @@ class Interp {
 
 			variables.set(name, v);
 		} else {
+			if (parent != null && parentFields.exists(name)) {
+				if(getMeta(':bypassAccessor') != null)
+					Reflect.setField(parent, name, v);
+				else
+					Reflect.setProperty(parent, name, v);
+
+				return v;
+			}
+
 			if (stack.length <= 1 && defineGlobals) {
 				variables.set(name, v);
 				return v;
@@ -1318,16 +1351,29 @@ class Interp {
 	 */
 	public function resolve(id:String):Dynamic {
 		var v:Dynamic = imports.get(id);
-		if (v != null)
+		if (v != null) {
 			return resolveMirror(v);
-		if (imports.exists(id))
+		}
+
+		if (imports.exists(id)) {
 			error(ECustom('Module $id does not define type $id'));
+		}
 
 		v = variables.get(id);
-		if (v != null)
+		if (v != null) {
 			return resolveMirror(v);
-		if (!variables.exists(id))
+		}
+
+		if (parent != null && parentFields.exists(id)) {
+			if(getMeta(':bypassAccessor') != null)
+				return Reflect.field(parent, id);
+			else
+				return Reflect.getProperty(parent, id);
+		}
+
+		if (!variables.exists(id)) {
 			error(EUnknownVariable(id));
+		}
 
 		return null;
 	}
@@ -1339,7 +1385,7 @@ class Interp {
 	 * @return True if `resolve` would succeed.
 	 */
 	public function isResolvable(id:String):Bool {
-		return (imports.exists(id) || variables.exists(id));
+		return ((imports.exists(id) || variables.exists(id)) || (parent != null && parentFields.exists(id)));
 	}
 
 	/**
