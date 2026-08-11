@@ -4,6 +4,7 @@ import hxscript.error.Sink;
 import hxscript.setup.Boot;
 import hxscript.types.ScriptedClass;
 import studio.EntryKind;
+import studio.EntryKindTools;
 import studio.ProjectInfo;
 import studio.Projects;
 
@@ -109,7 +110,7 @@ class Check {
 			var kind:EntryKind = shapeOf(cls);
 
 			if (kind != null)
-				return '${cls.name}  ($kind)';
+				return '${cls.name}  (' + EntryKindTools.describe(kind) + ')';
 		}
 
 		return null;

@@ -151,6 +151,14 @@ class Launcher {
 					return false;
 				}
 
+				if (!keepsRunning()) {
+					Sink.note(PRun, '${entry.name}.main returned', 'Nothing was left running, so the shell is back.\n'
+						+ 'A project that wants to keep going puts something on the screen: switch to a\n'
+						+ 'flixel state, add to the layer, or extend host.Project for a frame loop.');
+					stop();
+					return false;
+				}
+
 			case KState:
 				instance = Sandbox.make(entry);
 
@@ -191,6 +199,23 @@ class Launcher {
 		}
 
 		return running;
+	}
+
+	/**
+	 * Whether a `main()` that has returned left anything behind that is still going.
+	 *
+	 * A project with no framework under it is the one shape that can finish. It runs, returns, and
+	 * unless it switched flixel somewhere or put something on the layer there is nothing on screen
+	 * and nothing to update, so leaving the shell hidden would show an empty window until somebody
+	 * guessed at the back key.
+	 *
+	 * @return Whether something it started is still on screen.
+	 */
+	static function keepsRunning():Bool {
+		if (layer != null && layer.numChildren > 0)
+			return true;
+
+		return !Std.isOfType(FlxG.state, studio.Shell);
 	}
 
 	/**
