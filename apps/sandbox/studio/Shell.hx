@@ -7,6 +7,7 @@ import host.Sandbox;
 import hxscript.error.Diagnostic;
 import hxscript.error.Sink;
 import openfl.display.Sprite;
+import openfl.events.UncaughtErrorEvent;
 import smidr.UIComponent;
 import smidr.UIRoot;
 import smidr.UITheme;
@@ -23,6 +24,7 @@ import smidr.widgets.UIScrollPane;
 import smidr.widgets.UISegmentedControl;
 import smidr.widgets.UIStatusBar;
 import smidr.widgets.UITextArea;
+import smidr.widgets.UITextInput;
 import smidr.widgets.UIToolbar;
 
 /**
@@ -71,6 +73,15 @@ class Shell extends FlxState {
 
 	/** How often to look for changed files, in seconds. */
 	static inline var WATCH:Float = 0.5;
+
+	/** The new-project panel's width. */
+	static inline var NEW_WIDTH:Float = 360;
+
+	/** How many class names the detail pane lists before it gives a count instead. */
+	static inline var DECLARED_SHOWN:Int = 8;
+
+	/** Room left for the filter box's own label. */
+	static inline var FILTER_LABEL:Float = 44;
 
 	/**
 	 * Points added to every font size in the shell.
@@ -128,6 +139,10 @@ class Shell extends FlxState {
 	static var newButton:UIButton;
 	static var detail:UIPanel;
 	static var logPanel:UIPanel;
+	static var filter:UITextInput;
+	static var scriptsButton:UIButton;
+	static var sandboxButton:UIButton;
+	static var consoleButton:UIButton;
 
 	/** Everything the shell shows, hidden as one while a project runs. */
 	static var panes:UIComponent;
@@ -135,10 +150,36 @@ class Shell extends FlxState {
 	/** `sandbox.log`, opened on the first line written to it. */
 	static var file:sys.io.FileOutput = null;
 
+	/** Every project on disk, whatever the filter box says. */
+	static var found:Array<ProjectInfo> = [];
+
+	/** The ones the list is showing, which is `found` unless the filter box has something in it. */
 	static var projects:Array<ProjectInfo> = [];
+
 	static var selected:Int = -1;
 	static var lines:Array<String> = [];
 	static var sinceCheck:Float = 0;
+
+	/**
+	 * What the launcher resolved for the loaded project.
+	 *
+	 * Held rather than asked for again, because resolving reports when a manifest names an entry class
+	 * that does not exist, and the detail pane is redrawn on every selection. Describing something
+	 * should not write to the log, least of all the same line each time somebody clicks the same row.
+	 */
+	static var resolved:{cls:hxscript.types.ScriptedClass, kind:EntryKind} = null;
+
+	/** The most recent diagnostic that carried a file and a line, for the Open error button. */
+	static var lastError:{origin:String, line:Int} = null;
+
+	/** Whether the log pane is behind `lines`, so a frame rewrites it once rather than a line at a time. */
+	static var logDirty:Bool = false;
+
+	/** Whether the crash handler is already handling one, so a failure inside it cannot recurse. */
+	static var failing:Bool = false;
+
+	/** Reused by `pressed`, which asks four times a frame and would otherwise allocate each time. */
+	static var oneKey:Array<flixel.input.keyboard.FlxKey> = [cast 0];
 
 	override public function create():Void {
 		super.create();
@@ -175,8 +216,8 @@ class Shell extends FlxState {
 		FlxG.signals.gameResized.add(function(_, _):Void layout());
 
 		Metrics.hook();
-		hxscript.debug.Metrics.on = true;
 		capture();
+		survive();
 
 		note('hxScript sandbox');
 		note('${Settings.name(Settings.run)} runs the selected project, ${Settings.name(Settings.back)} comes back here. Settings changes both.');
@@ -252,9 +293,18 @@ class Shell extends FlxState {
 		bar = new UIToolbar(Viewport.TOP);
 		bar.addButton('Stop', 60, Launcher.stop);
 		bar.addSpacer();
-		bar.addButton('Scripts', 74, Panels.toggleScript);
-		bar.addButton('Sandbox', 78, Panels.toggleSandbox);
-		bar.addButton('Console', 78, Panels.toggleConsole);
+		scriptsButton = bar.addButton('Scripts', 92, function():Void {
+			Panels.toggleScript();
+			refreshStatus();
+		});
+		sandboxButton = bar.addButton('Sandbox', 96, function():Void {
+			Panels.toggleSandbox();
+			refreshStatus();
+		});
+		consoleButton = bar.addButton('Console', 96, function():Void {
+			Panels.toggleConsole();
+			refreshStatus();
+		});
 		ui.content.addChild(bar);
 
 		sidebar = new UIPanel(SIDEBAR, 10);
@@ -263,8 +313,13 @@ class Shell extends FlxState {
 		listTitle = new UILabel('projects', 12, SECONDARY);
 		panes.addChild(listTitle);
 
+		filter = new UITextInput('filter', SIDEBAR - 20, '', function(_:String):Void applyFilter());
+		filter.controlWidth = SIDEBAR - 20 - FILTER_LABEL;
+		panes.addChild(filter);
+
 		list = new UIList(SIDEBAR - 20, 10);
 		list.onSelect = pick;
+		list.onActivate = function(_:Int):Void run();
 		panes.addChild(list);
 
 		newButton = new UIButton('New project', SIDEBAR - 20, 28, createOne);
@@ -280,10 +335,12 @@ class Shell extends FlxState {
 		panes.addChild(summary);
 
 		toolbar = new UIToolbar(BAR);
-		toolbar.addButton('Run', 92, run);
-		toolbar.addButton('Reload', 80, reload);
-		toolbar.addButton('Rescan', 80, rescan);
+		toolbar.addButton('Run', 84, run);
+		toolbar.addButton('Reload', 76, reload);
+		toolbar.addButton('Rescan', 76, rescan);
+		toolbar.addButton('Folder', 76, reveal);
 		toolbar.addSpacer();
+		toolbar.addButton('Open error', 96, openError);
 		toolbar.addButton('Settings', 84, openSettings);
 		toolbar.addButton('Clear log', 84, clearLog);
 		panes.addChild(toolbar);
@@ -293,6 +350,7 @@ class Shell extends FlxState {
 
 		log = new UITextArea(10, LOG - 12, '');
 		log.readOnly = true;
+		log.follow = true;
 		log.fontSize = 11;
 		log.wordWrap = false;
 		panes.addChild(log);
@@ -343,9 +401,13 @@ class Shell extends FlxState {
 		listTitle.x = PAD + 10;
 		listTitle.y = PAD + 8;
 
-		list.resize(SIDEBAR - 20, top - PAD - 80);
+		filter.resize(SIDEBAR - 20, 26);
+		filter.x = PAD + 10;
+		filter.y = PAD + 28;
+
+		list.resize(SIDEBAR - 20, top - PAD - 112);
 		list.x = PAD + 10;
-		list.y = PAD + 30;
+		list.y = PAD + 62;
 
 		newButton.x = PAD + 10;
 		newButton.y = top - PAD - 38;
@@ -380,6 +442,9 @@ class Shell extends FlxState {
 			surface.scaleX = Viewport.scale;
 			surface.scaleY = Viewport.scale;
 		}
+
+		Api.screenWidth = FlxG.width;
+		Api.screenHeight = FlxG.height;
 	}
 
 	/**
@@ -400,7 +465,28 @@ class Shell extends FlxState {
 
 	/** Reads the projects folder again and refills the list. */
 	static function rescan():Void {
-		projects = Projects.all();
+		found = Projects.all();
+
+		if (found.length == 0)
+			note('no projects found in ' + Projects.root);
+
+		applyFilter();
+	}
+
+	/**
+	 * Refills the list from `found`, keeping only what the filter box matches.
+	 *
+	 * The selection is kept by name rather than by position, so typing into the box does not load a
+	 * different project out from under whoever is typing.
+	 */
+	static function applyFilter():Void {
+		var wanted:String = (selected >= 0 && selected < projects.length) ? projects[selected].name : null;
+		var needle:String = filter == null ? '' : StringTools.trim(filter.text).toLowerCase();
+
+		projects = needle.length == 0 ? found.copy() : [
+			for (p in found)
+				if (p.name.toLowerCase().indexOf(needle) >= 0 || p.title.toLowerCase().indexOf(needle) >= 0) p
+		];
 
 		list.setProvider(projects.length, function(i:Int):String {
 			var p:ProjectInfo = projects[i];
@@ -408,14 +494,17 @@ class Shell extends FlxState {
 		});
 
 		if (projects.length == 0) {
-			note('no projects found in ' + Projects.root);
 			selected = -1;
 			describe();
 			refreshStatus();
 			return;
 		}
 
-		var want:Int = (selected >= 0 && selected < projects.length) ? selected : 0;
+		var want:Int = 0;
+		if (wanted != null)
+			for (i in 0...projects.length)
+				if (projects[i].name == wanted)
+					want = i;
 
 		selected = -1;
 		list.select(want, true);
@@ -444,6 +533,7 @@ class Shell extends FlxState {
 			return;
 
 		selected = index;
+		resolved = null;
 
 		var project:ProjectInfo = projects[index];
 
@@ -452,6 +542,7 @@ class Shell extends FlxState {
 		} else {
 			note('loading ${project.name} ...');
 			Sandbox.load(project);
+			resolved = Launcher.resolve(project);
 		}
 
 		describe();
@@ -478,9 +569,8 @@ class Shell extends FlxState {
 		if (project.problem != null) {
 			facts.push('problem   ${project.problem}');
 		} else if (Sandbox.current == project) {
-			var found = Launcher.resolve(project);
-
-			facts.push(found == null ? 'entry     nothing runnable found' : 'entry     ${found.cls.name}  (${describeKind(found.kind)})');
+			facts.push(resolved == null ? 'entry     nothing runnable found' : 'entry     ${resolved.cls.name}  (${EntryKindTools.describe(resolved.kind)})');
+			facts.push('declares  ' + declared());
 		}
 
 		if (project.description.length > 0) {
@@ -492,16 +582,26 @@ class Shell extends FlxState {
 	}
 
 	/**
-	 * @param kind How the launcher would run it.
-	 * @return A phrase for the detail pane.
+	 * What the loaded project's scripts came out as.
+	 *
+	 * The question a scripting sandbox exists to answer, and one the pane could not answer before:
+	 * the file count says what went in, and this says what came out of it, which is the difference
+	 * between a project that loaded and a project that loaded and produced nothing.
+	 *
+	 * @return The class names, or a count when there are more than fit on a line.
 	 */
-	static function describeKind(kind:EntryKind):String {
-		return switch (kind) {
-			case KState: 'a flixel state';
-			case KSprite: 'an openfl sprite';
-			case KProject: 'a host.Project';
-			case KMain: 'a static main()';
-		}
+	static function declared():String {
+		var classes:Array<hxscript.types.ScriptedClass> = Sandbox.classes();
+
+		if (classes.length == 0)
+			return 'no classes';
+
+		var names:Array<String> = [for (cls in classes) cls.name];
+
+		if (names.length > DECLARED_SHOWN)
+			return '${names.length} classes: ' + names.slice(0, DECLARED_SHOWN).join(', ') + ', ...';
+
+		return names.join(', ');
 	}
 
 	/** Runs the selected project. */
@@ -516,8 +616,10 @@ class Shell extends FlxState {
 			return;
 		}
 
-		if (Sandbox.current != project)
+		if (Sandbox.current != project) {
 			Sandbox.load(project);
+			resolved = Launcher.resolve(project);
+		}
 
 		Sandbox.compile();
 		note(Sandbox.compiled);
@@ -548,10 +650,18 @@ class Shell extends FlxState {
 
 		Launcher.stop();
 
-		projects[selected] = Projects.read(name, path);
+		var fresh:ProjectInfo = Projects.read(name, path);
+		projects[selected] = fresh;
+		resolved = null;
 
-		if (projects[selected].problem == null)
-			Sandbox.load(projects[selected], wasRunning);
+		for (i in 0...found.length)
+			if (found[i].name == name)
+				found[i] = fresh;
+
+		if (fresh.problem == null) {
+			Sandbox.load(fresh, wasRunning);
+			resolved = Launcher.resolve(fresh);
+		}
 
 		note('reloaded $name');
 		describe();
@@ -581,10 +691,12 @@ class Shell extends FlxState {
 			refreshStatus();
 	}
 
-	/** Empties the log pane. */
+	/** Empties both places output goes: the pane at the bottom and the console window. */
 	static function clearLog():Void {
 		lines = [];
+		logDirty = false;
 		log.text = '';
+		Panels.clear();
 	}
 
 	/**
@@ -644,13 +756,7 @@ class Shell extends FlxState {
 		rate.onSelect = function(at:Int):Void {
 			Settings.fps = rates[at];
 			Settings.save();
-
-			if (Settings.fps <= 0) {
-				FlxG.updateFramerate = 60;
-				FlxG.drawFramerate = 60;
-			} else {
-				Settings.apply();
-			}
+			Settings.apply();
 		};
 		add(rate, 34);
 
@@ -689,10 +795,11 @@ class Shell extends FlxState {
 	}
 
 	/**
-	 * Creates a project from the first template, under a name that is free.
+	 * Asks what to create, then creates it.
 	 *
-	 * A dialog with a name field and a template picker is the obvious next thing here. A button that
-	 * always works is the thing worth having first.
+	 * The button used to take the first template and a generated name, which meant the other
+	 * templates this build ships could not be reached from the application at all. The name is
+	 * suggested rather than demanded, so the button is still one click away from working.
 	 */
 	static function createOne():Void {
 		var kinds:Array<String> = Projects.templates();
@@ -702,26 +809,137 @@ class Shell extends FlxState {
 			return;
 		}
 
-		var kind:String = kinds[0];
-		var made:ProjectInfo = null;
+		var picked:Int = 0;
+		var rows:Array<UIComponent> = [];
+		var y:Float = 16;
+
+		var add = function(child:UIComponent, height:Float):Void {
+			child.x = 16;
+			child.y = y;
+			rows.push(child);
+			y += height;
+		};
+
+		var name:UITextInput = new UITextInput('Name', NEW_WIDTH - 48, free(kinds[0]));
+		add(name, 40);
+
+		var template:UISegmentedControl = new UISegmentedControl('Template', NEW_WIDTH - 48, kinds);
+		template.select(0);
+		template.onSelect = function(at:Int):Void {
+			picked = at;
+
+			if (name.text == free(kinds[picked == 0 ? kinds.length - 1 : picked - 1]))
+				name.text = free(kinds[picked]);
+		};
+		add(template, 40);
+
+		var modal:UIModal = new UIModal('New project', NEW_WIDTH, UITheme.px(40) + y + 56);
+
+		add(new UIButton('Create', NEW_WIDTH - 48, 30, function():Void {
+			var made:ProjectInfo = Projects.create(StringTools.trim(name.text), kinds[picked]);
+
+			if (made == null) {
+				note('could not create "${name.text}": the name is empty, taken, or the folder is not writable');
+				return;
+			}
+
+			note('created ${made.name} from the ${kinds[picked]} template');
+			modal.close();
+
+			filter.text = '';
+			rescan();
+		}), 30);
+
+		for (row in rows)
+			modal.body.addChild(row);
+
+		modal.open();
+	}
+
+	/**
+	 * A project name that is not taken yet.
+	 *
+	 * @param kind The template it would be made from.
+	 * @return `my-<kind>`, numbered if it has to be.
+	 */
+	static function free(kind:String):String {
+		var candidate:String = 'my-$kind';
 		var n:Int = 1;
 
-		while (made == null && n < 100) {
-			made = Projects.create(n == 1 ? 'my-$kind' : 'my-$kind-$n', kind);
+		while (n < 100) {
+			var taken:Bool = false;
+
+			for (p in found)
+				if (p.name == candidate)
+					taken = true;
+
+			if (!taken)
+				return candidate;
+
 			n++;
+			candidate = 'my-$kind-$n';
 		}
 
-		if (made == null) {
-			note('could not create a project folder in ' + Projects.root);
+		return candidate;
+	}
+
+	/** Opens the selected project's folder in the system's file manager. */
+	static function reveal():Void {
+		if (selected < 0 || selected >= projects.length)
+			return;
+
+		var path:String = projects[selected].path;
+
+		if (!open(path))
+			note('could not open $path');
+	}
+
+	/** Opens the file the most recent positioned diagnostic came from, at its line. */
+	static function openError():Void {
+		if (lastError == null) {
+			note('no error with a file position has been reported yet');
 			return;
 		}
 
-		note('created ${made.name} from the $kind template');
-		rescan();
+		if (!open(lastError.origin))
+			note('could not open ' + lastError.origin);
 	}
 
-	/** Refreshes the bottom bar. */
+	/**
+	 * Hands a path to whatever the system opens it with.
+	 *
+	 * Deliberately the system handler rather than a configured editor command: an editor is the one
+	 * thing on a developer's machine that is already associated with `.hx`, and asking would be
+	 * asking somebody to configure what their operating system already knows.
+	 *
+	 * @param path The file or folder to open.
+	 * @return Whether the command was issued.
+	 */
+	static function open(path:String):Bool {
+		try {
+			#if windows
+			Sys.command('cmd', ['/c', 'start', '', path]);
+			#elseif mac
+			Sys.command('open', [path]);
+			#else
+			Sys.command('xdg-open', [path]);
+			#end
+			return true;
+		} catch (e:haxe.Exception) {
+			return false;
+		}
+	}
+
+	/** Refreshes the bottom bar, and the bar at the top that says which windows are up. */
 	static function refreshStatus():Void {
+		var up = Panels.shown();
+
+		if (scriptsButton != null) {
+			scriptsButton.label = (up.script ? '- ' : '+ ') + 'Scripts';
+			sandboxButton.label = (up.sandbox ? '- ' : '+ ') + 'Sandbox';
+			consoleButton.label = (up.console ? '- ' : '+ ') + 'Console';
+		}
+
 		status.setCells([
 			{text: Launcher.running ? 'running' : 'idle'},
 			{text: '${projects.length} project(s)'},
@@ -747,12 +965,27 @@ class Shell extends FlxState {
 		while (lines.length > LOG_LINES)
 			lines.shift();
 
-		if (log != null)
-			log.text = lines.join('\n');
+		logDirty = true;
 
 		Panels.print(text);
 
 		write(text);
+	}
+
+	/**
+	 * Rewrites the log pane, at most once a frame and only while it is on screen.
+	 *
+	 * Rewriting per line was the cost worth removing. `UITextArea.text` rebuilds a style word per
+	 * character, so setting it costs the length of the whole buffer, and a project load reports
+	 * hundreds of diagnostics inside one frame. Nobody can read intermediate states of a frame, so
+	 * producing them was work with no reader.
+	 */
+	static function flushLog():Void {
+		if (!logDirty || log == null || panes == null || !panes.visible)
+			return;
+
+		logDirty = false;
+		log.text = lines.join('\n');
 	}
 
 	/**
@@ -781,7 +1014,16 @@ class Shell extends FlxState {
 	 * @param d The diagnostic.
 	 */
 	static function onDiagnostic(d:Diagnostic):Void {
-		note(d.toString());
+		if (d.fatal && d.origin != null && d.line > 0)
+			lastError = {origin: d.origin, line: d.line};
+
+		var mark:String = d.fatal ? '!' : '-';
+		var out:Array<String> = [];
+
+		for (line in d.toString().split('\n'))
+			out.push((out.length == 0 ? '$mark ' : '  ') + line);
+
+		note(out.join('\n'));
 	}
 
 	/**
@@ -816,6 +1058,63 @@ class Shell extends FlxState {
 	}
 
 	/**
+	 * Keeps a throw out of a project from ending the process.
+	 *
+	 * `ScriptedClass.safe` catches an interpreted method that throws, but it is a property of the
+	 * bridge, and a class the runtime compiler substituted is constructed as its native form
+	 * (`Interp.instantiate`), which has no such wrapper. So in the default mode a script bug leaves
+	 * through flixel, out through openfl and ends the window with nothing printed.
+	 *
+	 * openfl wraps its own event loop and rethrows unless the event's default is prevented, which is
+	 * the only place a throw out of `FlxState.update` can be reached: no `FlxG.signals` hook brackets
+	 * the state's update, so nothing at flixel's level can catch it.
+	 *
+	 * The project is stopped rather than resumed. Whatever threw did so mid-frame, so its own
+	 * invariants are already in doubt, and a project that fails once a frame for ever is a worse way
+	 * to find out than one report and the shell back.
+	 */
+	static function survive():Void {
+		try {
+			openfl.Lib.current.loaderInfo.uncaughtErrorEvents.addEventListener(UncaughtErrorEvent.UNCAUGHT_ERROR, onUncaught);
+		} catch (e:haxe.Exception) {
+			note('could not install the crash handler: ' + e.message);
+		}
+	}
+
+	/**
+	 * Reports something that escaped a project, and puts the shell back.
+	 *
+	 * @param event openfl's event, carrying whatever was thrown.
+	 */
+	static function onUncaught(event:UncaughtErrorEvent):Void {
+		event.preventDefault();
+
+		if (failing)
+			return;
+
+		failing = true;
+
+		var error:Dynamic = event.error;
+		var where:String = Launcher.entry == null ? 'a project' : Launcher.entry.name;
+
+		note('! $where threw and did not catch it: ' + Std.string(error));
+
+		var stack:String = haxe.CallStack.toString(haxe.CallStack.exceptionStack());
+		if (stack != null && StringTools.trim(stack).length > 0)
+			note(stack);
+
+		note('the project was stopped. Run it interpreted from Settings to have hxScript report the script line instead.');
+
+		try {
+			Launcher.stop();
+		} catch (e:haxe.Exception) {
+			note('stopping it also failed: ' + e.message);
+		}
+
+		failing = false;
+	}
+
+	/**
 	 * Runs every frame whatever state flixel is in.
 	 *
 	 * A scripted `FlxState` replaces this one while it runs, so `update` here stops being called. Anything
@@ -842,6 +1141,7 @@ class Shell extends FlxState {
 		Overlay.tick(FlxG.elapsed);
 		Panels.tick(FlxG.elapsed);
 
+		flushLog();
 		watch(FlxG.elapsed);
 	}
 
@@ -856,7 +1156,11 @@ class Shell extends FlxState {
 	 * @return Whether it was pressed.
 	 */
 	static function pressed(code:Int):Bool {
-		return code > 0 && FlxG.keys.anyJustPressed([cast code]);
+		if (code <= 0)
+			return false;
+
+		oneKey[0] = cast code;
+		return FlxG.keys.anyJustPressed(oneKey);
 	}
 
 	/**
@@ -868,7 +1172,7 @@ class Shell extends FlxState {
 	 * @param elapsed Seconds since the previous frame.
 	 */
 	static function watch(elapsed:Float):Void {
-		if (Sandbox.current == null)
+		if (Sandbox.current == null || Launcher.running)
 			return;
 
 		sinceCheck += elapsed;

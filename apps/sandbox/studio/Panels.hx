@@ -42,6 +42,9 @@ class Panels {
 	static var since:Float = 0;
 	static var root:UIRoot = null;
 
+	/** Whether the console pane is behind `lines`, so a frame rewrites it once rather than a line at a time. */
+	static var dirty:Bool = false;
+
 	/** Seconds the script counters have been accumulating for, so a count becomes a rate. */
 	static var counted:Float = 0;
 
@@ -64,6 +67,7 @@ class Panels {
 		consoleText.x = 10;
 		consoleText.y = 8;
 		consoleText.readOnly = true;
+		consoleText.follow = true;
 		consoleText.fontSize = 11;
 		consoleText.wordWrap = false;
 		console.content.addChild(consoleText);
@@ -149,13 +153,13 @@ class Panels {
 		while (lines.length > LINES)
 			lines.shift();
 
-		if (consoleText != null && console.visible)
-			consoleText.text = lines.join('\n');
+		dirty = true;
 	}
 
 	/** Empties it. */
 	public static function clear():Void {
 		lines = [];
+		dirty = false;
 
 		if (consoleText != null)
 			consoleText.text = '';
@@ -172,6 +176,11 @@ class Panels {
 
 		if (root == null || !any())
 			return;
+
+		if (dirty && console.visible) {
+			dirty = false;
+			consoleText.text = lines.join('\n');
+		}
 
 		since += elapsed;
 
@@ -263,6 +272,27 @@ class Panels {
 
 		if (window.visible && window.parent != null)
 			window.parent.setChildIndex(window, window.parent.numChildren - 1);
+
+		counting(script != null && script.visible);
+	}
+
+	/**
+	 * Turns the interpreter's own counters on and off with the window that reads them.
+	 *
+	 * They sit on `Interp`'s field read, field write and call paths, which are its three hottest
+	 * lines, so leaving them on from startup taxed every script in every project for a readout that
+	 * is hidden by default. Zeroed on the way on so the first reading covers the window being open
+	 * rather than however long the application had been running.
+	 *
+	 * @param on Whether the Script environment window is up.
+	 */
+	static function counting(on:Bool):Void {
+		if (hxscript.debug.Metrics.on == on)
+			return;
+
+		hxscript.debug.Metrics.on = on;
+		hxscript.debug.Metrics.reset();
+		counted = 0;
 	}
 
 	/**
