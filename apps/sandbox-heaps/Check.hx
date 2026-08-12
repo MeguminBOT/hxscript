@@ -17,12 +17,12 @@ import studio.Projects;
  * second and needs no window is worth having beside the one that needs a window and a person looking at it.
  *
  * ```
- * haxe console.hxml
- * haxe console.hxml --run Check --projects ../some/other/folder
- * haxe console.hxml -lib flixel -lib flixel-addons --macro flixel.system.macros.FlxDefines.run()
+ * haxe check.hxml
+ * haxe check.hxml --run Check --projects ../some/other/folder
+ * haxe check.hxml -lib heaps
  * ```
  *
- * Resolved by name rather than by type, because naming `flixel.FlxState` here would require flixel to be in
+ * Resolved by name rather than by type, because naming `h2d.Object` here would require heaps to be in
  * the build, and the whole point of this program is to run without it. Walking the super-class chain as
  * strings gives the same answer for every project and costs only that it cannot construct anything, which it
  * was never going to do anyway.
@@ -30,8 +30,8 @@ import studio.Projects;
 class Check {
 	/** The native bases a project can extend, and what each means, longest chain first. */
 	static var BASES:Array<{path:String, kind:EntryKind}> = [
-		{path: 'flixel.FlxState', kind: KState},
-		{path: 'openfl.display.Sprite', kind: KSprite},
+		{path: 'h2d.Scene', kind: KScene},
+		{path: 'h2d.Object', kind: KObject},
 		{path: 'host.Project', kind: KProject}
 	];
 
