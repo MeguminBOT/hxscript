@@ -148,7 +148,7 @@ class Backend {
 	 * @param t The annotation, or null when there was none.
 	 * @return Whether it names `Bool` or a nullable one.
 	 */
-	static function isBool(t:Null<CType>):Bool {
+	public static function isBool(t:Null<CType>):Bool {
 		if (t == null)
 			return false;
 

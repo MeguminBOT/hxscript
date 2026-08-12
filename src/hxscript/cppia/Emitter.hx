@@ -806,11 +806,11 @@ class Emitter {
 			case KVar(v):
 				w.token('VAR');
 				w.bool(isStatic);
-				w.token(accessCode(v.get, pos));
-				w.token(accessCode(v.set, pos));
+				w.token(accessCode(v.get, true, pos));
+				w.token(accessCode(v.set, false, pos));
 				w.bool(false);
 				w.str(f.name);
-				w.type(v.type == null ? '' : typeName(v.type));
+				w.type(v.type == null || Backend.isBool(v.type) ? '' : typeName(v.type));
 
 				if (v.expr == null || !isStatic) {
 					w.int(0);
@@ -1169,7 +1169,7 @@ class Emitter {
 					return;
 				}
 
-				var built:String = resolveType(cl, e.pos);
+				var built:String = (cl == 'Map' || cl == 'haxe.ds.Map') && !typePaths.exists(cl) ? 'hxscript.runtime.AnyMap' : resolveType(cl, e.pos);
 				var wantedNew:Int = padArgs(declaredClass(built), 'new', params.length);
 				w.pos(line);
 				w.token('NEW');
@@ -1271,6 +1271,8 @@ class Emitter {
 					// statics taking the boxed value, and a call it did not recognise was emitted as an
 					// instance call on the type the abstract wraps, which the loader resolves to nothing.
 					var id:Int = declareVar(n, t == null ? inferType(init) : typeName(t));
+					var stored:String = t != null ? typeName(t) : literalType(init);
+
 					if (init == null) {
 						w.token('VARDECL');
 						w.str(n);
@@ -1282,7 +1284,7 @@ class Emitter {
 						w.str(n);
 						w.int(id);
 						w.bool(false);
-						storableType(t == null ? '' : typeName(t));
+						storableType(stored);
 						w.type('');
 
 						var declared:Null<String> = elementArray(t == null ? null : typeName(t));
@@ -1395,7 +1397,7 @@ class Emitter {
 				w.token('s');
 				w.str(member);
 				expectedArray = elementArray(inferType(e1));
-				expr(e2);
+				boolean(e2, line);
 				return;
 			}
 
@@ -1405,7 +1407,7 @@ class Emitter {
 			expr(e1);
 			writingTo = false;
 			expectedArray = elementArray(inferType(e1));
-			expr(e2);
+			boolean(e2, line);
 			return;
 		}
 
@@ -2707,14 +2709,33 @@ class Emitter {
 	}
 
 	/**
+	 * Writes a value being assigned, marking it as a boolean when that is what it is.
+	 *
+	 * @param e The value.
+	 * @param line Where the assignment is.
+	 */
+	function boolean(e:Expr, line:Int):Void {
+		if (inferType(e) != 'Bool') {
+			expr(e);
+			return;
+		}
+
+		w.pos(line);
+		w.token('CASTBOOL');
+		expr(e);
+	}
+
+	/**
 	 * Maps a property accessor to the cppia access code for it.
 	 *
 	 * @param mode The accessor as written, or null for a plain field.
+	 * @param reading Whether this is the read side of the declaration.
 	 * @param pos Where the field is declared.
 	 * @return The one-character access code.
 	 */
-	function accessCode(mode:Null<String>, pos:Position):String {
+	function accessCode(mode:Null<String>, reading:Bool, pos:Position):String {
 		return switch (mode) {
+			case 'null' if (reading): throw new Unsupported('a field only its own class may read', pos);
 			case null | 'default' | 'null': 'N';
 			case 'get' | 'set' | 'dynamic': 'V';
 			case 'never': 'n';
@@ -2753,6 +2774,25 @@ class Emitter {
 	 *
 	 * @param path The declared type, or the empty string when there was none.
 	 */
+	/**
+	 * The type an unannotated local gets from a literal it is initialised with.
+	 *
+	 * @param init The initialiser.
+	 * @return `Int`, `Float`, `Bool`, or empty for anything else.
+	 */
+	function literalType(init:Null<Expr>):String {
+		if (init == null)
+			return '';
+
+		return switch (init.e) {
+			case EConst(CInt(_)): 'Int';
+			case EConst(CFloat(_)): 'Float';
+			case EIdent('true') | EIdent('false'): 'Bool';
+			case EParent(inner): literalType(inner);
+			case _: '';
+		}
+	}
+
 	function storableType(path:String):Void {
 		if (path == null || path.length == 0) {
 			w.unknownType();
