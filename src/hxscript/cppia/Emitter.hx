@@ -1098,6 +1098,20 @@ class Emitter {
 
 			case EArray(arr, index):
 				var known:Null<String> = inferType(arr);
+
+				if (isMapType(known)) {
+					w.pos(line);
+					w.token('CALL');
+					w.int(2);
+					w.pos(line);
+					w.token('FSTATIC');
+					w.type('hxscript.runtime.Indexing');
+					w.str('get');
+					expr(arr);
+					expr(index);
+					return;
+				}
+
 				w.pos(line);
 				w.token('ARRAYI');
 				w.type(known != null && known.substr(0, 5) == 'Array' ? known : 'Dynamic');
@@ -2611,30 +2625,17 @@ class Emitter {
 	 * @return A block expression evaluating to the map.
 	 */
 	function mapLiteral(items:Array<Expr>, pos:Position):Expr {
-		var allString:Bool = true;
-		var allInt:Bool = true;
-
 		for (item in items) {
-			switch (item.e) {
-				case EBinop('=>', key, _):
-					switch (key.e) {
-						case EConst(CString(_, _)): allInt = false;
-						case EConst(CInt(_)): allString = false;
-						case _:
-							allString = false;
-							allInt = false;
-					}
-				case _:
-					throw new Unsupported('mixed array and map literal', pos);
-			}
+			if (!item.e.match(EBinop('=>', _, _)))
+				throw new Unsupported('mixed array and map literal', pos);
 		}
 
-		var mapClass:String = allString ? 'haxe.ds.StringMap' : (allInt ? 'haxe.ds.IntMap' : 'hxscript.runtime.AnyMap');
+		var mapClass:String = mapClassOf(items);
 
 		var name:String = tempName('map');
 		var target:Expr = {e: EIdent(name), pos: pos};
 		var block:Array<Expr> = [
-			{e: EVar(name, null, {e: ENew(mapClass, []), pos: pos}, null, null, false), pos: pos}
+			{e: EVar(name, CTPath([mapClass]), {e: ENew(mapClass, []), pos: pos}, null, null, false), pos: pos}
 		];
 
 		for (item in items) {
@@ -3100,6 +3101,48 @@ class Emitter {
 	 * @param path The full type path.
 	 * @return The wrapper class, or null when the path is not a wrapped native abstract.
 	 */
+	/**
+	 * @param items A map literal's entries.
+	 * @return The map class it builds, by what its keys are.
+	 */
+	function mapClassOf(items:Array<Expr>):String {
+		var allString:Bool = true;
+		var allInt:Bool = true;
+
+		for (item in items) {
+			switch (item.e) {
+				case EBinop('=>', key, _):
+					switch (key.e) {
+						case EConst(CString(_, _)): allInt = false;
+						case EConst(CInt(_)): allString = false;
+						case _:
+							allString = false;
+							allInt = false;
+					}
+				case _:
+					allString = false;
+					allInt = false;
+			}
+		}
+
+		return allString ? 'haxe.ds.StringMap' : (allInt ? 'haxe.ds.IntMap' : 'hxscript.runtime.AnyMap');
+	}
+
+	/**
+	 * @param known An inferred type name, or null.
+	 * @return Whether it names something keyed rather than indexed.
+	 */
+	function isMapType(known:Null<String>):Bool {
+		if (known == null)
+			return false;
+
+		return switch (known) {
+			case 'Map' | 'haxe.ds.StringMap' | 'haxe.ds.IntMap' | 'haxe.ds.ObjectMap' | 'haxe.ds.EnumValueMap' | 'haxe.ds.WeakMap' |
+				'hxscript.runtime.AnyMap': true;
+			case _: false;
+		}
+	}
+
 	function nativeAbstract(path:String):Null<Class<Dynamic>> {
 		if (moduleClasses.exists(path) || moduleAbstracts.exists(path))
 			return null;
@@ -3700,6 +3743,9 @@ class Emitter {
 				if (statics.exists(v))
 					return staticTypes.get(v);
 				return null;
+
+			case EArrayDecl(items) if (items.length > 0 && items[0].e.match(EBinop('=>', _, _))):
+				return mapClassOf(items);
 
 			case EUnop('!', _, _):
 				return 'Bool';

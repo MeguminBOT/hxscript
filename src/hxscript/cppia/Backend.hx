@@ -38,6 +38,9 @@ import hxscript.syntax.Expr;
  * Compiles hxscript modules to cppia bytecode, which hxcpp loads and JIT-compiles at runtime.
  */
 class Backend {
+	/** Names the helper compiled bodies call, so it is in the build. A name in bytecode is not a reference. */
+	@:keep static var indexing:Class<Dynamic> = hxscript.runtime.Indexing;
+
 	/** Whether this build can compile at all. */
 	public static var available(get, never):Bool;
 
