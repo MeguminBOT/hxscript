@@ -1873,6 +1873,17 @@ class Emitter {
 	function emitField2(obj:Expr, name:String, pos:Position):Void {
 		var line:Int = pos == null ? 0 : pos.line;
 
+		switch (obj.e) {
+			case EIdent('super'):
+				if (methodArity.exists(currentSuper + ' ' + name))
+					throw new Unsupported('super.' + name + ' as a value rather than a call', pos);
+
+				emitField2({e: EIdent('this'), pos: pos}, name, pos);
+				return;
+
+			case _:
+		}
+
 		var asType:Null<String> = typeOf(obj);
 		if (asType != null) {
 			if (isEnumCtor(asType, name)) {
