@@ -3,6 +3,7 @@ rem Builds the hxScript Sandbox (HashLink Heaps) on Windows.
 rem
 rem   build.bat                 build it
 rem   build.bat run             build, then launch it
+rem   build.bat bundle          build, then assemble a folder that runs without HashLink installed
 rem   build.bat --debug         debug build
 rem   build.bat --clean         wipe the build output first
 rem
@@ -20,10 +21,12 @@ cd /d "%~dp0"
 set "MODE=release"
 set "CLEAN=0"
 set "LAUNCH=0"
+set "BUNDLE=0"
 
 :args
 if "%~1"=="" goto args_done
 if /i "%~1"=="run" ( set "LAUNCH=1" & shift & goto args )
+if /i "%~1"=="bundle" ( set "BUNDLE=1" & shift & goto args )
 if /i "%~1"=="--debug" ( set "MODE=debug" & shift & goto args )
 if /i "%~1"=="--clean" ( set "CLEAN=1" & shift & goto args )
 if /i "%~1"=="--help" goto usage
@@ -94,6 +97,32 @@ if not exist "export\assets" mkdir "export\assets"
 xcopy /e /i /y /q "assets\templates" "export\assets\templates" >nul
 
 echo Built export\sandbox.hl
+
+rem --- bundle ------------------------------------------------------------------------------------
+
+rem A HashLink program is bytecode the VM runs, so shipping one means shipping the VM. There is no
+rem linking step and nothing is compiled here: hl looks for hlboot.dat when it is given no argument,
+rem so a renamed VM beside a renamed .hl is a double-clickable application.
+rem
+rem hlboot.dat is opened relative to the WORKING directory rather than to the executable. Explorer
+rem sets that to the folder it launched from, so double-clicking works; a shortcut with a different
+rem "start in" does not.
+if "%BUNDLE%"=="1" (
+	if exist bundle rmdir /s /q bundle
+	mkdir bundle
+	copy /y "%HLPATH%\hl.exe" "bundle\Sandbox.exe" >nul
+	copy /y "export\sandbox.hl" "bundle\hlboot.dat" >nul
+	if exist "export\hxscript.hdll" copy /y "export\hxscript.hdll" "bundle\" >nul
+	mkdir "bundle\assets"
+	xcopy /e /i /y /q "assets\templates" "bundle\assets\templates" >nul
+
+	rem Only what this app binds: fmt, heaps, sdl and std, plus the shared libraries they need.
+	for %%f in (libhl.dll fmt.hdll heaps.hdll sdl.hdll openal.hdll SDL3.dll SDL2.dll OpenAL32.dll) do (
+		if exist "%HLPATH%\%%f" copy /y "%HLPATH%\%%f" "bundle\" >nul
+	)
+
+	echo Bundled bundle\ - copy it anywhere and run the executable in it
+)
 
 if "%LAUNCH%"=="1" (
 	echo Launching ...

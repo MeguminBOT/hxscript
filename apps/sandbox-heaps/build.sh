@@ -3,6 +3,7 @@
 #
 #   ./build.sh                 build it
 #   ./build.sh run             build, then launch it
+#   ./build.sh bundle          build, then assemble a folder that runs without HashLink installed
 #   ./build.sh --debug         debug build
 #   ./build.sh --clean         wipe the build output first
 #
@@ -26,10 +27,12 @@ repo="$(cd "$here/../.." && pwd)"
 mode="release"
 clean="no"
 launch="no"
+bundle="no"
 
 for arg in "$@"; do
 	case "$arg" in
 		run) launch="yes" ;;
+		bundle) bundle="yes" ;;
 		--debug|-debug) mode="debug" ;;
 		--clean|-clean) clean="yes" ;;
 		--help|-h)
@@ -110,6 +113,43 @@ mkdir -p export/assets
 cp -r assets/templates export/assets/
 
 echo "Built export/sandbox.hl"
+
+# --- bundle ---------------------------------------------------------------------------------------
+
+# A HashLink program is bytecode the VM runs, so shipping one means shipping the VM. There is no
+# linking step and nothing is compiled here: hl looks for hlboot.dat when it is given no argument,
+# so a renamed VM beside a renamed .hl is a double-clickable application.
+#
+# hlboot.dat is opened relative to the WORKING directory rather than to the executable. Explorer
+# sets that to the folder it launched from, so double-clicking works; a shortcut with a different
+# "start in" does not.
+if [ "$bundle" = "yes" ]; then
+	out="bundle"
+	rm -rf "$out"
+	mkdir -p "$out"
+
+	exe="$vm/hl"
+	[ -f "$exe" ] || exe="$vm/hl.exe"
+
+	case "$(uname -s)" in
+		MINGW*|MSYS*|CYGWIN*) cp "$exe" "$out/Sandbox.exe" ;;
+		*) cp "$exe" "$out/Sandbox" ;;
+	esac
+
+	cp export/sandbox.hl "$out/hlboot.dat"
+	[ -f export/hxscript.hdll ] && cp export/hxscript.hdll "$out/"
+	cp -r assets/templates "$out/assets-templates-tmp" 2>/dev/null || true
+	mkdir -p "$out/assets"
+	[ -d "$out/assets-templates-tmp" ] && mv "$out/assets-templates-tmp" "$out/assets/templates"
+
+	# Only what this app binds: fmt, heaps, sdl and std, plus the shared libraries they need. The
+	# rest of what HashLink ships is for programs that are not this one.
+	for name in libhl.dll libhl.so libhl.dylib fmt.hdll heaps.hdll sdl.hdll openal.hdll SDL3.dll SDL2.dll OpenAL32.dll; do
+		[ -f "$vm/$name" ] && cp "$vm/$name" "$out/"
+	done
+
+	echo "Bundled $out/ - copy it anywhere and run the executable in it"
+fi
 
 if [ "$launch" = "yes" ]; then
 	exe="$vm/hl"

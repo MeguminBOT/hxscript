@@ -50,12 +50,40 @@ build.bat           # cmd, on Windows
 | | |
 | --- | --- |
 | `./build.sh run` | build, then launch |
+| `./build.sh bundle` | build, then assemble a folder that runs on a machine with no HashLink |
 | `./build.sh --debug` | debug build |
 | `./build.sh --clean` | wipe `export/` first |
 
 There is no lime under this one, so there is no `Project.xml` either: the build is a hxml and the
 result is a `.hl` the VM runs. You need [HashLink](https://hashlink.haxe.org) on your path, or
 `HLPATH` set to the directory holding it.
+
+### Shipping it
+
+`bundle` produces about 11 MB that runs anywhere:
+
+```
+bundle/
+  Sandbox.exe       the VM, renamed
+  hlboot.dat        this app's bytecode, renamed
+  libhl.dll  fmt.hdll  heaps.hdll  sdl.hdll  openal.hdll  SDL3.dll  OpenAL32.dll
+  hxscript.hdll     so scripts compile rather than only interpret
+  assets/templates
+```
+
+Nothing is compiled or linked by that step. **A HashLink program is bytecode the VM runs, so shipping
+one means shipping the VM.** `hl` given no argument opens `hlboot.dat`, so a renamed VM beside a
+renamed `.hl` is a double-clickable application.
+
+One caveat worth knowing: `hlboot.dat` is opened relative to the **working** directory rather than to
+the executable. Explorer sets that to the folder it launched from, so double-clicking works, but a
+shortcut with a different "start in" does not.
+
+> **This app cannot be built as HL/C**, which is the other way to ship HashLink: `haxe -hl out.c`
+> emits C that compiles to an ordinary native binary with no VM and no bytecode file. That route has
+> no JIT to hand a script to, and this app exists to load bytecode at runtime. A game that only wants
+> the *interpreter* has no such problem, and can be HL/C; see
+> [`../../docs/embedding.md`](../../docs/embedding.md).
 
 Setup installs [hxscript](https://github.com/MeguminBOT/hxscript) from git rather than from a
 release, because this app is written against the library as it currently is. A checkout of it at
