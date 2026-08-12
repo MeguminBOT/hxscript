@@ -15,6 +15,12 @@ class Keep {
 	 * Neighbours worth adding for a host whose scripts use them, none of which are kept by default
 	 * because each costs binary size for a program that does not: `haxe.ds.IntMap`,
 	 * `haxe.ds.ObjectMap`, `haxe.ds.EnumValueMap`, `StringTools`, `haxe.Json`, `haxe.Timer`.
+	 * `-D hxscript_keep=StringTools,haxe.Json` adds them without editing this list.
+	 *
+	 * `Lambda` is here rather than among the neighbours because leaving it out was not neutral: on
+	 * hxcpp something else in an ordinary build referenced it and a script could call it, and on eval
+	 * and HashLink nothing did and the same script could not. A default that changes what a script
+	 * can reach depending on which target the host was built for is worse than either answer.
 	 */
 	public static var types:Array<String> = [
 		'IntIterator',
@@ -24,6 +30,7 @@ class Keep {
 		'EReg',
 		'List',
 		'haxe.ds.List',
+		'Lambda',
 		'Date',
 		'Sys'
 	];
@@ -35,6 +42,16 @@ class Keep {
 		#if macro
 		if (Context.defined('hxscript_no_keep'))
 			return;
+
+		var asked:Null<String> = Context.definedValue('hxscript_keep');
+
+		if (asked != null) {
+			for (raw in asked.split(',')) {
+				var one:String = StringTools.trim(raw);
+				if (one.length > 0 && types.indexOf(one) < 0)
+					types.push(one);
+			}
+		}
 
 		for (path in types) {
 			// Not recursive: these are exact type paths, and a recursive filter on a name like `Type`

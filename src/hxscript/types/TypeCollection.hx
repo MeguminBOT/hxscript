@@ -162,6 +162,19 @@ class TypeCollection {
 	public static function resolve(info:TypeInfo, ?env:Environment):Dynamic {
 		if (info.typedefType != null)
 			return TypeTools.resolve(compilePath(info.typedefType), env);
+
+		/**
+		 * An enum is asked for as an enum, because the index knows it is one and the runtime does not
+		 * answer consistently: on HashLink `Type.resolveClass` hands back something for an enum path
+		 * that is neither null nor the enum, so `haxe.ds.Option.Some` became a field of an object with
+		 * no fields. Nothing else can tell the two apart at that point; this can, and it is free.
+		 */
+		if (info.kind == 'enum') {
+			var found:Dynamic = hxscript.proxy.TypeProxy.resolveEnum(compilePath(info));
+			if (found != null)
+				return found;
+		}
+
 		return TypeTools.resolve(compilePath(info), env);
 	}
 	#end

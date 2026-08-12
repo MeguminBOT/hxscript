@@ -155,7 +155,7 @@ class Autowire {
 				args.push({name: 'a${args.length}', type: Context.toComplexType(type), opt: true});
 
 				switch (type) {
-					case TAbstract(_, _):
+					case TAbstract(_, _) | TEnum(_, _):
 
 					case _:
 						refs.push(macro $p{path.split('.')});
