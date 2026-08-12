@@ -257,15 +257,41 @@ class Runtime {
 				return boxed.owner.getField(boxed.boxed, name);
 		}
 
+		/**
+		 * A scripted field read from the instance's own slots, in one lookup.
+		 *
+		 * The reflection hooks would find it too, and did, but they go looking: a property path, then
+		 * a scan of the native field names, then the slots. That is several times the work of the
+		 * interpreter's own read for the same field, and a compiler that costs more per field than
+		 * interpreting is not worth having. `getLocal` is the read the interpreter performs, so this
+		 * is the same answer by the same route, accessors included.
+		 *
+		 * A name that is not in the slots belongs to the host half of a bridge, and falls through.
+		 */
+		if (o is IScriptedInstance) {
+			var inst:IScriptedInstance = cast o;
+			var slots:Map<String, Variable> = @:privateAccess inst.__vars;
+			var held:Null<Variable> = slots == null ? null : slots.get(name);
+
+			if (held != null) {
+				/**
+				 * One lookup, and the accessor path only when there is an accessor. A slot with no
+				 * getter is read straight off, which is the first line of the interpreter's own
+				 * reader; anything else is handed back to it rather than reimplemented.
+				 */
+				if (held.get == null)
+					return held.a != null ? held.a : held.r;
+
+				return @:privateAccess inst.__interp.getLocal(name, slots);
+			}
+		}
+
 		var through:Dynamic = hxscript.proxy.ReflectProxy.getProperty(o, name);
 
 		/**
-		 * A plain field read straight, when asking for the property answered with nothing.
-		 *
-		 * The two are one question on most values, and not on a generated bridge: its property hook
-		 * answers for what the script declared as a property and says nothing about a plain field,
-		 * so a field on a class extending a host type reads as null through the first and correctly
-		 * through the second. Trying the property first keeps a getter winning where there is one.
+		 * A plain field read straight, when asking for the property answered with nothing. The two
+		 * are one question on most values, and not on a generated bridge, whose property hook says
+		 * nothing about a plain native field.
 		 */
 		return through != null ? through : hxscript.proxy.ReflectProxy.field(o, name);
 	}
@@ -434,8 +460,23 @@ class Runtime {
 		return v == true;
 	}
 
-	/** Writes a named field of something a script declared, through its setter when it has one. */
+	/**
+	 * Writes a named field of something a script declared, through its setter when it has one.
+	 *
+	 * The instance's own slots first, for the reason `get` gives: it is one lookup instead of a
+	 * search, and it is the write the interpreter performs for the same field.
+	 */
 	public static function set(o:Dynamic, name:String, v:Dynamic):Void {
+		if (o is IScriptedInstance) {
+			var inst:IScriptedInstance = cast o;
+			var slots:Map<String, Variable> = @:privateAccess inst.__vars;
+
+			if (slots != null && slots.exists(name)) {
+				@:privateAccess inst.__interp.setLocal(name, v, slots);
+				return;
+			}
+		}
+
 		hxscript.proxy.ReflectProxy.setProperty(o, name, v);
 	}
 
