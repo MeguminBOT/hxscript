@@ -11,3 +11,6 @@ export_classes.info
 # apps: build output and the user's own projects
 export/
 apps/*/projects/
+
+# the sandbox apps keep their haxelibs to themselves
+apps/*/.haxelib/
