@@ -434,15 +434,29 @@ class Interp {
 	 * Adds two values with Haxe semantics: String concatenation when either side is a String,
 	 * otherwise numeric addition promoted like `numArith` (`Int + Int` stays `Int`).
 	 *
+	 * **`Int + Int` wraps, which is what Haxe does.** It used to widen to `Float` when the sum did
+	 * not fit, on the reasoning that a script which never wrote `Int` should not have a value quietly
+	 * corrupted. Two things were wrong with that. It is not what the same source compiled by Haxe
+	 * produces, so a script moved between the two changes answer; and it was not even consistent
+	 * here, because the widening turns on a `Float` comparison that eval answers differently from
+	 * hxcpp, so the interpreter wrapped on one target and widened on another. A script has to get one
+	 * answer, and the only defensible one is Haxe's.
+	 *
 	 * @param a The left operand.
 	 * @param b The right operand.
 	 * @return The concatenated string or the promoted numeric sum.
 	 */
-	inline function numAdd(a:Dynamic, b:Dynamic):Dynamic {
+	inline function numAdd(a:Dynamic, b:Dynamic, widen:Bool = false):Dynamic {
 		if (a is Int && b is Int) {
-			var wide:Float = (a : Float) + (b : Float);
-			var narrow:Int = (a : Int) + (b : Int);
-			return (narrow == wide) ? narrow : wide;
+			/**
+			 * `Std.int` rather than a cast, because `v is Int` is true of a whole `Float` on every
+			 * dynamic target and a cast then leaves it a `Float` in an `Int` local. `+` does not mind;
+			 * the bitwise test below does, and eval refuses it outright.
+			 */
+			var x:Int = Std.int(a);
+			var y:Int = Std.int(b);
+			var sum:Int = x + y;
+			return (widen && overflowed(x, y, sum)) ? x * 1.0 + y * 1.0 : sum;
 		}
 		if (a is String || b is String)
 			return Std.string(a) + Std.string(b);
@@ -452,21 +466,155 @@ class Interp {
 	}
 
 	/**
-	 * Subtracts with Haxe numeric promotion, widening on overflow for the reasons `numAdd` gives.
+	 * Whether adding or subtracting two `Int`s carried past the width.
+	 *
+	 * The sign test rather than a comparison against the same sum computed as a `Float`. The float
+	 * form was what the widening used to turn on, and it does not mean the same thing on every
+	 * target: eval keeps a `Float` apart from an `Int` and hxcpp reads a whole one back as an `Int`,
+	 * so the interpreter wrapped on one and widened on the other for the same expression. This is
+	 * three integer operations and reads the same everywhere.
+	 *
+	 * @param x The left operand.
+	 * @param y The right operand, negated already when this was a subtraction.
+	 * @param sum What the wrapped operation produced.
+	 * @return Whether the true result is outside `Int`.
+	 */
+	inline function overflowed(x:Int, y:Int, sum:Int):Bool {
+		return ((x ^ sum) & (y ^ sum)) < 0;
+	}
+
+	/**
+	 * Subtracts with Haxe numeric promotion, wrapping on overflow for the reasons `numAdd` gives.
 	 *
 	 * @param a The left operand.
 	 * @param b The right operand.
-	 * @return `Int` when both operands are `Int` and the difference fits, otherwise `Float`.
+	 * @return `Int` when both operands are `Int`, otherwise `Float`.
 	 */
-	inline function numSub(a:Dynamic, b:Dynamic):Dynamic {
+	inline function numSub(a:Dynamic, b:Dynamic, widen:Bool = false):Dynamic {
 		if (a is Int && b is Int) {
-			var wide:Float = (a : Float) - (b : Float);
-			var narrow:Int = (a : Int) - (b : Int);
-			return (narrow == wide) ? narrow : wide;
+			/**
+			 * `Std.int` rather than a cast, because `v is Int` is true of a whole `Float` on every
+			 * dynamic target and a cast then leaves it a `Float` in an `Int` local. `+` does not mind;
+			 * the bitwise test below does, and eval refuses it outright.
+			 */
+			var x:Int = Std.int(a);
+			var y:Int = Std.int(b);
+			var diff:Int = x - y;
+			return (widen && overflowed(x, -y, diff)) ? x * 1.0 - y * 1.0 : diff;
 		}
 		if (a is AbstractValue || b is AbstractValue)
 			return abstractArith("-", a, b);
 		return (a : Float) - (b : Float);
+	}
+
+	/**
+	 * Adds, asking what the operands were declared as only when the result carried.
+	 *
+	 * The annotations are what decide whether an overflow wraps or promotes, and reading them costs a
+	 * lookup per operand. Doing that on every addition to answer a question that almost never comes
+	 * up would be paying for the exception in the common case, so the wrapped result is computed
+	 * first and the declarations are consulted only when it is not the whole answer.
+	 *
+	 * @param e1 The left operand's expression.
+	 * @param e2 The right operand's expression.
+	 * @return The sum.
+	 */
+	function addExpr(e1:Expr, e2:Expr):Dynamic {
+		var a:Dynamic = expr(e1);
+		var b:Dynamic = expr(e2);
+
+		if (a is Int && b is Int) {
+			/**
+			 * `Std.int` rather than a cast, because `v is Int` is true of a whole `Float` on every
+			 * dynamic target and a cast then leaves it a `Float` in an `Int` local. `+` does not mind;
+			 * the bitwise test below does, and eval refuses it outright.
+			 */
+			var x:Int = Std.int(a);
+			var y:Int = Std.int(b);
+			var sum:Int = x + y;
+
+			if (!overflowed(x, y, sum))
+				return sum;
+
+			return (widensNumbers(e1) || widensNumbers(e2)) ? x * 1.0 + y * 1.0 : sum;
+		}
+
+		return numAdd(a, b);
+	}
+
+	/**
+	 * Subtracts, on the same terms `addExpr` gives.
+	 *
+	 * @param e1 The left operand's expression.
+	 * @param e2 The right operand's expression.
+	 * @return The difference.
+	 */
+	function subExpr(e1:Expr, e2:Expr):Dynamic {
+		var a:Dynamic = expr(e1);
+		var b:Dynamic = expr(e2);
+
+		if (a is Int && b is Int) {
+			/**
+			 * `Std.int` rather than a cast, because `v is Int` is true of a whole `Float` on every
+			 * dynamic target and a cast then leaves it a `Float` in an `Int` local. `+` does not mind;
+			 * the bitwise test below does, and eval refuses it outright.
+			 */
+			var x:Int = Std.int(a);
+			var y:Int = Std.int(b);
+			var diff:Int = x - y;
+
+			if (!overflowed(x, -y, diff))
+				return diff;
+
+			return (widensNumbers(e1) || widensNumbers(e2)) ? x * 1.0 - y * 1.0 : diff;
+		}
+
+		return numSub(a, b);
+	}
+
+	/**
+	 * Whether `Int` arithmetic on this expression's value should widen rather than wrap.
+	 *
+	 * Wrapping is what Haxe does and is therefore the default, but only for values that really are
+	 * `Int`. **On hxcpp and HashLink a whole `Float` in a `Dynamic` reads back as an `Int`**, so a
+	 * `var t:Float` accumulating past the width is indistinguishable from an `Int` overflowing, and
+	 * wrapping it would quietly destroy a total. Nothing about the value can tell the two apart, so
+	 * the annotation is asked instead, and only when an operation has actually carried: the common
+	 * path never reaches this.
+	 *
+	 * `Dynamic` widens for a different reason, and it is also Haxe's: arithmetic on a `Dynamic` is
+	 * dynamic arithmetic, which promotes. An unannotated local wraps, because Haxe infers `Int` for
+	 * one initialised from an `Int`.
+	 *
+	 * @param e The operand's expression.
+	 * @return Whether it was written with a type that promotes.
+	 */
+	function widensNumbers(e:Expr):Bool {
+		return switch (ExprTools.expr(e)) {
+			case EParent(inner) | ECheckType(inner, _): widensNumbers(inner);
+			case EIdent(id): promoting(locals.get(id));
+			/** `this.total` is the one field shape reachable without evaluating a receiver twice. */
+			case EField(owner, f, _):
+				switch (ExprTools.expr(owner)) {
+					case EIdent('this'): promoting(locals.get(f));
+					case _: false;
+				}
+			case _: false;
+		}
+	}
+
+	/**
+	 * @param l The slot, or null when the name is not one.
+	 * @return Whether its declared type is one that promotes `Int` arithmetic.
+	 */
+	function promoting(l:Null<Variable>):Bool {
+		if (l == null || l.t == null)
+			return false;
+
+		return switch (l.t) {
+			case CTPath(path, _): path.length == 1 && (path[0] == 'Float' || path[0] == 'Dynamic');
+			case _: false;
+		}
 	}
 
 	/**
@@ -521,8 +669,8 @@ class Interp {
 	function initOps() {
 		binops = [
 			"=" => assign,
-			"+" => function(e1, e2) return numAdd(expr(e1), expr(e2)),
-			"-" => function(e1, e2) return numSub(expr(e1), expr(e2)),
+			"+" => function(e1, e2) return addExpr(e1, e2),
+			"-" => function(e1, e2) return subExpr(e1, e2),
 			"*" => function(e1, e2) return numMul(expr(e1), expr(e2)),
 			"/" => function(e1, e2) return numDiv(expr(e1), expr(e2)),
 			"%" => function(e1, e2) return numMod(expr(e1), expr(e2)),
@@ -556,18 +704,23 @@ class Interp {
 			"is" => function(e1, e2) return #if (haxe_ver >= 4.2) Std.isOfType #else Std.is #end (expr(e1), expr(e2)),
 			"??" => function(e1, e2) return expr(e1) ?? expr(e2)
 		];
-		assignOp("+=", function(v1, v2) return numAdd(v1, v2));
-		assignOp("-=", function(v1, v2) return numSub(v1, v2));
-		assignOp("*=", function(v1, v2) return numMul(v1, v2));
-		assignOp("/=", function(v1, v2) return numDiv(v1, v2));
-		assignOp("%=", function(v1, v2) return numMod(v1, v2));
-		assignOp("&=", function(v1, v2) return (v1 : Int) & (v2 : Int));
-		assignOp("|=", function(v1, v2) return (v1 : Int) | (v2 : Int));
-		assignOp("^=", function(v1, v2) return (v1 : Int) ^ (v2 : Int));
-		assignOp("<<=", function(v1, v2) return (v1 : Int) << (v2 : Int));
-		assignOp(">>=", function(v1, v2) return (v1 : Int) >> (v2 : Int));
-		assignOp(">>>=", function(v1, v2) return (v1 : Int) >>> (v2 : Int));
-		assignOp("??=", function(v1, v2) return v1 ?? v2);
+		/**
+		 * The target's own declaration decides an overflow here, which is the same rule `addExpr`
+		 * applies and the same reason: `t += n` on a `var t:Float` is a total being accumulated, and
+		 * nothing about the values says so once a whole `Float` reads back as an `Int`.
+		 */
+		assignOp("+=", function(v1, v2, wide) return numAdd(v1, v2, wide));
+		assignOp("-=", function(v1, v2, wide) return numSub(v1, v2, wide));
+		assignOp("*=", function(v1, v2, wide) return numMul(v1, v2));
+		assignOp("/=", function(v1, v2, wide) return numDiv(v1, v2));
+		assignOp("%=", function(v1, v2, wide) return numMod(v1, v2));
+		assignOp("&=", function(v1, v2, wide) return (v1 : Int) & (v2 : Int));
+		assignOp("|=", function(v1, v2, wide) return (v1 : Int) | (v2 : Int));
+		assignOp("^=", function(v1, v2, wide) return (v1 : Int) ^ (v2 : Int));
+		assignOp("<<=", function(v1, v2, wide) return (v1 : Int) << (v2 : Int));
+		assignOp(">>=", function(v1, v2, wide) return (v1 : Int) >> (v2 : Int));
+		assignOp(">>>=", function(v1, v2, wide) return (v1 : Int) >>> (v2 : Int));
+		assignOp("??=", function(v1, v2, wide) return v1 ?? v2);
 	}
 
 	/**
@@ -679,7 +832,7 @@ class Interp {
 	 * @param op The operator token.
 	 * @param fop The function combining the current and right-hand values.
 	 */
-	function assignOp(op, fop:Dynamic->Dynamic->Dynamic) {
+	function assignOp(op, fop:Dynamic->Dynamic->Bool->Dynamic) {
 		binops.set(op, function(e1, e2) return evalAssignOp(op, fop, e1, e2));
 	}
 
@@ -694,14 +847,16 @@ class Interp {
 	 */
 	function evalAssignOp(op, fop, e1, e2):Dynamic {
 		var v;
+		var wide:Bool = widensNumbers(e1) || widensNumbers(e2);
+
 		switch (ExprTools.expr(e1)) {
 			case EIdent(id):
 				var l:Variable = hasCaptures ? null : locals.get(id);
 				if (l != null) {
-					v = fop(readLocal(l, id), expr(e2));
+					v = fop(readLocal(l, id), expr(e2), wide);
 					writeLocal(l, id, v);
 				} else {
-					v = fop(expr(e1), expr(e2));
+					v = fop(expr(e1), expr(e2), wide);
 
 					if (locals.exists(id)) {
 						setLocal(id, v);
@@ -711,19 +866,19 @@ class Interp {
 				}
 			case EField(e, f, _):
 				var obj = expr(e);
-				v = fop(get(obj, f), expr(e2));
+				v = fop(get(obj, f), expr(e2), wide);
 				v = set(obj, f, v);
 			case EArray(e, index):
 				var arr:Dynamic = expr(e);
 				var index:Dynamic = expr(index);
 				if (isMap(arr)) {
-					v = fop(getMapValue(arr, index), expr(e2));
+					v = fop(getMapValue(arr, index), expr(e2), wide);
 					setMapValue(arr, index, v);
 				} else if (arr is AbstractValue) {
-					v = fop(abstractGetIndex(arr, index), expr(e2));
+					v = fop(abstractGetIndex(arr, index), expr(e2), wide);
 					abstractSetIndex(arr, index, v);
 				} else {
-					v = fop(arr[index], expr(e2));
+					v = fop(arr[index], expr(e2), wide);
 					arr[index] = v;
 				}
 			default:
@@ -2134,6 +2289,16 @@ class Interp {
 					if (imports.exists(id) || variables.exists(id))
 						return matchValues(resolve(id), match);
 
+					/**
+					 * A constructor of whatever is being matched, which is how Haxe reads a bare
+					 * upper-case name in a pattern: the subject's type is what the pattern is checked
+					 * against, so `case None:` needs no import and names nothing that has to resolve.
+					 * Only reached once the name has failed to resolve as anything else, and only
+					 * when the subject really is an enum value, so a mistyped name still says so.
+					 */
+					if (id != '_' && id.isTypeIdentifier() && constructorOf(match) != null)
+						return constructorOf(match) == id;
+
 					if (id != '_' && id.isTypeIdentifier())
 						throw 'Unknown identifier: $id, pattern variables must be lower-case or with \'var \' prefix';
 
@@ -2191,6 +2356,28 @@ class Interp {
 					true;
 
 				case ECall(ce, params):
+					/**
+					 * The same rule as a bare name, for a constructor that takes parameters. The old
+					 * path had to evaluate the constructor and build a value with nulls in it just to
+					 * ask what it was called, which cannot be done for a name that resolves to
+					 * nothing. Reading the name off the subject asks the question directly.
+					 */
+					var named:Null<String> = patternName(ce);
+
+					if (named != null && constructorOf(match) != null) {
+						if (constructorOf(match) != named)
+							return false;
+
+						var held:Array<Dynamic> = Type.enumParameters(match);
+
+						for (i => param in params) {
+							if (!testCase(param, i < held.length ? held[i] : null))
+								return false;
+						}
+
+						return true;
+					}
+
 					if (checkCapture(ce)) {
 						testCase(ce, match);
 					} else {
@@ -2578,6 +2765,7 @@ class Interp {
 
 		var got:Dynamic = null,
 			gotType:TypeInfo = null,
+			namedHolder:Dynamic = null,
 			unknown:Null<String> = null;
 
 		var fullProp:String = '';
@@ -2624,7 +2812,36 @@ class Interp {
 						got = gotType.resolve(environment);
 				} else if (gotType != null) {
 					var t = gotType.resolve(environment);
-					got = get(t, field, maybe);
+					got = fromType(t, field, maybe);
+				} else if (namedHolder != null) {
+					got = fromType(namedHolder, field, maybe);
+				} else {
+					/**
+					 * A fully-qualified path the index does not carry, resolved by name.
+					 *
+					 * Writing `haxe.Json.stringify(o)` with no import is ordinary Haxe and was an
+					 * `Unknown identifier: haxe` here, because the only paths a chain could be
+					 * resolved by were the ones some macro had put in the index. The runtime knows
+					 * about a great many more, and asking it is what the compiled backends already
+					 * did, so this is also what stops the two disagreeing about which types exist.
+					 *
+					 * Held rather than used, exactly as a type found in the index is, so that a
+					 * longer path still gets its turn: `haxe.ds.Option` resolving does not settle
+					 * whether `haxe.ds.Option.None` is a longer type name or a field of that one.
+					 *
+					 * Last, and only once nothing else has answered, so it costs nothing on the path
+					 * a resolvable name already takes.
+					 */
+					var named:Dynamic = TypeTools.resolve(fullProp, environment);
+
+					if (named != null) {
+						unknown = null;
+
+						if (i == __tempResolveFields.length - 1)
+							got = named;
+						else
+							namedHolder = named;
+					}
 				}
 			} else {
 				got = get(got, field, maybe);
@@ -2985,10 +3202,21 @@ class Interp {
 		if (iter != null)
 			v = Reflect.callMethod(v, iter, []);
 
-		if (Reflect.field(v, 'hasNext') == null || Reflect.field(v, 'next') == null)
+		var has:Dynamic = Reflect.field(v, 'hasNext');
+		var next:Dynamic = Reflect.field(v, 'next');
+
+		if (has == null || next == null)
 			error(EInvalidIterator(v));
 
-		return v;
+		/**
+		 * A scripted object is handed back wrapped, because finding its methods and calling them are
+		 * two different questions. `Reflect` here is the library's own and looks in the instance's
+		 * slots, so both were found; the loop then calls `hasNext` on the value directly, which is a
+		 * native dynamic call that knows nothing about those slots. The lookup succeeded and the call
+		 * did not, which read as `Null Function Pointer` rather than as anything to do with
+		 * iterating. Nothing else needs the wrapper, so nothing else pays for it.
+		 */
+		return (v is IScriptedInstance) ? new SlotIterator(has, next) : v;
 	}
 
 	/**
@@ -3287,10 +3515,79 @@ class Interp {
 				return (bypassAccessor ? Reflect.field(fields, f) : Reflect.getProperty(fields, f));
 		}
 
+
 		if (hxscript.debug.Metrics.on)
 			hxscript.debug.Metrics.reads++;
 
 		return boolean(o, f, prop);
+	}
+
+	/**
+	 * @param v A value being matched.
+	 * @return The constructor it was made with, or null when it is not an enum value at all.
+	 */
+	function constructorOf(v:Dynamic):Null<String> {
+		/**
+		 * Asked before reading, not caught after. `Type.enumConstructor` on something that is not an
+		 * enum value is not a throw on every target: on hxcpp it ends the process, so a `try` around
+		 * it is a guard that does not guard.
+		 */
+		if (v == null || !((v is ICustomEnumValueType) || HaxeReflect.isEnumValue(v)))
+			return null;
+
+		return Type.enumConstructor(v);
+	}
+
+	/**
+	 * @param e A pattern's callee.
+	 * @return The bare upper-case name it is, when that name resolves to nothing and so can only be
+	 *         a constructor of whatever is being matched.
+	 */
+	function patternName(e:Expr):Null<String> {
+		return switch (ExprTools.expr(e)) {
+			case EIdent(id) if (id.isTypeIdentifier() && !isResolvable(id)): id;
+			case _: null;
+		}
+	}
+
+	/**
+	 * Reads a member off something a path resolved to, which may be an enum.
+	 *
+	 * `haxe.ds.Option.None` reads like a static and is not one: reflection finds nothing on the enum,
+	 * so the read answered null and the script got a null where Haxe gives a value. It is built here
+	 * instead, the way a scripted enum's constructor already is.
+	 *
+	 * **Only where a type is known to be what was resolved.** The obvious place for this was the end
+	 * of `get`, and that was wrong twice over: it ran on every field read that came back empty, which
+	 * is not rare, and `Type.getEnumConstructs` on something that is not an enum ends the hxcpp
+	 * process rather than throwing. Two asserted cases died of it.
+	 *
+	 * @param t The resolved type.
+	 * @param f The member's name.
+	 * @param maybe Whether the access was null-safe.
+	 * @return The member, or the enum value when the name is one of its constructors.
+	 */
+	function fromType(t:Dynamic, f:String, maybe:Bool):Dynamic {
+		var read:Dynamic = get(t, f, maybe);
+
+		if (read != null || t == null || (t is IScriptedType))
+			return read;
+
+		/**
+		 * `getEnumName` rather than `getEnumConstructs` as the test, because the first answers null
+		 * for anything that is not an enum and the second is only defined for one. `get` already
+		 * asks it of arbitrary values a few lines above, so it is known to be safe here.
+		 */
+		var named:Null<String> = try Type.getEnumName(t) catch (e:Dynamic) null;
+		if (named == null)
+			return read;
+
+		var names:Array<String> = HaxeType.getEnumConstructs(t);
+		if (names == null)
+			return read;
+
+		var at:Int = names.indexOf(f);
+		return at < 0 ? read : resolveEnumValue(t, at);
 	}
 
 	/**
@@ -3599,5 +3896,40 @@ class Interp {
 			return (cast c : ScriptedAbstract).create(args);
 
 		return Type.createInstance(c, args);
+	}
+}
+
+/**
+ * An iterator over a scripted object's own `hasNext` and `next`.
+ *
+ * The two closures are taken once, from the instance's slots, and each already knows its receiver.
+ * That is what makes this work where handing the object itself to a `for` does not: the loop calls
+ * an ordinary function value rather than dispatching a method name against a native object that
+ * never declared one.
+ */
+private class SlotIterator {
+	/** The object's own `hasNext`, bound to it. */
+	var more:Dynamic;
+
+	/** The object's own `next`, bound to it. */
+	var take:Dynamic;
+
+	/**
+	 * @param more The bound `hasNext`.
+	 * @param take The bound `next`.
+	 */
+	public function new(more:Dynamic, take:Dynamic) {
+		this.more = more;
+		this.take = take;
+	}
+
+	/** @return Whether anything is left. */
+	public function hasNext():Bool {
+		return HaxeReflect.callMethod(null, more, []) == true;
+	}
+
+	/** @return The next value. */
+	public function next():Dynamic {
+		return HaxeReflect.callMethod(null, take, []);
 	}
 }

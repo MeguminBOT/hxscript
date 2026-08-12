@@ -320,6 +320,17 @@ class Parser extends Lexer {
 					switch (expr(e)) {
 						case EConst(CInt(i)):
 							return mk(EConst(CInt(-i)), start, pmax(e));
+						/**
+						 * The one whole number whose negation is an `Int` and whose own value is not.
+						 * `2147483648` is a `Float` coming out of the lexer because that is the only
+						 * thing it can be, so `-2147483648` was a `Float` too, and then the lowest
+						 * `Int` there is was the one value a script could not write. Left as a
+						 * `Float` it subtracts to -2147483649 on a target that keeps floats apart
+						 * from ints and wraps to 2147483647 on one that does not, which is two
+						 * answers to `Int` arithmetic that Haxe gives one answer to.
+						 */
+						case EConst(CFloat(f)) if (-f == -2147483648.0):
+							return mk(EConst(CInt(-2147483648)), start, pmax(e));
 						case EConst(CFloat(f)):
 							return mk(EConst(CFloat(-f)), start, pmax(e));
 						default:
@@ -991,7 +1002,9 @@ class Parser extends Lexer {
 	 * @return The parsed arguments, return type, and body expression.
 	 */
 	function parseFunctionDecl(allowNoBody:Bool = false) {
-		parseParams();
+		var params = parseParams();
+		var outer = openParams(params);
+
 		ensure(TPOpen);
 		var args = parseFunctionArgs();
 		var ret = null;
@@ -1002,9 +1015,66 @@ class Parser extends Lexer {
 			else
 				ret = parseType();
 		}
-		if (allowNoBody && maybe(TSemicolon))
-			return {args: args, ret: ret, body: null};
-		return {args: args, ret: ret, body: parseExpr()};
+
+		if (allowNoBody && maybe(TSemicolon)) {
+			closeParams(outer);
+			return {args: args, ret: ret, params: params, body: null};
+		}
+
+		var body = parseExpr();
+		closeParams(outer);
+		return {args: args, ret: ret, params: params, body: body};
+	}
+
+	/**
+	 * Type-parameter names in scope, innermost last.
+	 *
+	 * An annotation naming one of these is erased where it is written, which is what makes a type
+	 * parameter accept anything. Doing it here rather than at runtime is what gets the scoping right
+	 * for free: a method's `<T>` shadows a class called `T` exactly as far as the method's own text,
+	 * which is Haxe's rule, and a check made later would have to be told where the text began and
+	 * ended.
+	 *
+	 * The list also has to be a list rather than a set, because two nested declarations may name the
+	 * same parameter and leaving the inner one's scope must not end the outer one's.
+	 */
+	var openTypeParams:Array<String> = [];
+
+	/**
+	 * Brings a declaration's type parameters into scope.
+	 *
+	 * @param params The names it declared.
+	 * @return How deep the scope was before, to be handed back to `closeParams`.
+	 */
+	function openParams(params:Array<String>):Int {
+		var was:Int = openTypeParams.length;
+
+		for (p in params)
+			openTypeParams.push(p);
+
+		return was;
+	}
+
+	/**
+	 * Takes them out again.
+	 *
+	 * @param was What `openParams` answered.
+	 */
+	function closeParams(was:Int):Void {
+		while (openTypeParams.length > was)
+			openTypeParams.pop();
+	}
+
+	/** @return Whether a bare type name is a type parameter of something being parsed. */
+	function isTypeParam(name:String):Bool {
+		var i:Int = openTypeParams.length;
+
+		while (i-- > 0) {
+			if (openTypeParams[i] == name)
+				return true;
+		}
+
+		return false;
 	}
 
 	/**
@@ -1038,6 +1108,17 @@ class Parser extends Lexer {
 				push(t);
 				var path = parsePath();
 				var params = parseTypeArgs();
+
+				/**
+				 * A type parameter is written out as `Dynamic` here rather than left to be resolved.
+				 * Constraints are erased everywhere in this library, so a parameter accepts anything,
+				 * and an annotation naming one that survived to runtime was a name to look up: it
+				 * found nothing, or worse, it found a real type that happened to share the letter and
+				 * then rejected every value that was not one.
+				 */
+				if (path.length == 1 && isTypeParam(path[0]))
+					return parseTypeNext(CTPath(['Dynamic'], params));
+
 				return parseTypeNext(CTPath(path, params));
 			case TPOpen:
 				var a = token();
@@ -1596,6 +1677,7 @@ class Parser extends Lexer {
 					error(ECustom('Type name should start with an uppercase letter'), tokenMin, tokenMax);
 
 				var params = parseParams();
+				var outerParams = openParams(params);
 				var extend = null;
 				var implement = [];
 
@@ -1616,6 +1698,8 @@ class Parser extends Lexer {
 				ensure(TBrOpen);
 				while (!maybe(TBrClose))
 					fields.push(parseField());
+
+				closeParams(outerParams);
 
 				return mkd(DClass({
 					name: name,
@@ -1638,6 +1722,7 @@ class Parser extends Lexer {
 					error(ECustom('Type name should start with an uppercase letter'), tokenMin, tokenMax);
 
 				var params = parseParams();
+				var outerParams = openParams(params);
 				var implement = [];
 
 				while (true) {
@@ -1655,6 +1740,8 @@ class Parser extends Lexer {
 				ensure(TBrOpen);
 				while (!maybe(TBrClose))
 					fields.push(parseField(true));
+
+				closeParams(outerParams);
 
 				return mkd(DInterface({
 					name: name,
@@ -1712,11 +1799,14 @@ class Parser extends Lexer {
 					error(ECustom('Type name should start with an uppercase letter'), tokenMin, tokenMax);
 
 				var params = parseParams();
+				var outerParams = openParams(params);
 				var isEnumAbstract = false;
 				for (m in meta)
 					if (m.name == ':enum')
 						isEnumAbstract = true;
-				return parseAbstractDecl(name, meta, params, isEnumAbstract, isPrivate);
+				var decl = parseAbstractDecl(name, meta, params, isEnumAbstract, isPrivate);
+				closeParams(outerParams);
+				return decl;
 			case "typedef":
 				if (importModule)
 					error(EImportHx, tokenMin, tokenMax);
@@ -1848,7 +1938,7 @@ class Parser extends Lexer {
 								name: fname,
 								meta: meta,
 								access: access,
-								kind: KFunction({args: finf.args, expr: finf.body, ret: finf.ret}),
+								kind: KFunction({args: finf.args, expr: finf.body, ret: finf.ret, params: finf.params}),
 							};
 						}
 					}

@@ -392,6 +392,17 @@ typedef FunctionDecl = {
 
 	/** The return type, if annotated. */
 	var ret:Null<CType>;
+
+	/**
+	 * The method's own type-parameter names, constraints erased as everywhere else.
+	 *
+	 * Parsed and thrown away until now, which made `function pick<T>(v:T):T` a function whose
+	 * argument is annotated with a type nothing answers to. Enforcement then read that as a value of
+	 * the wrong type and threw, so the one thing a type parameter has to do, accept anything, was the
+	 * one thing it could not. Keeping the names is what lets the annotation be recognised as erased
+	 * rather than unknown.
+	 */
+	var ?params:Array<String>;
 }
 
 /** A variable/property field's accessors, type, initializer, and finality. */
