@@ -1,0 +1,6 @@
+{
+	"title": "Heaps playground",
+	"kind": "heaps",
+	"entry": "Playground",
+	"description": "A scripted h2d.Object, added to the project's layer and drawn by being in it. h2d, h3d, hxd and hxd.Key are reachable by name, and the module beside it declares a scripted enum, a scripted abstract with an operator, and a class."
+}

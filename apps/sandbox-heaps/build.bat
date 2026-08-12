@@ -88,6 +88,11 @@ if not exist "export\hxscript.hdll" (
 	echo To change that: ..\..\src\hxscript\hl\hdll.bat --out export
 )
 
+rem The templates are read from disk beside the executable rather than embedded, so the folder has
+rem to be there for projects\ to be seeded on a first run.
+if not exist "export\assets" mkdir "export\assets"
+xcopy /e /i /y /q "assets\templates" "export\assets\templates" >nul
+
 echo Built export\sandbox.hl
 
 if "%LAUNCH%"=="1" (

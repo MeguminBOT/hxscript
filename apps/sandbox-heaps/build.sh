@@ -104,6 +104,11 @@ if [ ! -f "export/hxscript.hdll" ]; then
 	echo "To change that: sh ../../src/hxscript/hl/hdll.sh --out export"
 fi
 
+# The templates are read from disk beside the executable rather than embedded, so the folder has to
+# be there for `projects/` to be seeded on a first run.
+mkdir -p export/assets
+cp -r assets/templates export/assets/
+
 echo "Built export/sandbox.hl"
 
 if [ "$launch" = "yes" ]; then

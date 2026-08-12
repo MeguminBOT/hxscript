@@ -1,3 +1,10 @@
+import h2d.Object;
+import h2d.Scene;
+import host.Api;
+import studio.Launcher;
+import studio.Metrics;
+import studio.Shell;
+import studio.Viewport;
 import ui.Gallery;
 import ui.Root;
 import ui.Theme;
@@ -8,42 +15,126 @@ import ui.Theme;
  * `hxd.App` starts the window, owns the engine and drives the frame, so anything extending it would
  * have had to exist before the program did. A project that wants a loop of its own extends
  * `host.Project` instead and is handed the same lifecycle.
+ *
+ * **Two scenes, rendered in order.** The project has one, fitted to the band between the bars and
+ * scaled with it; the interface has another that is never scaled, which is what lets the bars keep
+ * their size while what sits between them changes. One scene for both would mean choosing between a
+ * project that is never scaled and an interface that always is.
  */
 class Main extends hxd.App {
-	static var showGallery:Bool = false;
+	static var wantsGallery:Bool = false;
 
 	static function main():Void {
 		for (arg in Sys.args()) {
 			if (arg == '--gallery')
-				showGallery = true;
+				wantsGallery = true;
 		}
 
 		new Main();
 	}
 
+	/** The interface. */
 	var root:Root;
+
+	/** What a project draws on, unless it becomes a scene of its own. */
+	var stage:Scene;
+
+	/** What the launcher adds a project's object to. */
+	var surface:Object;
+
+	/** A scene a project became, which replaces `stage` until it stops. */
+	var borrowed:Null<Scene>;
+
 	var gallery:Null<Gallery>;
 
 	override function init():Void {
 		engine.backgroundColor = Theme.bg & 0xFFFFFF;
 
+		stage = new Scene();
+		surface = new Object(stage);
+
 		root = new Root();
-		setScene(root.scene);
+		setScene(root.scene, false);
+		sevents.addScene(stage, 1);
 
 		root.onResize = function():Void {
 			if (gallery != null)
 				gallery.layout();
+			else
+				Shell.layout();
+
+			Viewport.fit(borrowed != null ? borrowed : stage, engine.width, engine.height);
 		};
 
-		if (showGallery)
+		if (wantsGallery) {
 			gallery = new Gallery(root);
+		} else {
+			Api.backend = 'heaps';
+			Api.screenWidth = Viewport.CANVAS_WIDTH;
+			Api.screenHeight = Viewport.CANVAS_HEIGHT;
+
+			Launcher.onScene = borrow;
+			Shell.mount(root, surface);
+
+			// The shell's shortcuts are read here rather than from the scene, because the one that
+			// matters is the way back and it has to work while a project owns everything else.
+			hxd.Window.getInstance().addEventTarget(function(e:hxd.Event):Void {
+				if (e.kind == EKeyDown)
+					Shell.pressed(e.keyCode);
+			});
+		}
 
 		onResize();
+	}
+
+	/**
+	 * Takes a scene a project became, or gives it back.
+	 *
+	 * @param scene The project's scene, or null when it has stopped.
+	 */
+	function borrow(scene:Null<Scene>):Void {
+		if (borrowed != null) {
+			sevents.removeScene(borrowed);
+			borrowed = null;
+		}
+
+		borrowed = scene;
+
+		if (borrowed != null)
+			sevents.addScene(borrowed, 1);
+
+		Viewport.fit(borrowed != null ? borrowed : stage, engine.width, engine.height);
 	}
 
 	override function onResize():Void {
 		root.resize(engine.width, engine.height);
 	}
 
-	override function update(dt:Float):Void {}
+	override function update(dt:Float):Void {
+		Metrics.beginUpdate();
+
+		if (gallery == null) {
+			Launcher.update(dt);
+			Shell.tick(dt);
+		}
+
+		Metrics.tick(dt);
+		Metrics.endUpdate();
+	}
+
+	/**
+	 * Draws the project, then the interface over it.
+	 *
+	 * The order is the whole arrangement: the interface has to be on top, and the project has to be
+	 * scaled without it.
+	 */
+	override function render(e:h3d.Engine):Void {
+		Metrics.beginDraw();
+
+		var below:Scene = borrowed != null ? borrowed : stage;
+		below.render(e);
+		root.scene.render(e);
+
+		Metrics.endDraw(e);
+	}
 }
