@@ -375,6 +375,25 @@ class Corpus {
 			+ 'class Child extends Base { public function new() { super(); } '
 			+ 'public function borrowed():String return super.kept; }');
 
+		check('a do while', 'var i = 0; var n = 0; do { n += i; i++; } while (i < 5); return n;', '10');
+		check('a nested function calling itself', 'return fact(5);', '120', 'static function fact(n:Int):Int { return n <= 1 ? 1 : n * fact(n - 1); }');
+		check('a function value in a local', 'var f = function(x:Int):Int return x * 3; return f(4);', '12');
+		check('a function value passed along', 'return apply(function(x:Int):Int return x + 1, 41);', '42',
+			'static function apply(f:Int->Int, v:Int):Int { return f(v); }');
+		check('a typed catch', 'try { throw "boom"; } catch (e:String) { return "got " + e; } return "no";', 'got boom');
+		check('a rethrow', 'try { try { throw "inner"; } catch (e:Dynamic) { throw e; } } catch (e:Dynamic) { return "out " + e; } return "no";',
+			'out inner');
+		check('a comprehension with a guard', 'return [for (i in 0...10) if (i % 3 == 0) i].join(",");', '0,3,6,9');
+		check('a map literal read back', 'var m = ["a" => 1, "b" => 2]; return m["a"] + m["b"];', '3');
+		check('a nested structure', 'var o = {a: {b: 7}}; return o.a.b;', '7');
+		check('an array of arrays', 'var g = [[1, 2], [3, 4]]; return g[1][0] + g[0][1];', '5');
+		check('a static calling a static', 'return outer(3);', '12', 'static function inner(n:Int):Int { return n * 3; } static function outer(n:Int):Int { return inner(n) + 3; }');
+		check('a string built in a loop', 'var s = ""; for (i in 0...4) s += i; return s;', '0123');
+		check('a while with a break and a continue', 'var i = 0; var n = 0; while (true) { i++; if (i > 8) break; if (i % 2 == 0) continue; n += i; } return n;',
+			'16');
+		check('a switch on a string', 'var s = "b"; switch (s) { case "a": return 1; case "b": return 2; default: return 3; }', '2');
+		check('a ternary chain', 'var n = 7; return n < 5 ? "low" : n < 10 ? "mid" : "high";', 'mid');
+
 		check('an optional argument left out', 'return pad(3);', '13',
 			'static function pad(n:Int, ?extra:Int):Int { return n + (extra == null ? 10 : extra); }');
 

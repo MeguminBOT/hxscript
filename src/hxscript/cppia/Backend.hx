@@ -38,6 +38,16 @@ import hxscript.syntax.Expr;
  * Compiles hxscript modules to cppia bytecode, which hxcpp loads and JIT-compiles at runtime.
  */
 class Backend {
+	/**
+	 * Names the helper compiled bodies call, so it is in the build.
+	 *
+	 * Nothing in a host references `Indexing` and nothing here calls it: the only callers are the
+	 * bytecode this backend writes, and a name inside bytecode is not a reference, so without this
+	 * the class is never typed and every module naming it fails to link. The same problem, and the
+	 * same answer, as the standard-library members `Keep` holds on to.
+	 */
+	@:keep static var indexing:Class<Dynamic> = hxscript.runtime.Indexing;
+
 	/** Whether this build can compile at all. */
 	public static var available(get, never):Bool;
 
