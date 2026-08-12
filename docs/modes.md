@@ -1,10 +1,16 @@
 # Execution modes
 
-A script can be interpreted or compiled to bytecode, and the bytecode can be jitted. **The two
-compiled modes are hxcpp-only**, since the bytecode is hxcpp's own; everywhere else a script is
+A script can be interpreted or compiled to bytecode, and the bytecode can be jitted. **Two targets
+can compile**: hxcpp, to cppia, with `-D scriptable -D hxscript_cppia`; and HashLink, to HashLink
+bytecode, with `-D hxscript_hl`, on the VM or inside an HL/C binary. Everywhere else a script is
 interpreted and this page is not a decision you have. It is about what choosing between them means
 where you do. The measurements behind every figure quoted here are
-in [`mode-benchmarks.md`](mode-benchmarks.md).
+in [`mode-benchmarks.md`](mode-benchmarks.md), and what every mode answers for the same 266
+constructs is in [`support-table.md`](support-table.md), which is generated rather than written.
+
+HashLink's own limit is worth knowing before you plan around it: **its jit emits x86 and x86-64 and
+nothing else**, so on arm64, which is every Android and Apple Silicon build, the loader is left out
+and scripts are interpreted. The binary links and runs; it is only the speed that is not there.
 
 The short version: compiling is worth about **21x** on ordinary work and about **37x** on calls, it
 costs roughly **7ms per module** to do, and it is decided per module rather than per application. If
@@ -251,16 +257,21 @@ this page rather than your script, and bytecode without the JIT is worth trying 
 
 | construct | interpreted | compiled | keep it compiled by |
 | --- | --- | --- | --- |
-| `Int` arithmetic that overflows | widens to `Float`: `2147483647 + 1` is `2147483648` | wraps, as Haxe does: `-2147483648` | nothing to do; compiled is the one that matches Haxe |
 | reading a `Bool` field by reflection | `true` | `1` | reading the field directly, which is corrected |
 | a `Bool` instance field with no type annotation, under the JIT | `true` | `1` | writing `:Bool`, which is corrected |
 
-The first is deliberate on the interpreter's side: a script that never wrote `Int` should not have a
-value silently corrupted, and without a declared type the interpreter cannot tell which case it is
-in. The other two are cppia's own: it has no boolean, and folds `Bool` into its integer type. A
-field the emitter knows is `Bool` is read back through a comparison, which restores it; a field it
-was never told about, and a read that bypasses the field entirely, are the two places left where
-the integer shows.
+Both are cppia's own: it has no boolean, and folds `Bool` into its integer type. A field the emitter
+knows is `Bool` is read back through a comparison, which restores it; a field it was never told
+about, and a read that bypasses the field entirely, are the two places left where the integer shows.
+
+**`Int` overflow used to be on this list and is not any more.** The rule is now Haxe's, in every
+mode: `Int` arithmetic wraps, so `2147483647 + 1` is `-2147483648`, and arithmetic on something
+declared `Float` or `Dynamic` promotes instead. The compiled backends get this from their typed
+registers, which is what they always did; the interpreter gets it by asking what the operands were
+declared as, and only when an operation has actually carried, so the common path pays nothing for
+it. What it used to do was widen on any overflow, which was neither Haxe's answer nor a consistent
+one: the test turned on a `Float` comparison that eval answers differently from hxcpp, so the same
+expression wrapped on one target and widened on another.
 
 `test/cpp/SweepTest.hx` runs both modes over the constructs a script actually uses and reports any
 that disagree, so this list is generated rather than remembered.

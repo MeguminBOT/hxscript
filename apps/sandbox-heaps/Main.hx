@@ -28,6 +28,9 @@ import ui.Theme;
 class Main extends hxd.App {
 	static var wantsGallery:Bool = false;
 
+	/** The project `--conform` named, or null when this is an ordinary run. */
+	static var conformProject:Null<String> = null;
+
 	static function main():Void {
 		for (arg in Sys.args()) {
 			if (arg == '--gallery')
@@ -38,6 +41,7 @@ class Main extends hxd.App {
 			Api.log('could not open a projects folder at ' + Projects.root);
 
 		Shell.autoRun = argument('--run');
+		conformProject = argument('--conform');
 
 		new Main();
 	}
@@ -74,6 +78,19 @@ class Main extends hxd.App {
 	var gallery:Null<Gallery>;
 
 	override function init():Void {
+		/**
+		 * The conformance run, before anything is mounted.
+		 *
+		 * Here rather than in `main` because heaps has to be up: a case that builds an `h2d.Object`
+		 * needs the engine to exist, and the engine is what `hxd.App` starts on its way to this
+		 * method. The window opens and the process ends without ever drawing, which is what makes it
+		 * something a script can drive.
+		 */
+		if (conformProject != null) {
+			studio.Conform.run(conformProject);
+			return;
+		}
+
 		engine.backgroundColor = Theme.bg & 0xFFFFFF;
 
 		stage = new Scene();

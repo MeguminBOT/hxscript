@@ -59,9 +59,16 @@ world). Enforcement flows through a single point, `tryCast` in
 through the same path a local does (`Interp.bindDeclared`), so an abstract-typed field boxes and
 records its type rather than storing the bare underlying value.
 - **`Int` and `Float` are correct.** Integer arithmetic stays `Int` (so `is Int`, integer map keys,
-  and array indices behave), and `/` is always `Float`. One platform caveat: on hxcpp a
-  whole-number `Float` boxed in a `Dynamic` reads back as `Int` (`Type.typeof(10/2)` is `TInt`).
-  That is harmless, and unavoidable in a `Dynamic` interpreter.
+  and array indices behave), and `/` is always `Float`. **`Int` overflow wraps**, as Haxe's does, and
+  arithmetic on something declared `Float` or `Dynamic` promotes instead, which is also Haxe's rule.
+  Since a compiled backend already decides this from its typed registers, the same script gets one
+  answer interpreted, on cppia and on HashLink.
+
+  The annotation is what makes that possible, and it has to be, because of one platform caveat: on
+  hxcpp and HashLink a whole-number `Float` boxed in a `Dynamic` reads back as `Int`
+  (`Type.typeof(10/2)` is `TInt`). Nothing about the value can tell a `Float` total past the width
+  from an `Int` overflowing, so `Interp.widensNumbers` asks what was written rather than what is
+  held. An unannotated local wraps, matching the `Int` Haxe would infer for it.
 
 What is still missing is everything that needs the *compiler*:
 

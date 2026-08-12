@@ -77,10 +77,27 @@ class TypeTools {
 
 		var type:Dynamic = env?.resolve(path);
 		type ??= AbstractTools.resolve(path);
-		type ??= TypeProxy.resolveClass(path);
-		type ??= TypeProxy.resolveEnum(path);
 
-		return type;
+		if (type != null)
+			return type;
+
+		/**
+		 * The class table is asked first and its answer is only taken when it really is a class.
+		 *
+		 * `resolveClass` does not answer null for an enum on every target: on HashLink it hands back
+		 * an object that is neither a class nor the enum, and taking it meant `haxe.ds.Option.Some`
+		 * was a field of something with no fields. Asking the enum table second, and falling back to
+		 * whatever the class table said only when nothing better exists, keeps every target answering
+		 * with the type the script named.
+		 */
+		var asClass:Dynamic = TypeProxy.resolveClass(path);
+
+		if (asClass != null && isClass(asClass))
+			return asClass;
+
+		var asEnum:Dynamic = TypeProxy.resolveEnum(path);
+
+		return asEnum != null ? asEnum : asClass;
 	}
 
 	/** How many typedef hops `resolve` follows before giving up, so a cycle cannot spin. */

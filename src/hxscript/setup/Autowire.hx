@@ -243,7 +243,14 @@ class Autowire {
 				args.push({name: 'a${args.length}', type: Context.toComplexType(type), opt: true});
 
 				switch (type) {
-					case TAbstract(_, _):
+					/**
+					 * An abstract and an enum are named in the signature and nowhere else. Writing the
+					 * path as an expression gives the enum itself, which is an `Enum<T>` rather than
+					 * the `Class<Dynamic>` the manifest holds, and the build stops on the mismatch.
+					 * The typed argument is what forces the module in, so nothing is lost by leaving
+					 * these out of the references.
+					 */
+					case TAbstract(_, _) | TEnum(_, _):
 
 					case _:
 						refs.push(macro $p{path.split('.')});

@@ -87,7 +87,7 @@ class Frontier {
 			+ 'class Child extends Base { public function new() { super(); } '
 			+ 'public function grab():String { var f = super.speak; return f(); } }');
 		probe('extends a host class', 'var v = new Sub(); return Std.string(v.doubled(4));', null,
-			'class Sub extends StringBuf { public function new() { super(); } public function doubled(n:Int):Int return n * 2; }');
+			'class Sub extends HostBase { public function new() { super(); } public function doubled(n:Int):Int return n * 2 + tell(); }');
 		probe('rest arguments', 'return Std.string(total(1, 2, 3));', 'static function total(...rest:Int):Int { var n = 0; for (v in rest) n += v; return n; }');
 		probe('a static extension on an unknown receiver', 'var v:Dynamic = "ab"; return v.twice();', null,
 			'using Frontier.Ext;');

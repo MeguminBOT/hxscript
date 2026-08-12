@@ -47,6 +47,15 @@ class Signature {
 
 	/** The type table entry for the function itself. */
 	public var type:Int;
+
+	/**
+	 * Whether the last argument collects everything the call had left over.
+	 *
+	 * The function itself takes one array there and needs no telling. It is the call sites that do:
+	 * a call passing three arguments to a function that declares one is not a mistake to refuse, it
+	 * is three values to gather into the array first.
+	 */
+	public var rest:Bool = false;
 }
 
 /**
@@ -123,6 +132,21 @@ class Emitter {
 
 	/** The names each class declares as statics, by class. */
 	var owned:StringMap<StringMap<Bool>>;
+
+	/**
+	 * The register type each declared field's annotation names, by class then name.
+	 *
+	 * Where a field is stored is the world's business and this does not change that: a field is read
+	 * and written through `Runtime`, as a dynamic, whatever is recorded here. What this is for is
+	 * arithmetic. A field written `:Int` is an `Int`, and `Int` arithmetic wraps, but a dynamic
+	 * operand sends the operation to `Runtime.add`, which promotes because reaching it means nothing
+	 * said the operand was an `Int`. Recording the annotation is what lets the emitter say so, and
+	 * the value is then converted into a typed register and added with an instruction.
+	 *
+	 * Only fields with an annotation are here, and only classes of this batch. A field of a host base
+	 * is absent, which reads as dynamic, which is the truth about it.
+	 */
+	var memberTypes:StringMap<StringMap<Int>>;
 
 	/**
 	 * Types the batch declares that are not classes, and the enum each constructor belongs to.
@@ -205,6 +229,7 @@ class Emitter {
 		opened = new StringMap();
 		props = new StringMap();
 		owned = new StringMap();
+		memberTypes = new StringMap();
 		declared = new StringMap();
 		constructors = new StringMap();
 		ambientMembers = new StringMap();
@@ -294,6 +319,7 @@ class Emitter {
 		var accessors:StringMap<{get:String, set:String}> = new StringMap();
 		var statics:StringMap<Bool> = new StringMap();
 		var own:StringMap<Bool> = new StringMap();
+		var types:StringMap<Int> = new StringMap();
 
 		for (f in c.fields) {
 			switch (f.kind) {
@@ -306,6 +332,9 @@ class Emitter {
 					if (property(v))
 						accessors.set(f.name, {get: v.get, set: v.set});
 
+					if (v.type != null)
+						types.set(f.name, typeOf(v.type));
+
 				case KFunction(_):
 					if (isStatic(f))
 						statics.set(f.name, true);
@@ -315,6 +344,7 @@ class Emitter {
 		members.set(c.name, own);
 		props.set(c.name, accessors);
 		owned.set(c.name, statics);
+		memberTypes.set(c.name, types);
 
 		var base:Null<String> = baseName(c.extend);
 		if (base != null) {
@@ -342,8 +372,22 @@ class Emitter {
 			 * what a caller leaving it out passes is null and a typed register has nowhere to put
 			 * one. The body reads it as the interpreter does, which is null until its default runs.
 			 */
-			for (a in fn.args)
+			var gathers:Bool = false;
+
+			for (a in fn.args) {
+				/**
+				 * A rest argument is one dynamic register holding an array, whatever the elements
+				 * were declared as. The body already treats it that way, since a script iterates it;
+				 * what needed saying is that its callers pass more values than there are registers.
+				 */
+				if (a.rest == true) {
+					gathers = true;
+					args.push(tDyn);
+					continue;
+				}
+
 				args.push(optional(a) ? tDyn : typeOf(a.t));
+			}
 
 			var ret:Int = fn.ret != null ? typeOf(fn.ret) : (f.name == 'new' ? tVoid : tDyn);
 
@@ -351,7 +395,8 @@ class Emitter {
 				findex: module.reserve(),
 				args: args,
 				ret: ret,
-				type: module.typeId(TFun(args, ret))
+				type: module.typeId(TFun(args, ret)),
+				rest: gathers
 			};
 
 			signatures.set(c.name + (isStatic(f) ? '.' : '#') + f.name, sig);
@@ -1363,7 +1408,7 @@ class Emitter {
 
 		var own:Null<String> = selfCall(callee);
 		if (own != null) {
-			callSupport('invoke', [dynOf(thisExpr(pos)), named(own), gathered(params)], slot);
+			callSupport('dispatch', [dynOf(thisExpr(pos)), named(own), gathered(params), siteSlot()], slot);
 			return;
 		}
 
@@ -1397,16 +1442,36 @@ class Emitter {
 			return;
 		}
 
-		if (params.length > sig.args.length)
+		/**
+		 * Everything past the last declared argument is gathered into it, when that argument is the
+		 * one that collects. `total(1, 2, 3)` against `total(...rest:Int)` is one call with one
+		 * argument holding three values, and without this it read as three arguments to a function
+		 * that takes one and refused the module.
+		 */
+		var gathered:Int = sig.rest ? gatherArgs(params, sig.args.length - 1) : -1;
+
+		if (gathered < 0 && params.length > sig.args.length)
 			throw new Unsupported('a call given ' + params.length + ' of its ' + sig.args.length + ' arguments', pos);
 
 		var landed:Int = regs[slot] == sig.ret ? slot : reg(sig.ret);
 		var args:Array<Int> = [landed, sig.findex];
 
-		for (i in 0...params.length) {
+		var fixed:Int = gathered >= 0 ? sig.args.length - 1 : params.length;
+
+		for (i in 0...fixed) {
 			var holder:Int = reg(sig.args[i]);
 			into(params[i], holder);
 			args.push(holder);
+		}
+
+		if (gathered >= 0) {
+			args.push(gathered);
+			ops.push({op: callFor(sig.args.length), args: args});
+
+			if (landed != slot)
+				move(landed, slot);
+
+			return;
 		}
 
 		/**
@@ -1427,6 +1492,65 @@ class Emitter {
 	}
 
 	/**
+	 * Whether a bare upper-case name in a pattern can only be a constructor of the subject.
+	 *
+	 * Everything the emitter could resolve it as is asked first, so a name that is a batch enum's
+	 * constructor, a class, a declared type or a host static keeps meaning what it meant. What is
+	 * left is a name nothing here answers to, which in a pattern is exactly Haxe's case: the subject's
+	 * own type is what a pattern is read against.
+	 *
+	 * @param name The name as written.
+	 * @return Whether to read it off the subject.
+	 */
+	function subjectCtor(name:String):Bool {
+		return isTypeName(name)
+			&& lookup(name) == null
+			&& !constructors.exists(name)
+			&& !classes.exists(name)
+			&& !declared.exists(name)
+			&& !ambientMembers.exists(name);
+	}
+
+	/**
+	 * Builds the array a rest argument receives.
+	 *
+	 * @param params Every argument the call was written with.
+	 * @param from The index the collecting argument starts at.
+	 * @return A dynamic register holding the array, or -1 when there is no room for one.
+	 */
+	function gatherArgs(params:Array<Expr>, from:Int):Int {
+		if (from < 0)
+			return -1;
+
+		var made:Int = reg(tDyn);
+		callSupport('array', [], made);
+
+		for (i in from...params.length)
+			callSupport('push', [made, dynOf(params[i])], reg(tDyn));
+
+		return made;
+	}
+
+	/** How many field-access sites have been given a memory, so each one's key is its own. */
+	var sites:Int = 0;
+
+	/**
+	 * A register holding this access site's own cache cell.
+	 *
+	 * One per site rather than one per field name: two sites reading the same name usually see
+	 * different receivers, and sharing a cell between them would make each one evict the other's
+	 * answer on every pass.
+	 *
+	 * @return A dynamic register holding the cell.
+	 */
+	function siteSlot():Int {
+		var index:Int = bind('c' + (sites++), {index: 0, kind: BSite});
+		var held:Int = reg(tDyn);
+		ops.push({op: OGetGlobal, args: [held, index]});
+		return held;
+	}
+
+	/**
 	 * The global holding a host value, making one the first time it is asked for.
 	 *
 	 * @param owner The host class's path.
@@ -1443,8 +1567,8 @@ class Emitter {
 	 * @param field Which one.
 	 * @return The global's index.
 	 */
-	function supportSlot(field:String):Int {
-		return bind('s' + field, {index: 0, kind: BSupport, field: field});
+	function supportSlot(field:String, type:Int):Int {
+		return bind('s' + field, {index: 0, kind: BSupport, field: field}, type);
 	}
 
 	/**
@@ -1470,12 +1594,12 @@ class Emitter {
 	 * @param binding What to record when it is new. Its index is filled in here.
 	 * @return The global's index.
 	 */
-	function bind(key:String, binding:Binding):Int {
+	function bind(key:String, binding:Binding, ?type:Int):Int {
 		var known:Null<Int> = hostSlots.get(key);
 		if (known != null)
 			return known;
 
-		binding.index = module.global(tDyn);
+		binding.index = module.global(type == null ? tDyn : type);
 		hostSlots.set(key, binding.index);
 		bindings.push(binding);
 		return binding.index;
@@ -1578,16 +1702,21 @@ class Emitter {
 	 * @param slot Where to leave the result.
 	 */
 	function sendTo(target:Int, name:String, params:Array<Expr>, slot:Int):Void {
-		var given:Int = reg(tDyn);
-		callSupport('array', [], given);
+		var given:Int = gathered(params);
 
-		for (p in params)
-			callSupport('push', [given, dynOf(p)], reg(tDyn));
+		/**
+		 * With nothing brought in by `using`, the only question is what the receiver's own member is,
+		 * and that is the question a site can remember the answer to. `send` is what handles the
+		 * other case, where a name may belong to the value or to a static that takes it first, and
+		 * which of those it is cannot be settled before the value exists.
+		 */
+		if (usings.length == 0) {
+			callSupport('dispatch', [target, named(name), given, siteSlot()], slot);
+			return;
+		}
 
 		var extensions:Int = reg(tDyn);
-		if (usings.length == 0) {
-			ops.push({op: ONull, args: [extensions]});
-		} else {
+		{
 			callSupport('array', [], extensions);
 			for (u in usings) {
 				var holder:Int = reg(tDyn);
@@ -1620,14 +1749,13 @@ class Emitter {
 	function through(fn:Int, params:Array<Expr>, slot:Int):Void {
 		ops.push({op: ONullCheck, args: [fn]});
 
-		var returned:Int = reg(tDyn);
-		var args:Array<Int> = [returned, fn];
-
-		for (p in params)
-			args.push(dynOf(p));
-
-		ops.push({op: OCallClosure, args: args});
-		move(returned, slot);
+		/**
+		 * Through `Runtime.call` rather than straight at the closure. A dynamic call is checked
+		 * against what the callee really declares, and a host function with an optional argument left
+		 * off is refused rather than defaulted, which is ordinary Haxe that a script may write about
+		 * any function the host offers.
+		 */
+		callSupport('call', [fn, gathered(params)], slot);
 	}
 
 	/**
@@ -1645,6 +1773,16 @@ class Emitter {
 	 * @param pos Where it appears.
 	 */
 	function emitNew(cls:String, params:Array<Expr>, slot:Int, pos:Position):Void {
+		/**
+		 * `Map` before anything else, because it is not a class to resolve. It is Haxe's one
+		 * `@:multiType` and the name answers to nothing at runtime, so binding it as a host type left
+		 * a null to construct from. The interpreter has the same special case for the same reason.
+		 */
+		if ((cls == 'Map' || cls == 'haxe.ds.Map') && !classes.exists(cls)) {
+			callSupport('anyMap', [], slot);
+			return;
+		}
+
 		var given:Int = reg(tDyn);
 		callSupport('array', [], given);
 		for (p in params)
@@ -1681,7 +1819,12 @@ class Emitter {
 			return;
 		}
 
-		callSupport('get', [dynOf(obj), named(name)], slot);
+		// THROWAWAY MEASUREMENT: what a field costs as an instruction rather than a call.
+		var target:Int = dynOf(obj);
+		var held:Int = landing(slot);
+		ops.push({op: ODynGet, args: [held, target, module.stringId(name)]});
+		if (held != slot)
+			move(held, slot);
 	}
 
 	/** Writes a field write, by name and through the world, for the reasons `getField` gives. */
@@ -1698,7 +1841,7 @@ class Emitter {
 			return;
 		}
 
-		callSupport('set', [dynOf(obj), named(name), dynOf(value)], reg(tDyn));
+		callSupport('store', [dynOf(obj), named(name), dynOf(value), siteSlot()], reg(tDyn));
 	}
 
 	/**
@@ -1717,6 +1860,18 @@ class Emitter {
 	 */
 	function gathered(params:Array<Expr>):Int {
 		var given:Int = reg(tDyn);
+
+		/**
+		 * The short shapes in one call. Building an argument list by making it empty and pushing into
+		 * it is a call per argument on top of the call being made, and nearly every call a script
+		 * writes has three arguments or fewer.
+		 */
+		if (params.length <= 3) {
+			var boxed:Array<Int> = [for (p in params) dynOf(p)];
+			callSupport('args' + params.length, boxed, given);
+			return given;
+		}
+
 		callSupport('array', [], given);
 
 		for (p in params)
@@ -1983,8 +2138,56 @@ class Emitter {
 	 * @param slot Where to leave the result.
 	 */
 	function callSupport(field:String, args:Array<Int>, slot:Int):Void {
+		var shape:Null<String> = SHAPES.get(field);
+
+		/**
+		 * A closure held in a dynamic register is called through `hl_dyn_call`, which boxes every
+		 * argument and the result and reads the callee's real signature to marshal against. That is
+		 * most of what a support call costs, and it is paid on every field read, every dynamic
+		 * operator and every iteration step.
+		 *
+		 * Naming the signature turns it into a direct call. What the signature may say is limited by
+		 * a module holding no host types: `String`, `Array` and any class of the host cannot be named
+		 * here at all, so a support function that takes one takes `Dynamic` instead, and only the
+		 * primitives keep their own type. That is the whole reason `SHAPES` is written out rather
+		 * than derived: it has to agree with `Runtime` exactly, and it is checked by every case in
+		 * the corpus that reaches one.
+		 */
+		if (shape != null && shape.length == args.length + 1) {
+			var kinds:Array<Int> = [for (i in 0...args.length) typeFor(shape.charAt(i))];
+			var ret:Int = typeFor(shape.charAt(args.length));
+			var signed:Int = module.typeId(TFun(kinds, ret));
+
+			var fn:Int = reg(signed);
+			ops.push({op: OGetGlobal, args: [fn, supportSlot(field, signed)]});
+
+			var returned:Int = reg(ret);
+			var pass:Array<Int> = [returned, fn];
+			for (a in args)
+				pass.push(a);
+
+			ops.push({op: OCallClosure, args: pass});
+
+			if (ret == tVoid)
+				return;
+
+			/**
+			 * `move`, which opens a dynamic through `Runtime.toInt` or `toFloat` rather than through
+			 * `OSafeCast`.
+			 *
+			 * The instruction is faster and was used here for exactly that reason, and it is wrong:
+			 * it can only open a dynamic that really holds the number, and a script's value may be a
+			 * boxed abstract instead. `var rate:Float = speed` where `speed` is a scripted abstract
+			 * over `Float` is ordinary code, and it ended every frame of a real project with
+			 * `Can't cast hxscript.types.ScriptedAbstractValue to f64`. The conversions know how to
+			 * open one; the instruction does not, and cannot be taught.
+			 */
+			move(returned, slot);
+			return;
+		}
+
 		var fn:Int = reg(tDyn);
-		ops.push({op: OGetGlobal, args: [fn, supportSlot(field)]});
+		ops.push({op: OGetGlobal, args: [fn, supportSlot(field, tDyn)]});
 
 		var returned:Int = reg(tDyn);
 		var pass:Array<Int> = [returned, fn];
@@ -1993,6 +2196,46 @@ class Emitter {
 
 		ops.push({op: OCallClosure, args: pass});
 		unbox(returned, slot);
+	}
+
+	/**
+	 * The signature of each `Runtime` static, as one letter per argument and then the result.
+	 *
+	 * `d` is dynamic, `i` an `Int`, `f` a `Float`, `b` a `Bool`, `v` nothing. A name absent from here
+	 * is called the old way, through a dynamic closure, which is always correct and merely slower, so
+	 * adding one is an optimisation and forgetting one is not a bug.
+	 *
+	 * **It has to match `hxscript.hl.Runtime`.** A letter that disagrees with the real signature is a
+	 * call made with the wrong convention, which is not an error anyone reports.
+	 */
+	static var SHAPES:StringMap<String> = [
+		'add' => 'ddd', 'sub' => 'ddd', 'mul' => 'ddd', 'div' => 'ddd', 'mod' => 'ddd',
+		'eq' => 'ddb', 'lt' => 'ddb', 'lte' => 'ddb', 'gt' => 'ddb', 'gte' => 'ddb',
+		'neg' => 'dd', 'truthy' => 'db', 'toInt' => 'di', 'toFloat' => 'df', 'toBool' => 'db',
+		'fetch' => 'dddd', 'store' => 'ddddv', 'get' => 'ddd', 'set' => 'dddv',
+		'invoke' => 'dddd', 'send' => 'ddddd', 'make' => 'ddd', 'anyMap' => 'd',
+		'index' => 'ddd', 'setIndex' => 'dddd', 'array' => 'd', 'push' => 'ddv',
+		'object' => 'd', 'setField' => 'dddv', 'put' => 'dddd', 'range' => 'ddd',
+		'iterator' => 'dd', 'pairs' => 'dd', 'step' => 'db', 'take' => 'dd',
+		'args0' => 'd', 'args1' => 'dd', 'args2' => 'ddd', 'args3' => 'dddd', 'dispatch' => 'ddddd',
+		'call' => 'ddd',
+		'has' => 'ddb', 'sized' => 'ddb', 'ctor' => 'dd', 'params' => 'dd',
+		'isOfType' => 'ddb', 'catches' => 'ddb', 'enumOf' => 'dddd', 'regex' => 'ddd',
+		'superCall' => 'dddd', 'superGet' => 'dddd', 'superNew' => 'dddv'
+	];
+
+	/**
+	 * @param letter One of `SHAPES`'s letters.
+	 * @return The register type it names.
+	 */
+	function typeFor(letter:String):Int {
+		return switch (letter) {
+			case 'i': tI32;
+			case 'f': tF64;
+			case 'b': tBool;
+			case 'v': tVoid;
+			default: tDyn;
+		}
 	}
 
 	/**
@@ -2107,7 +2350,7 @@ class Emitter {
 
 			case EIdent(name):
 				var slot:Null<Int> = lookup(name);
-				slot != null ? regs[slot] : tDyn;
+				slot != null ? regs[slot] : declaredMember(name);
 
 			case EBinop(op, a, b) if (COMPARE.exists(op) || op == '&&' || op == '||'): tBool;
 
@@ -2144,6 +2387,31 @@ class Emitter {
 	/** @return Whichever of two types the other converts to, which is Float when either is. */
 	function widest(a:Int, b:Int):Int {
 		return (a == tF64 || b == tF64) ? tF64 : a;
+	}
+
+	/**
+	 * @param name A bare name that is not a local.
+	 * @return What the class being emitted declared it as, or dynamic when nothing did.
+	 *
+	 * Walks the bases too, because a field a base declares is reached by the same bare name and is
+	 * just as much an `Int` when it says so.
+	 */
+	function declaredMember(name:String):Int {
+		/**
+		 * `owning` rather than `inside`, because `inside` is null in a static and a static reads its
+		 * class's statics by bare name just as a method reads its fields by one.
+		 */
+		var at:Null<String> = inside != null ? inside : owning;
+
+		while (at != null) {
+			var known:Null<StringMap<Int>> = memberTypes.get(at);
+			if (known != null && known.exists(name))
+				return known.get(name);
+
+			at = bases.get(at);
+		}
+
+		return tDyn;
 	}
 
 	/**
@@ -2913,7 +3181,7 @@ class Emitter {
 				move(value, bound);
 				scopes[scopes.length - 1].set(name, bound);
 
-			case ECall({e: EIdent(ctor)}, binds) if (constructors.exists(ctor)):
+			case ECall({e: EIdent(ctor)}, binds) if (constructors.exists(ctor) || subjectCtor(ctor)):
 				var made:Int = reg(tDyn);
 				callSupport('ctor', [value], made);
 
@@ -2929,6 +3197,21 @@ class Emitter {
 					callSupport('index', [given, counted(i)], item);
 					match(binds[i], item, onFail);
 				}
+
+			/**
+			 * A constructor of whatever is being matched, named on its own.
+			 *
+			 * `case None:` against a host enum names something that resolves to nothing here, and the
+			 * comparison below would have had to evaluate it. Reading the constructor off the subject
+			 * asks the question directly, which is what the interpreter does with the same pattern.
+			 */
+			case EIdent(name) if (subjectCtor(name)):
+				var made:Int = reg(tDyn);
+				callSupport('ctor', [value], made);
+
+				var right:Int = reg(tBool);
+				callSupport('eq', [made, named(name)], right);
+				onFail.push(jump(OJFalse, [right]));
 
 			case EArrayDecl(items):
 				var right:Int = reg(tBool);

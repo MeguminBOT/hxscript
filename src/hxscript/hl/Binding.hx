@@ -38,6 +38,14 @@ enum abstract BindingKind(Int) to Int {
 
 	/** What carries the module's own fields, for what a script wrote outside any class. */
 	var BModule = 4;
+
+	/**
+	 * One field access's memory of the last slot it resolved.
+	 *
+	 * A fresh one per binding rather than a shared value, which is what makes it a per-site cache
+	 * rather than a per-name one.
+	 */
+	var BSite = 5;
 }
 
 /**

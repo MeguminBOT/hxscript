@@ -230,7 +230,13 @@ class Presets {
 		],
 		bases: ['h2d.Object'],
 		abstractPackages: [],
-		abstracts: ['h2d.BlendMode'],
+		/**
+		 * `h2d.col.Point` is here because it is an `@:forward abstract` over `PointImpl`, so it has no
+		 * runtime class and `new h2d.col.Point(3, 4)` in a script resolved to nothing. A wrapper is
+		 * what gives an abstract something to resolve to, and this is the one a project reaches for
+		 * most: it is what `getBounds`, `globalToLocal` and every collision shape are written in.
+		 */
+		abstracts: ['h2d.BlendMode', 'h2d.col.Point'],
 		abstractExclude: [],
 		globals: [
 			'h2d.Object',

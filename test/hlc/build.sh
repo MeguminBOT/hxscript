@@ -18,6 +18,7 @@
 #   callback   the host's own dynamic calls survive the jit taking over hl_setup
 #   throw      exceptions cross between compiled and generated code in both directions
 #   corpus     the 168 shared cases, the same ones HL/JIT and cppia answer
+#   bench      what a field costs interpreted against compiled, which is the slow path
 set -e
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -61,6 +62,16 @@ main_for() {
 		callback) echo "CallbackProbe" ;;
 		throw) echo "ThrowProbe" ;;
 		corpus) echo "CorpusProbe" ;;
+		bench) echo "FieldBench" ;;
+		*) echo "" ;;
+	esac
+}
+
+# Extra defines one probe needs. The bench compares a scripted class's field against a host
+# class's, so the host class has to be reachable by name, which is what `Keep` decides.
+defines_for() {
+	case "$1" in
+		bench) echo "-D hxscript_keep=HostBase" ;;
 		*) echo "" ;;
 	esac
 }
@@ -68,6 +79,7 @@ main_for() {
 paths_for() {
 	case "$1" in
 		corpus) echo "-cp test/hl/loader -cp test/lib" ;;
+		bench) echo "-cp test/hlc -cp test/common/fixtures" ;;
 		*) echo "-cp test/hlc" ;;
 	esac
 }
@@ -91,7 +103,7 @@ for name in $WANTED; do
 	# Haxe reports a missing `hashlink` haxelib after writing the C, because that library is what it
 	# would have used to drive the native build. This drives it below instead, so the C is what
 	# matters and the complaint is not one.
-	haxe -cp src $(paths_for "$name") -D hxscript_hl -D hxscript_no_hdll \
+	haxe -cp src $(paths_for "$name") -D hxscript_hl -D hxscript_no_hdll $(defines_for "$name") \
 		--macro "hxscript.macro.Keep.run()" -main "$class" -hl "$dir/main.c" 2>&1 \
 		| grep -v "Library hashlink is not installed\|^Error: Build failed" || true
 

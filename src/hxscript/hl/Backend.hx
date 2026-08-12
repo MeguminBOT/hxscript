@@ -191,6 +191,26 @@ class Backend {
 		if (exposed.length == 0)
 			return;
 
+		/**
+		 * A name nothing answers to refuses the module, rather than leaving a null in the global for
+		 * compiled code to use without looking.
+		 *
+		 * This used to be the other way round, on the reasoning that a null is what an interpreted
+		 * script gets for a name that is not there. It is not: the interpreter throws
+		 * `Unknown identifier`, and answering `null` instead is a different program. `haxe.Json` on a
+		 * host that never indexed it read as null and stringified to nothing, where every other mode
+		 * reported that the name was unreachable.
+		 *
+		 * The owner and not the field, because a field of a resolved owner may legitimately hold
+		 * null, and refusing on that would refuse any module naming a host static that starts empty.
+		 */
+		var unreachable:Null<String> = missingOwner(emitter.bindings, module, env);
+
+		if (unreachable != null) {
+			report.skipped.push({name: module.name, reason: 'names ' + unreachable + ', which nothing at runtime answers to'});
+			return;
+		}
+
 		var built = emitter.finish();
 		var bytes:haxe.io.Bytes = built.pack();
 		report.bytes += bytes.length;
@@ -241,6 +261,54 @@ class Backend {
 	static var retained:Array<Loaded> = [];
 
 	/**
+	 * @param bindings What the emitter asked to have filled.
+	 * @param env The world.
+	 * @return The first host name whose owner resolves to nothing, or null when they all resolve.
+	 */
+	static function missingOwner(bindings:Array<Binding>, module:Module, env:Environment):Null<String> {
+		for (binding in bindings) {
+			if (binding.kind != BHost)
+				continue;
+
+			if (hostOwner(binding.owner, module, env) == null)
+				return binding.field == '' ? binding.owner : binding.owner + '.' + binding.field;
+		}
+
+		return null;
+	}
+
+	/**
+	 * Finds what a name a script wrote refers to.
+	 *
+	 * **The module's own imports come first, and leaving them out was a real bug.** A script that
+	 * writes `import h2d.Object` names the class `Object` everywhere afterwards, which is what the
+	 * interpreter resolves through its import table and what nothing at all answers to as a path. So
+	 * every module of a real project bound null for it, and once unresolved names started refusing
+	 * rather than binding null, every module of a real project was refused. The corpus never showed
+	 * it because its cases import nothing.
+	 *
+	 * @param owner The name as the script wrote it.
+	 * @param module The module that wrote it, whose imports decide what a short name means.
+	 * @param env The world.
+	 * @return What it refers to, or null when nothing does.
+	 */
+	static function hostOwner(owner:String, module:Module, env:Environment):Dynamic {
+		if (module != null && module.interp != null && module.interp.imports.exists(owner)) {
+			var imported:Dynamic = module.interp.imports.get(owner);
+			if (imported != null)
+				return imported;
+		}
+
+		if (env.variables.exists(owner)) {
+			var held:Dynamic = env.variables.get(owner);
+			if (held != null)
+				return held;
+		}
+
+		return hxscript.types.TypeTools.resolve(owner, env);
+	}
+
+	/**
 	 * Finds the value a bound global should be filled with.
 	 *
 	 * @param binding What the emitter asked for.
@@ -250,11 +318,12 @@ class Backend {
 	 */
 	static function valueFor(binding:Binding, module:Module, env:Environment):Dynamic {
 		return switch (binding.kind) {
-			case BHost: hostValue(binding.owner, binding.field, env);
+			case BHost: hostValue(binding.owner, binding.field, module, env);
 			case BSupport: Emitter.support(binding.field);
 			case BConst: binding.value;
 			case BOwner: env.resolve(binding.owner);
 			case BModule: module.moduleFields;
+			case BSite: new hxscript.hl.Runtime.Slot();
 		}
 	}
 
@@ -272,10 +341,8 @@ class Backend {
 	 * @param env The world.
 	 * @return The value, or null when nothing answers to it.
 	 */
-	static function hostValue(owner:String, field:String, env:Environment):Dynamic {
-		var holder:Dynamic = env.variables.exists(owner) ? env.variables.get(owner) : null;
-		if (holder == null)
-			holder = hxscript.types.TypeTools.resolve(owner, env);
+	static function hostValue(owner:String, field:String, module:Module, env:Environment):Dynamic {
+		var holder:Dynamic = hostOwner(owner, module, env);
 		if (holder == null)
 			return null;
 
@@ -286,7 +353,103 @@ class Backend {
 		if (folded != null)
 			return folded;
 
-		return hxscript.proxy.ReflectProxy.field(holder, field);
+		/**
+		 * The property first, then the plain field. `Math.PI` is the case that needs it: it has no
+		 * runtime field of that name on every target, and asking only for the field bound null into
+		 * the global, so `Math.PI > 3` compiled to a comparison against nothing and answered false.
+		 * A wrong answer with nothing said about it, which is the worst shape a gap can take.
+		 */
+		var read:Dynamic = hxscript.proxy.ReflectProxy.getProperty(holder, field);
+		if (read == null)
+			read = hxscript.proxy.ReflectProxy.field(holder, field);
+
+		if (read == null)
+			read = enumValue(holder, field);
+
+		return read != null ? read : shimmed(owner, holder, field);
+	}
+
+	/**
+	 * Builds a constructor of an enum the host compiled.
+	 *
+	 * `haxe.ds.Option.None` is written like a static and is not one, so reflection answers nothing for
+	 * it and the global was filled with null. The interpreter builds it rather than reading it, and a
+	 * name bound here has to mean the same thing.
+	 *
+	 * @param holder What the owner resolved to.
+	 * @param field The constructor's name.
+	 * @return The value, a var-args builder when it takes parameters, or null when this is not one.
+	 */
+	static function enumValue(holder:Dynamic, field:String):Dynamic {
+		/**
+		 * Asked inside a `try`, because `getEnumName` is not the same question on every target: hxcpp
+		 * answers null for anything that is not an enum, and HashLink throws
+		 * `Can't cast $StringTools to hl.Enum`. That took the process down on the first host class a
+		 * script named after this was added.
+		 */
+		var named:Null<String> = try Type.getEnumName(holder) catch (e:Dynamic) null;
+		if (named == null)
+			return null;
+
+		var names:Array<String> = Type.getEnumConstructs(holder);
+		if (names == null)
+			return null;
+
+		var at:Int = names.indexOf(field);
+		if (at < 0)
+			return null;
+
+		/**
+		 * A constructor that takes parameters is bound as a builder rather than as a value, which is
+		 * what the interpreter binds for the same name. Building one with no arguments is not a
+		 * lesser answer, it is a throw at load time, and a throw while a module's globals are being
+		 * filled ends the process.
+		 *
+		 * Whether it takes any is asked the way the interpreter asks: `allEnums` lists exactly the
+		 * values that needed no arguments to exist, so a constructor missing from it is one that did.
+		 */
+		for (made in Type.allEnums(holder)) {
+			if (Type.enumConstructor(made) == field)
+				return made;
+		}
+
+		return Reflect.makeVarArgs(function(args:Array<Dynamic>):Dynamic {
+			return Type.createEnumIndex(holder, at, args);
+		});
+	}
+
+	/**
+	 * Finds an emulation for a member the target does not carry.
+	 *
+	 * `Config.callShims` exists because dead code elimination and `extern inline` leave members with
+	 * no runtime form, and the interpreter has consulted it for a long time. Compiled code did not,
+	 * so a script calling `StringTools.hex` answered interpreted and threw compiled, which is the
+	 * divergence this whole exercise is against: the same source, two answers, decided by a flag.
+	 *
+	 * Wrapped as a var-args closure because that is what a call site expects. A shim takes its
+	 * receiver and an array; a compiled call passes its arguments positionally and knows nothing
+	 * about either.
+	 *
+	 * @param owner The owner's name as the script wrote it.
+	 * @param holder What that name resolved to, passed to the shim as its receiver.
+	 * @param field The member's name.
+	 * @return A callable, or null when nothing emulates it.
+	 */
+	static function shimmed(owner:String, holder:Dynamic, field:String):Dynamic {
+		var shim:Null<(o:Dynamic, args:Array<Dynamic>) -> Dynamic> = hxscript.Config.callShims.get(owner + '.' + field);
+
+		if (shim == null) {
+			var named:Null<String> = try Type.getClassName(holder) catch (e:Dynamic) null;
+			if (named != null)
+				shim = hxscript.Config.callShims.get(named + '.' + field);
+		}
+
+		if (shim == null)
+			return null;
+
+		return Reflect.makeVarArgs(function(args:Array<Dynamic>):Dynamic {
+			return shim(holder, args);
+		});
 	}
 
 	/**

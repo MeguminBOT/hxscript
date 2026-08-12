@@ -806,11 +806,27 @@ class Emitter {
 			case KVar(v):
 				w.token('VAR');
 				w.bool(isStatic);
-				w.token(accessCode(v.get, pos));
-				w.token(accessCode(v.set, pos));
+				w.token(accessCode(v.get, true, pos));
+				w.token(accessCode(v.set, false, pos));
 				w.bool(false);
 				w.str(f.name);
-				w.type(v.type == null ? '' : typeName(v.type));
+
+				/**
+				 * A field declared `Bool` is given no type here, which is the one place this emitter
+				 * deliberately throws away what it knows.
+				 *
+				 * cppia has no boolean: `ExprTypeOf<bool>` is `etInt`, so a field typed `Bool` gets an
+				 * integer slot and every reader that does not know better sees 0 or 1. Conditions and
+				 * comparisons were fine; `Std.string`, concatenation and reflection were not, and a
+				 * host calling `Reflect.field` on a compiled instance got `1` where every other mode
+				 * gives `true`.
+				 *
+				 * An untyped slot holds an object, and hxcpp's `DataVal<bool>::runObject` boxes a real
+				 * `Bool` into one, under the JIT as well: its `genCode` for an object destination
+				 * calls the same `runObject`. So the value that lands is the value the interpreter
+				 * would have stored, and the only thing given up is the slot being an `int`.
+				 */
+				w.type(v.type == null || Backend.isBool(v.type) ? '' : typeName(v.type));
 
 				if (v.expr == null || !isStatic) {
 					w.int(0);
@@ -1178,7 +1194,14 @@ class Emitter {
 					return;
 				}
 
-				var built:String = resolveType(cl, e.pos);
+				/**
+				 * `Map` is not a type to resolve. It is Haxe's one `@:multiType`, so which class
+				 * `new Map()` becomes is decided by the key, and the name answers to nothing at
+				 * runtime: resolving it refused the module. The container that works out its own kind
+				 * is what a map literal already becomes here, and what the interpreter builds for the
+				 * same line, so all three agree about what a script's map is.
+				 */
+				var built:String = (cl == 'Map' || cl == 'haxe.ds.Map') && !typePaths.exists(cl) ? 'hxscript.runtime.AnyMap' : resolveType(cl, e.pos);
 				var wantedNew:Int = padArgs(declaredClass(built), 'new', params.length);
 				w.pos(line);
 				w.token('NEW');
@@ -1280,6 +1303,8 @@ class Emitter {
 					// statics taking the boxed value, and a call it did not recognise was emitted as an
 					// instance call on the type the abstract wraps, which the loader resolves to nothing.
 					var id:Int = declareVar(n, t == null ? inferType(init) : typeName(t));
+					var stored:String = t != null ? typeName(t) : literalType(init);
+
 					if (init == null) {
 						w.token('VARDECL');
 						w.str(n);
@@ -1291,7 +1316,7 @@ class Emitter {
 						w.str(n);
 						w.int(id);
 						w.bool(false);
-						storableType(t == null ? '' : typeName(t));
+						storableType(stored);
 						w.type('');
 
 						var declared:Null<String> = elementArray(t == null ? null : typeName(t));
@@ -1404,7 +1429,7 @@ class Emitter {
 				w.token('s');
 				w.str(member);
 				expectedArray = elementArray(inferType(e1));
-				expr(e2);
+				boolean(e2, line);
 				return;
 			}
 
@@ -1414,7 +1439,7 @@ class Emitter {
 			expr(e1);
 			writingTo = false;
 			expectedArray = elementArray(inferType(e1));
-			expr(e2);
+			boolean(e2, line);
 			return;
 		}
 
@@ -2735,8 +2760,48 @@ class Emitter {
 	 * @param pos Where the field is declared.
 	 * @return The one-character access code.
 	 */
-	function accessCode(mode:Null<String>, pos:Position):String {
+	/**
+	 * Writes a value being assigned, marking it as a boolean when that is what it is.
+	 *
+	 * **cppia has no boolean and this is the one place that shows.** `true` is a `DataVal<bool>`
+	 * whose expression type is `etInt`, so storing it in an object slot converts an integer and what
+	 * lands is a boxed `1`. Interpreted, `runObject` knows the C++ type was `bool` and boxes a real
+	 * one; the JIT asks `isBoolInt()` instead, which `DataVal` does not override, so it took the
+	 * integer path. Two answers for the same field depending on a flag.
+	 *
+	 * `CASTBOOL` is hxcpp's own answer to this: it reports `isBoolInt()`, so the JIT takes the branch
+	 * that stores `Dynamic(true)` or `Dynamic(false)`, and interpreted it boxes the same. It costs a
+	 * cast on the integer path, where the value is already 0 or 1.
+	 *
+	 * @param e The value.
+	 * @param line Where the assignment is.
+	 */
+	function boolean(e:Expr, line:Int):Void {
+		if (inferType(e) != 'Bool') {
+			expr(e);
+			return;
+		}
+
+		w.pos(line);
+		w.token('CASTBOOL');
+		expr(e);
+	}
+
+	function accessCode(mode:Null<String>, reading:Bool, pos:Position):String {
 		return switch (mode) {
+			/**
+			 * A `null` accessor means "only inside the declaring class", which Haxe settles at compile
+			 * time and the interpreter settles at run time by asking which interpreter is doing the
+			 * reading. Bytecode carries no such question: a compiled read is a field read and would
+			 * answer where every other mode throws.
+			 *
+			 * Refused on the read side, where the answer would otherwise be a value a script should
+			 * not have. The write side is left alone deliberately: `var x(default, null)` is a common
+			 * way to declare a field the outside may read and not write, and refusing every module
+			 * carrying one would cost far more speed than the divergence is worth. What is lost there
+			 * is an error nobody gets, rather than a wrong value somebody uses.
+			 */
+			case 'null' if (reading): throw new Unsupported('a field only its own class may read', pos);
 			case null | 'default' | 'null': 'N';
 			case 'get' | 'set' | 'dynamic': 'V';
 			case 'never': 'n';
@@ -2775,6 +2840,35 @@ class Emitter {
 	 *
 	 * @param path The declared type, or the empty string when there was none.
 	 */
+	/**
+	 * The type an unannotated local gets from a literal it is initialised with.
+	 *
+	 * Haxe infers here and this does not, which is a difference nobody notices until the width runs
+	 * out: `var n = 2147483647; n + 1` is `Int` arithmetic in Haxe and wraps, and a local left
+	 * dynamic promotes it to a `Float` instead. The interpreter wraps it and so does HashLink, whose
+	 * emitter reads the same literal, so this was the one of the three answering differently.
+	 *
+	 * Only a literal, and only the three types whose representation differs from a dynamic's. That
+	 * keeps it to the case Haxe infers unambiguously and where a later write of another type is a
+	 * compile error there anyway, rather than typing a slot from something that might be widened
+	 * later.
+	 *
+	 * @param init The initialiser.
+	 * @return `Int`, `Float`, `Bool`, or empty for anything else.
+	 */
+	function literalType(init:Null<Expr>):String {
+		if (init == null)
+			return '';
+
+		return switch (init.e) {
+			case EConst(CInt(_)): 'Int';
+			case EConst(CFloat(_)): 'Float';
+			case EIdent('true') | EIdent('false'): 'Bool';
+			case EParent(inner): literalType(inner);
+			case _: '';
+		}
+	}
+
 	function storableType(path:String):Void {
 		if (path == null || path.length == 0) {
 			w.unknownType();

@@ -52,6 +52,13 @@ class Runtime {
 	/**
 	 * Adds, which is also how strings are joined.
 	 *
+	 * **This is the dynamic path and only the dynamic path.** An operand with a type of its own is in
+	 * a typed register and its arithmetic is an instruction, which wraps, as Haxe's `Int` does.
+	 * Reaching here means at least one side was written `Dynamic` or came from somewhere untyped,
+	 * and arithmetic on a `Dynamic` promotes in Haxe rather than wrapping. So the two answers are
+	 * both right and the emitter picks between them by what the script declared, which is the same
+	 * rule the interpreter follows in `widensNumbers`.
+	 *
 	 * @param a The left operand.
 	 * @param b The right operand.
 	 * @return `Int` when both are `Int` and the sum fits, `String` when either is a string,
@@ -59,9 +66,12 @@ class Runtime {
 	 */
 	public static function add(a:Dynamic, b:Dynamic):Dynamic {
 		if (a is Int && b is Int) {
-			var wide:Float = (a : Float) + (b : Float);
-			var narrow:Int = (a : Int) + (b : Int);
-			return (narrow == wide) ? narrow : wide;
+			/** `Std.int`, for the reason the interpreter's own `numAdd` gives: `v is Int` is true of a
+			 * whole `Float`, and a cast leaves it one, which the bitwise test cannot take. */
+			var x:Int = Std.int(a);
+			var y:Int = Std.int(b);
+			var sum:Int = x + y;
+			return overflowed(x, y, sum) ? x * 1.0 + y * 1.0 : sum;
 		}
 		if (a is String || b is String)
 			return Std.string(a) + Std.string(b);
@@ -70,16 +80,34 @@ class Runtime {
 		return (a : Float) + (b : Float);
 	}
 
-	/** @return The difference, keeping `Int` when both operands are `Int` and it fits. */
+	/** @return The difference, promoting past the width for the reason `add` gives. */
 	public static function sub(a:Dynamic, b:Dynamic):Dynamic {
 		if (a is Int && b is Int) {
-			var wide:Float = (a : Float) - (b : Float);
-			var narrow:Int = (a : Int) - (b : Int);
-			return (narrow == wide) ? narrow : wide;
+			/** `Std.int`, for the reason the interpreter's own `numAdd` gives: `v is Int` is true of a
+			 * whole `Float`, and a cast leaves it one, which the bitwise test cannot take. */
+			var x:Int = Std.int(a);
+			var y:Int = Std.int(b);
+			var diff:Int = x - y;
+			return overflowed(x, -y, diff) ? x * 1.0 - y * 1.0 : diff;
 		}
 		if (a is AbstractValue || b is AbstractValue)
 			return arith('-', a, b);
 		return (a : Float) - (b : Float);
+	}
+
+	/**
+	 * Whether adding or subtracting two `Int`s carried past the width.
+	 *
+	 * The sign test rather than a comparison against the same result as a `Float`, which is the
+	 * interpreter's reason too: the float form reads differently per target, and this does not.
+	 *
+	 * @param x The left operand.
+	 * @param y The right operand, negated already when this was a subtraction.
+	 * @param sum What the wrapped operation produced.
+	 * @return Whether the true result is outside `Int`.
+	 */
+	static inline function overflowed(x:Int, y:Int, sum:Int):Bool {
+		return ((x ^ sum) & (y ^ sum)) < 0;
 	}
 
 	/** @return The product, keeping `Int` when both operands are `Int`. */
@@ -181,7 +209,7 @@ class Runtime {
 	 * on the object and one shared between every use of a literal would answer about the wrong
 	 * subject.
 	 */
-	public static function regex(pattern:String, flags:String):Dynamic {
+	public static function regex(pattern:Dynamic, flags:Dynamic):Dynamic {
 		return new EReg(pattern, flags);
 	}
 
@@ -193,6 +221,81 @@ class Runtime {
 	/** @return A new empty array, which is what a literal and a comprehension both start from. */
 	public static function array():Dynamic {
 		return new Array<Dynamic>();
+	}
+
+	/**
+	 * Builds an argument list in one call rather than one per argument.
+	 *
+	 * A call's arguments have to reach the runtime as an array, and building one by making it empty
+	 * and pushing into it costs a call per argument on top of the call being made. Almost every call
+	 * a script writes has three arguments or fewer, so those three shapes are worth having: one call,
+	 * one allocation, no growth.
+	 */
+	public static function args0():Dynamic {
+		return [];
+	}
+
+	/** @return A one-argument list. */
+	public static function args1(a:Dynamic):Dynamic {
+		return [a];
+	}
+
+	/** @return A two-argument list. */
+	public static function args2(a:Dynamic, b:Dynamic):Dynamic {
+		return [a, b];
+	}
+
+	/** @return A three-argument list. */
+	public static function args3(a:Dynamic, b:Dynamic, c:Dynamic):Dynamic {
+		return [a, b, c];
+	}
+
+	/**
+	 * Calls a function value the host owns.
+	 *
+	 * Not `OCallClosure` on it directly, which is what this used to be. HashLink checks a dynamic
+	 * call against the callee's real signature and refuses one that leaves an optional argument off:
+	 * `Lambda.count(list)` is one argument to a function that declares two, and the VM reports
+	 * `Missing arguments : 2 expected but 1 passed` rather than applying the default. `Reflect` knows
+	 * how to pad it, and is what the interpreter has always called the same function through, so this
+	 * is also what makes the two agree.
+	 *
+	 * @param fn The function.
+	 * @param args Its arguments.
+	 * @return What it answered.
+	 */
+	public static function call(fn:Dynamic, args:Dynamic):Dynamic {
+		return Reflect.callMethod(null, fn, (args : Array<Dynamic>));
+	}
+
+	/**
+	 * Calls a named member, remembering where it was found.
+	 *
+	 * The same memory `fetch` keeps, for the same reason: a method lives in the instance's slots as a
+	 * closure already bound to it, so finding one is the same string hash a field read was, and a
+	 * call site asks the same question of the same receiver over and over.
+	 *
+	 * @param o The receiver.
+	 * @param name The method's name.
+	 * @param args Its arguments.
+	 * @param site This call site's own memory.
+	 * @return What it answered.
+	 */
+	public static function dispatch(o:Dynamic, name:Dynamic, args:Dynamic, site:Dynamic):Dynamic {
+		if (o is IScriptedInstance) {
+			var cell:Slot = cast site;
+			var inst:IScriptedInstance = cast o;
+			var held:Null<Variable> = (cell.owner == inst) ? cell.held : remember(inst, name, cell);
+
+			if (held != null) {
+				var fn:Dynamic = held.a != null ? held.a : held.r;
+
+				if (fn != null)
+					return Reflect.callMethod(o, fn, (args : Array<Dynamic>));
+			}
+		}
+
+		return send(o, name, args, null);
 	}
 
 	/** Appends to an array. */
@@ -234,7 +337,7 @@ class Runtime {
 	}
 
 	/** Puts a named field on a value, which is how an object literal is filled. */
-	public static function setField(o:Dynamic, name:String, v:Dynamic):Void {
+	public static function setField(o:Dynamic, name:Dynamic, v:Dynamic):Void {
 		Reflect.setField(o, name, v);
 	}
 
@@ -250,7 +353,7 @@ class Runtime {
 	 * value with no accessor for the name answers with the field, so asking for the property is the
 	 * one question with a right answer either way.
 	 */
-	public static function get(o:Dynamic, name:String):Dynamic {
+	public static function get(o:Dynamic, name:Dynamic):Dynamic {
 		if (o is ScriptedAbstractValue) {
 			var boxed:ScriptedAbstractValue = cast o;
 			if (boxed.owner != null)
@@ -307,7 +410,7 @@ class Runtime {
 	 * @param args Its arguments.
 	 * @return What it answered.
 	 */
-	public static function invoke(o:Dynamic, name:String, args:Array<Dynamic>):Dynamic {
+	public static function invoke(o:Dynamic, name:Dynamic, args:Dynamic):Dynamic {
 		if (o is ScriptedAbstractValue) {
 			var boxed:ScriptedAbstractValue = cast o;
 			if (boxed.owner != null)
@@ -338,7 +441,7 @@ class Runtime {
 	 * @param self The instance.
 	 * @return Its mirror, or null.
 	 */
-	static function mirror(self:Dynamic, owner:String):Dynamic {
+	static function mirror(self:Dynamic, owner:Dynamic):Dynamic {
 		if (!(self is IScriptedInstance))
 			return null;
 
@@ -358,7 +461,7 @@ class Runtime {
 	 * @param name The field.
 	 * @return The base's version of it, or null when there is none.
 	 */
-	static function superSlot(self:Dynamic, owner:String, name:String):Dynamic {
+	static function superSlot(self:Dynamic, owner:Dynamic, name:Dynamic):Dynamic {
 		var found:Dynamic = mirror(self, owner);
 		if (found == null || !(found is Reference))
 			return null;
@@ -384,7 +487,7 @@ class Runtime {
 	 * @param args Its arguments.
 	 * @return What it answered.
 	 */
-	public static function superCall(self:Dynamic, owner:String, name:String, args:Array<Dynamic>):Dynamic {
+	public static function superCall(self:Dynamic, owner:Dynamic, name:Dynamic, args:Dynamic):Dynamic {
 		var found:Dynamic = superSlot(self, owner, name);
 
 		/**
@@ -412,7 +515,7 @@ class Runtime {
 	 * @param name The field.
 	 * @return Its value.
 	 */
-	public static function superGet(self:Dynamic, owner:String, name:String):Dynamic {
+	public static function superGet(self:Dynamic, owner:Dynamic, name:Dynamic):Dynamic {
 		var found:Dynamic = superSlot(self, owner, name);
 		return found == null ? get(self, name) : found;
 	}
@@ -426,7 +529,7 @@ class Runtime {
 	 * @param self The instance.
 	 * @param args The arguments.
 	 */
-	public static function superNew(self:Dynamic, owner:String, args:Array<Dynamic>):Void {
+	public static function superNew(self:Dynamic, owner:Dynamic, args:Dynamic):Void {
 		var found:Dynamic = mirror(self, owner);
 
 		if (found != null && found is Reference) {
@@ -461,12 +564,178 @@ class Runtime {
 	}
 
 	/**
+	 * Reads a field, remembering where it was so the next read of the same one is two instructions.
+	 *
+	 * **This is the whole of the field optimisation and it is worth saying why it works.** A scripted
+	 * instance keeps its fields in a `Map<String, Variable>`, so every read was a string hash, and
+	 * that is most of what made a compiled field access barely faster than an interpreted one. The
+	 * hash cannot be removed, but it can be paid once: the `Variable` a name resolves to is created
+	 * when the instance is built and mutated in place forever after, so a site that has resolved one
+	 * may hold on to it and check only that the receiver is the same object.
+	 *
+	 * Each field access in the emitted code gets its own `Slot`, filled the first time it runs. A hit
+	 * is a pointer compare and a field read. A miss is what the read cost before, plus the compare,
+	 * which is why a site that sees a different instance every time is no worse than it was.
+	 *
+	 * Only plain fields are ever cached. A property has to reach its accessor every time, and one
+	 * that is not in the instance's slots at all belongs to the host half of a bridge, which this
+	 * knows nothing about; both fall through to the uncached reader, which is the same answer by the
+	 * same route as before.
+	 *
+	 * @param o The receiver.
+	 * @param name The field.
+	 * @param site This access's own memory.
+	 * @return The value.
+	 */
+	public static function fetch(o:Dynamic, name:Dynamic, site:Dynamic):Dynamic {
+		if (o is IScriptedInstance) {
+			var inst:IScriptedInstance = cast o;
+			var held:Null<Variable> = (site.owner == inst) ? site.held : remember(inst, name, site);
+
+			if (held != null)
+				return held.a != null ? held.a : held.r;
+		}
+
+		return get(o, name);
+	}
+
+	/**
+	 * Writes a field, through the same memory `fetch` keeps.
+	 *
+	 * The write itself still goes through the interpreter's own `writeLocal`, so finality, method
+	 * rebinding and the declared type are all checked exactly as they were. What the cache saves is
+	 * finding the slot, which is the part that was costing.
+	 *
+	 * @param o The receiver.
+	 * @param name The field.
+	 * @param v The value.
+	 * @param site This access's own memory.
+	 */
+	public static function store(o:Dynamic, name:Dynamic, v:Dynamic, site:Dynamic):Void {
+		if (o is IScriptedInstance) {
+			var cell:Slot = cast site;
+			var inst:IScriptedInstance = cast o;
+			var held:Null<Variable> = (cell.owner == inst) ? cell.held : remember(inst, name, cell);
+
+			if (held != null) {
+				if (!quick(cell, held, v))
+					@:privateAccess cell.interp.writeLocal(held, name, v);
+
+				return;
+			}
+		}
+
+		set(o, name, v);
+	}
+
+	/**
+	 * Writes a slot the site has already established is an ordinary one.
+	 *
+	 * **This is where the remaining cost of a field write was.** The interpreter's own write is
+	 * correct and general: it checks finality, then whether a method is being rebound, then casts the
+	 * value against the declared type, and that last one alone is a map lookup and a walk through
+	 * every kind of type a script can write. Per assignment, in a loop.
+	 *
+	 * None of it can be dropped, but almost all of it can be decided once. What the declaration wants
+	 * is fixed when the site is first resolved; what is left per write is one test that the value is
+	 * still that kind, and the three guards below, which are a field read each. Anything that does
+	 * not answer plainly falls through to the interpreter's own write, which is what defines the
+	 * behaviour this is a shortcut for.
+	 *
+	 * @param site The resolved site.
+	 * @param held The slot.
+	 * @param v The value.
+	 * @return Whether it was written here.
+	 */
+	static function quick(site:Slot, held:Variable, v:Dynamic):Bool {
+		if (held.a != null || held.isFinal || Reflect.isFunction(held.r))
+			return false;
+
+		switch (site.wants) {
+			case WAnything:
+				held.r = v;
+				return true;
+
+			case WInt:
+				if (!(v is Int))
+					return false;
+				held.r = v;
+				return true;
+
+			case WFloat:
+				if (!(v is Float))
+					return false;
+				held.r = (v : Float);
+				return true;
+
+			case WBool:
+				if (!(v is Bool))
+					return false;
+				held.r = v;
+				return true;
+
+			case WString:
+				if (!(v is String))
+					return false;
+				held.r = v;
+				return true;
+
+			case _:
+				return false;
+		}
+	}
+
+	/**
+	 * Resolves a field once and fills a site with it.
+	 *
+	 * @param inst The receiver.
+	 * @param name The field.
+	 * @param site The site to fill.
+	 * @return The slot, or null when this one is not the kind that may be remembered.
+	 */
+	static function remember(inst:IScriptedInstance, name:Dynamic, site:Slot):Null<Variable> {
+		var slots:Map<String, Variable> = @:privateAccess inst.__vars;
+		var held:Null<Variable> = slots == null ? null : slots.get(name);
+
+		if (held == null || held.get != null || held.set != null)
+			return null;
+
+		site.owner = inst;
+		site.held = held;
+		site.interp = @:privateAccess inst.__interp;
+		site.wants = wanted(held.t);
+
+		return held;
+	}
+
+	/**
+	 * @param t What a slot was declared as.
+	 * @return Which of the kinds a write to it can be checked against without casting.
+	 */
+	static function wanted(t:Null<hxscript.syntax.Expr.CType>):Wants {
+		if (t == null)
+			return WAnything;
+
+		return switch (t) {
+			case CTPath(path, _) if (path.length == 1):
+				switch (path[0]) {
+					case 'Int': WInt;
+					case 'Float': WFloat;
+					case 'Bool': WBool;
+					case 'String': WString;
+					case _: WChecked;
+				}
+			case _: WChecked;
+		}
+	}
+
+	/**
 	 * Writes a named field of something a script declared, through its setter when it has one.
 	 *
 	 * The instance's own slots first, for the reason `get` gives: it is one lookup instead of a
 	 * search, and it is the write the interpreter performs for the same field.
 	 */
-	public static function set(o:Dynamic, name:String, v:Dynamic):Void {
+	public static function set(o:Dynamic, name:Dynamic, v:Dynamic):Void {
 		if (o is IScriptedInstance) {
 			var inst:IScriptedInstance = cast o;
 			var slots:Map<String, Variable> = @:privateAccess inst.__vars;
@@ -516,6 +785,17 @@ class Runtime {
 	}
 
 	/**
+	 * @return A map whose implementation is picked once a key arrives.
+	 *
+	 * `Map` is Haxe's one `@:multiType`: which class `new Map()` becomes is decided by the key type,
+	 * and there is no type here to decide it with. The interpreter answers the same way, with the
+	 * container that works out its own kind, so the two agree about what a script's map is.
+	 */
+	public static function anyMap():Dynamic {
+		return new hxscript.runtime.AnyMap();
+	}
+
+	/**
 	 * Calls a method on a value, falling back to whatever the module brought into scope with `using`.
 	 *
 	 * Whether a name is the value's own method or a static that takes it first cannot be settled
@@ -527,7 +807,7 @@ class Runtime {
 	 * @param extensions The types `using` brought in, or null when there were none.
 	 * @return What the method answered.
 	 */
-	public static function send(o:Dynamic, name:String, args:Dynamic, extensions:Dynamic):Dynamic {
+	public static function send(o:Dynamic, name:Dynamic, args:Dynamic, extensions:Dynamic):Dynamic {
 		if (o != null && (o is ScriptedAbstractValue || get(o, name) != null))
 			return invoke(o, name, (args : Array<Dynamic>));
 
@@ -556,7 +836,7 @@ class Runtime {
 	 * @param name The constructor's name.
 	 * @param args What it was given.
 	 */
-	public static function enumOf(type:Dynamic, name:String, args:Dynamic):Dynamic {
+	public static function enumOf(type:Dynamic, name:Dynamic, args:Dynamic):Dynamic {
 		return hxscript.proxy.TypeProxy.createEnum(type, name, (args : Array<Dynamic>));
 	}
 
@@ -571,12 +851,12 @@ class Runtime {
 	}
 
 	/** @return Whether a value carries a named field, which is what an object pattern asks first. */
-	public static function has(o:Dynamic, name:String):Bool {
+	public static function has(o:Dynamic, name:Dynamic):Bool {
 		return o != null && hxscript.proxy.ReflectProxy.hasField(o, name);
 	}
 
 	/** @return Whether a value is an array of exactly this length, which an array pattern asks first. */
-	public static function sized(o:Dynamic, n:Int):Bool {
+	public static function sized(o:Dynamic, n:Dynamic):Bool {
 		return (o is Array) && (o : Array<Dynamic>).length == n;
 	}
 
@@ -625,7 +905,7 @@ class Runtime {
 		if (v is IntIterator)
 			return v;
 
-		var own:Dynamic = Reflect.field(v, 'iterator');
+		var own:Dynamic = get(v, 'iterator');
 		return own != null ? Reflect.callMethod(v, own, []) : v;
 	}
 
@@ -637,18 +917,26 @@ class Runtime {
 		if (v is Array)
 			return (v : Array<Dynamic>).keyValueIterator();
 
-		var own:Dynamic = Reflect.field(v, 'keyValueIterator');
+		var own:Dynamic = get(v, 'keyValueIterator');
 		return own != null ? Reflect.callMethod(v, own, []) : v;
 	}
 
-	/** @return Whether an iterator has anything left. */
+	/**
+	 * @return Whether an iterator has anything left.
+	 *
+	 * Through `get` rather than `Reflect.field`, and that is the difference between working and not
+	 * on a class a script declared. Its members live in the instance's own slots, which the standard
+	 * reflection does not look in, so `hasNext` came back null and calling it said only that null is
+	 * not a function. A `for` over an object with `hasNext` and `next` of its own, no `iterator`
+	 * method at all, is ordinary Haxe and this is what makes it reach one.
+	 */
 	public static function step(it:Dynamic):Bool {
-		return Reflect.callMethod(it, Reflect.field(it, 'hasNext'), []) == true;
+		return invoke(it, 'hasNext', []) == true;
 	}
 
-	/** @return An iterator's next value. */
+	/** @return An iterator's next value, reached the way `step` reaches its companion. */
 	public static function take(it:Dynamic):Dynamic {
-		return Reflect.callMethod(it, Reflect.field(it, 'next'), []);
+		return invoke(it, 'next', []);
 	}
 
 	/**
@@ -714,5 +1002,53 @@ class Runtime {
 			default: l == r;
 		}
 	}
+}
+
+/**
+ * What one field access in the compiled code remembers about the last one it did.
+ *
+ * One of these per access site, filled into a module global before anything runs, exactly the way a
+ * host static is. Holding the `Variable` rather than an index is what makes it correct without any
+ * layout being agreed on: the slot an instance's field resolves to is made when the instance is
+ * built and mutated in place from then on, so a site holding one is holding the field itself.
+ *
+ * It keeps the last receiver alive, which is the whole of its cost: one object per site that would
+ * otherwise have been collected a little sooner.
+ */
+class Slot {
+	/** The instance this was last resolved against, or null before the first time. */
+	public var owner:Null<IScriptedInstance> = null;
+
+	/** That instance's slot for this field. */
+	public var held:Null<Variable> = null;
+
+	/** The interpreter that owns the slot, for a write to go through its own checks. */
+	public var interp:Null<hxscript.runtime.Interp> = null;
+
+	/** What a write to it has to be, worked out once from the declaration. */
+	public var wants:Wants = WChecked;
+
+	/** Starts empty, which is a miss, which fills it. */
+	public function new() {}
+}
+
+/**
+ * What a slot's declaration wants of a value being written to it.
+ *
+ * Read once when a site resolves, so that a write only has to test the value rather than work out
+ * what to test it against. `WChecked` is everything else, and means the interpreter's own cast has
+ * to run, which is always correct and is what this exists to skip in the ordinary cases.
+ */
+enum abstract Wants(Int) {
+	/** No annotation, so anything goes, exactly as an unchecked store does. */
+	var WAnything;
+
+	var WInt;
+	var WFloat;
+	var WBool;
+	var WString;
+
+	/** Anything with a cast behind it: an abstract, a class, a structure, a container. */
+	var WChecked;
 }
 #end
