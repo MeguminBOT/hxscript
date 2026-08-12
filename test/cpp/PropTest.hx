@@ -1,6 +1,6 @@
 import hxscript.Environment;
 import hxscript.Module;
-import hxscript.compile.Cppia;
+import hxscript.cppia.Backend;
 import hxscript.compile.Result;
 import hxscript.types.ScriptedClass;
 
@@ -61,7 +61,7 @@ class T {
 		report('interpreted, batch accessor', Reflect.callMethod(null, cls.reflectGetField('viaAccessor'), []));
 
 		var decls = new hxscript.syntax.Parser().parseModule(SRC, 'T', 0, ['p']);
-		var r:Result = Cppia.compile([{name: 'p.T', decls: decls}], ['HostSink']);
+		var r:Result = Backend.compile([{name: 'p.T', decls: decls}], ['HostSink']);
 		if (r.bytes == null) {
 			TestCase.bad('compile', 'refused: ' + r.skipped[0].reason);
 			return;

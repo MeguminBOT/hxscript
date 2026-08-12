@@ -1,7 +1,7 @@
 import haxe.io.Bytes;
 import hxscript.Environment;
 import hxscript.Module;
-import hxscript.compile.Cppia;
+import hxscript.cppia.Backend;
 import hxscript.compile.Unit;
 import hxscript.compile.Result;
 import hxscript.types.ScriptedClass;
@@ -418,7 +418,7 @@ class CppiaTest {
 			return;
 		}
 
-		var result:Result = Cppia.compile([{name: 'p.T', decls: decls}]);
+		var result:Result = Backend.compile([{name: 'p.T', decls: decls}]);
 
 		if (result.bytes == null) {
 			refused++;
@@ -457,7 +457,7 @@ class CppiaTest {
 			return;
 		}
 
-		var result:Result = Cppia.compile([{name: 'p.T', decls: decls}]);
+		var result:Result = Backend.compile([{name: 'p.T', decls: decls}]);
 
 		if (result.bytes != null) {
 			TestCase.bad(label, 'the emitter accepted it');

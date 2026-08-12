@@ -1,6 +1,6 @@
 import hxscript.Environment;
 import hxscript.Module;
-import hxscript.compile.Cppia;
+import hxscript.cppia.Backend;
 import hxscript.compile.Unit;
 import hxscript.compile.Result;
 import hxscript.types.ScriptedClass;
@@ -306,11 +306,11 @@ class ShapeEntry {
 				continue;
 			}
 
-			for (declared in Cppia.declaredPaths(decls))
+			for (declared in Backend.declaredPaths(decls))
 				outside.push(declared);
 		}
 
-		var result:Result = Cppia.compile(inputs, null, outside, ['bonus=CppiaWorldTest::bonus']);
+		var result:Result = Backend.compile(inputs, null, outside, ['bonus=CppiaWorldTest::bonus']);
 		if (result.bytes == null)
 			return;
 
@@ -323,7 +323,7 @@ class ShapeEntry {
 			for (d in input.decls)
 				declared.push(d);
 
-		for (path in Cppia.declaredPaths(declared)) {
+		for (path in Backend.declaredPaths(declared)) {
 			var cls:Class<Dynamic> = loaded.resolveClass(path);
 			if (cls != null)
 				env.compiled.set(path, cls);

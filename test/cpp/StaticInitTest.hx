@@ -1,6 +1,6 @@
 import hxscript.Environment;
 import hxscript.Module;
-import hxscript.compile.Cppia;
+import hxscript.cppia.Backend;
 import hxscript.compile.Unit;
 import hxscript.compile.Result;
 import hxscript.types.ScriptedClass;
@@ -249,7 +249,7 @@ class Reader {
 				outside.push(path);
 		}
 
-		var result:Result = Cppia.compile(inputs, null, outside, []);
+		var result:Result = Backend.compile(inputs, null, outside, []);
 		if (result.bytes == null)
 			return;
 

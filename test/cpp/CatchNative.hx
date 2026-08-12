@@ -1,6 +1,6 @@
 import hxscript.Environment;
 import hxscript.Module;
-import hxscript.compile.Cppia;
+import hxscript.cppia.Backend;
 import hxscript.compile.Result;
 import hxscript.types.ScriptedClass;
 
@@ -39,7 +39,7 @@ class T {
 		Sys.println('interpreted -> ' + safely(cls.reflectGetField('run')));
 
 		var decls = new hxscript.syntax.Parser().parseModule(SRC, 'T', 0, ['p']);
-		var r:Result = Cppia.compile([{name: 'p.T', decls: decls}]);
+		var r:Result = Backend.compile([{name: 'p.T', decls: decls}]);
 		if (r.bytes == null) {
 			Sys.println('refused: ' + r.skipped[0].reason);
 			return;

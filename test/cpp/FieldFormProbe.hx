@@ -1,4 +1,4 @@
-import hxscript.compile.Cppia;
+import hxscript.cppia.Backend;
 import hxscript.compile.Unit;
 import hxscript.compile.Result;
 import hxscript.syntax.Parser;
@@ -28,14 +28,14 @@ class FieldFormProbe {
 		}
 
 		if (Sys.args().length > 1)
-			Cppia.echoTarget = Sys.args()[1];
+			Backend.echoTarget = Sys.args()[1];
 
-		var result:Result = Cppia.compile(inputs, ambient(), null, ambientStatics());
+		var result:Result = Backend.compile(inputs, ambient(), null, ambientStatics());
 
-		if (Cppia.echoed != null) {
+		if (Backend.echoed != null) {
 			Sys.println('');
-			Sys.println('--- ' + Cppia.echoTarget + ' ---');
-			Sys.println(Cppia.echoed);
+			Sys.println('--- ' + Backend.echoTarget + ' ---');
+			Sys.println(Backend.echoed);
 			return;
 		}
 		Sys.println('modules: ' + inputs.length + '   compiled: ' + result.compiled.length + '   skipped: ' + result.skipped.length);

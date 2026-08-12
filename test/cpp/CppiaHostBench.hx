@@ -1,6 +1,6 @@
 import hxscript.Environment;
 import hxscript.Module;
-import hxscript.compile.Cppia;
+import hxscript.cppia.Backend;
 import hxscript.compile.Result;
 import hxscript.types.ScriptedClass;
 
@@ -209,7 +209,7 @@ class A {
 		var interpAnswer:Dynamic = last;
 
 		var decls = new hxscript.syntax.Parser().parseModule(source, name, 0, ['p']);
-		var result:Result = Cppia.compile([{name: path, decls: decls}], ['HostSink']);
+		var result:Result = Backend.compile([{name: path, decls: decls}], ['HostSink']);
 
 		if (result.bytes == null) {
 			Sys.println(pad(label, 16) + 'refused: ' + result.skipped[0].reason);

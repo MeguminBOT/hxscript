@@ -26,4 +26,9 @@ class Report {
 
 	/** Whether the world now reaches its scripted classes through their compiled form. */
 	public var substituting:Bool;
+
+	/** @return A report of nothing having happened, which is where every run starts. */
+	public static function empty():Report {
+		return {compiled: [], skipped: [], failed: [], ms: 0, bytes: 0, substituting: false};
+	}
 }
