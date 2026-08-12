@@ -1,0 +1,10 @@
+# Turns the collected conformance columns into docs/support-table.md. Run from the repository root,
+# after `sh test/lib/conformance.sh`.
+#
+#   haxe test/lib/table.hxml
+#
+# Exits non-zero when a column disagrees with its target's interpreter, or when a case with a
+# written answer produced a different one.
+-cp test/lib
+-main Table
+--interp

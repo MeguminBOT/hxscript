@@ -82,6 +82,8 @@ class Frontier {
 		probe('mixed array and map literal', 'var m = [1 => 2, 3]; return Std.string(m);');
 		probe('a property declared dynamic', 'return Std.string(v);', 'public static var v(dynamic, never):Int; static function get_v() return 7;');
 		probe('a property declared null', 'return Std.string(new T().v);', 'public var v(null, null):Int = 7; public function new() {}');
+		probe('a property through Reflect.field', 'return Std.string(Reflect.field(new T(), "v"));',
+			'public var v(get, never):Int; function get_v() return 7; public function new() {}');
 		probe('super as a value, not a call', 'return new Child().grab();', null,
 			'class Base { public function new() {} public function speak():String return "base"; }\n'
 			+ 'class Child extends Base { public function new() { super(); } '
