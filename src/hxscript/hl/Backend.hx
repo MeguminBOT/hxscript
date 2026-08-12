@@ -49,12 +49,19 @@ class Backend {
 	 * Types a script may name without importing them, as full paths.
 	 *
 	 * Declared because it is part of the configuration every backend takes, and a host should not
-	 * have to know which one it got. Nothing reads it yet: a compiled function cannot reach out of
-	 * its own batch here until host calls land.
+	 * have to know which one it got. Nothing reads it here, and nothing needs to: a name written the
+	 * way a type is, that is not one of the batch's own, is already resolved against the world when
+	 * the module loads, so an ambient type costs no configuration on this target.
 	 */
 	public static var ambient:Array<String> = [];
 
-	/** Bare names the host answers with a static of its own, written `name=owner.path::field`. */
+	/**
+	 * Bare names the host answers with a static of its own, written `name=owner.path::field`.
+	 *
+	 * These do need saying, because a bare name that is neither a local, a field nor a type has
+	 * nothing about it to resolve. `Emitter.ambientStatics` reads them the same way the cppia
+	 * backend does, so a host configures both targets identically.
+	 */
 	public static var statics:Array<String> = [];
 
 	/** Whether this build carries the emitter, which `-D hxscript_hl` decides. */
@@ -129,6 +136,7 @@ class Backend {
 	static function one(module:Module, env:Environment, report:Report):Void {
 		var emitter:Emitter = new Emitter();
 		emitter.pack = module.pack == null ? '' : module.pack.join('.');
+		emitter.ambientStatics(statics);
 
 		try {
 			emitter.declare(module.decls, module.name);

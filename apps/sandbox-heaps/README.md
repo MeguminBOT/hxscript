@@ -205,23 +205,25 @@ else.
 > JIT is turned on, so there the two are worth separating. HashLink jits whatever it loads, so
 > bytecode here is already machine code and a third setting would be a control that did nothing.
 
-### Both templates are interpreted today, and the log says why
+### One template compiles, one does not, and the log says why
 
-Worth stating rather than letting somebody discover it. The HashLink backend answers 167 of the 168
-shared corpus cases, but the corpus is **self-contained scripts**, and a script in a real application
-is not self-contained. Two things it reaches for are not implemented yet, and each makes its module
-fall back to the interpreter:
+`plain` compiles in full. `heaps` is refused and interpreted, and the reason is worth knowing rather
+than discovering:
 
-| the log says | what is missing |
-| --- | --- |
-| `super, which is neither a local nor a field here` | `super.m(...)` and `super(...)`. cppia emits `CALLSUPER`; HashLink has no equivalent yet |
-| `log, which is neither a local nor a field here` | bare `@:scriptStatic` names such as `log`, `info` and `overlayShown`. `hl.Backend.statics` is declared and unread |
+```
+compiled 0 class(es); interpreting Playground: super(), because a class of this
+batch is compiled with no base; all interpreted
+```
 
-Both are the same shape of gap: **reaching out of the compiled batch into the host**, which
-`hl/Backend.hx` says outright it does not do yet. The refusal is the designed behaviour rather than a
-fault, and it costs speed and nothing else, which is why the templates still run correctly on every
-build here. It does mean this app currently demonstrates the *shipping* difference rather than a
-speed difference, and it is the reason to fix those two before it can demonstrate both.
+**HashLink compiles a batch's classes into module types of its own**, which is also why `v is C` is
+refused for a class of the batch: the instances a loaded module makes are its own. Nothing models
+`extends` there yet, so a class with a base is compiled as if it had none and `super` has nothing to
+reach. cppia has `CALLSUPER` and passes the same cases, so this is a gap between the two backends
+rather than something neither can do.
+
+The refusal is the designed behaviour rather than a fault: the module is interpreted, costs speed and
+nothing else, and every answer stays right. `test/lib/Corpus.hx` now carries four `super` cases, so
+the gap is a number both backends are held to instead of something a real app finds by surprise.
 
 **The check takes ten seconds**: set the run mode to interpreted. If the behaviour changes back, it
 is the compiler rather than your script.

@@ -357,5 +357,30 @@ class Corpus {
 		check('is operator, false', 'var s:Dynamic = 5; return s is String;', 'false');
 		check('is operator on a scripted class', 'var v:Dynamic = new T(); return v is T;', 'true',
 			'public function new() {}');
+
+		check('super call', 'return new Child().speak();', 'base then child',
+			null,
+			'class Base { public function new() {} public function speak():String return "base"; }\n'
+			+ 'class Child extends Base { public function new() { super(); } '
+			+ 'override public function speak():String return super.speak() + " then child"; }');
+
+		check('super constructor with an argument', 'return new Child(7).total();', '9',
+			null,
+			'class Base { var n:Int; public function new(n:Int) { this.n = n; } public function total():Int return n; }\n'
+			+ 'class Child extends Base { public function new(n:Int) { super(n + 2); } }');
+
+		check('super field read', 'return new Child().borrowed();', 'held',
+			null,
+			'class Base { public var kept:String; public function new() { kept = "held"; } }\n'
+			+ 'class Child extends Base { public function new() { super(); } '
+			+ 'public function borrowed():String return super.kept; }');
+
+		check('super two deep', 'return new C().name();', 'A/B/C',
+			null,
+			'class A { public function new() {} public function name():String return "A"; }\n'
+			+ 'class B extends A { public function new() { super(); } '
+			+ 'override public function name():String return super.name() + "/B"; }\n'
+			+ 'class C extends B { public function new() { super(); } '
+			+ 'override public function name():String return super.name() + "/C"; }');
 	}
 }

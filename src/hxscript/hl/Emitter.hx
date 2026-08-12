@@ -119,6 +119,15 @@ class Emitter {
 	/** Which enum each constructor name belongs to, so a bare one can be resolved. */
 	var constructors:StringMap<String>;
 
+	/**
+	 * Bare names the host answers with a static of its own, as owner and field.
+	 *
+	 * A host may put a name in scope that is neither a local, a field, nor a type: a helper it gives
+	 * every script, such as `log` or `trace`. The interpreter has one injected into it, and compiled
+	 * code has no interpreter to inject into, so the name has to be reached where it actually lives.
+	 */
+	var ambientMembers:StringMap<{owner:String, field:String}>;
+
 	/** Whether the module declares fields of its own, outside any class. */
 	var loose:Bool;
 
@@ -181,6 +190,7 @@ class Emitter {
 		owned = new StringMap();
 		declared = new StringMap();
 		constructors = new StringMap();
+		ambientMembers = new StringMap();
 		loose = false;
 		usings = [];
 		inside = null;
@@ -955,10 +965,19 @@ class Emitter {
 					return;
 				}
 
+				if (ambientMembers.exists(name)) {
+					var host:{owner:String, field:String} = ambientMembers.get(name);
+					emitHostRead(host.owner, host.field, slot);
+					return;
+				}
+
 				if (!loose)
 					throw new Unsupported(name + ', which is neither a local nor a field here', e.pos);
 
 				callSupport('get', [looseOwner(), named(name)], slot);
+
+			case EField({e: EIdent('super')}, name, _):
+				throw new Unsupported('super.' + name + ', because a class of this batch is compiled with no base', e.pos);
 
 			case EField({e: EIdent(cls)}, name, _) if (isStaticOf(cls, name)):
 				staticRead(cls, name, slot, e.pos);
@@ -1251,6 +1270,16 @@ class Emitter {
 	 * about the type, and the answer then reads back as an address rather than as a number.
 	 */
 	function emitCall(callee:Expr, params:Array<Expr>, slot:Int, pos:Position):Void {
+		switch (callee.e) {
+			case EField({e: EIdent('super')}, name, _):
+				throw new Unsupported('super.' + name + ', because a class of this batch is compiled with no base', pos);
+
+			case EIdent('super'):
+				throw new Unsupported('super(), because a class of this batch is compiled with no base', pos);
+
+			case _:
+		}
+
 		var method:Null<{on:Expr, sig:Signature}> = methodCall(callee);
 		if (method != null) {
 			if (params.length != method.sig.args.length - 1)
@@ -1292,6 +1321,12 @@ class Emitter {
 			var host:Null<{owner:String, field:String}> = hostName(callee);
 			if (host != null) {
 				emitHostCall(host.owner, host.field, params, slot, pos);
+				return;
+			}
+
+			var bare:Null<{owner:String, field:String}> = ambientCallee(callee);
+			if (bare != null) {
+				emitHostCall(bare.owner, bare.field, params, slot, pos);
 				return;
 			}
 
@@ -2080,6 +2115,51 @@ class Emitter {
 	inline function isTypeName(name:String):Bool {
 		var head:String = name.charAt(0);
 		return head == head.toUpperCase() && head != head.toLowerCase();
+	}
+
+	/**
+	 * @param callee What is being called.
+	 * @return The host static a bare name stands for, or null when it does not stand for one.
+	 *
+	 * A local of the same name wins, which is what shadowing means and what the interpreter does.
+	 */
+	function ambientCallee(callee:Expr):Null<{owner:String, field:String}> {
+		return switch (callee.e) {
+			case EParent(inner):
+				ambientCallee(inner);
+
+			case EIdent(name) if (lookup(name) == null && ambientMembers.exists(name)):
+				ambientMembers.get(name);
+
+			case _:
+				null;
+		}
+	}
+
+	/**
+	 * Takes the bare names the host answers with a static of its own.
+	 *
+	 * Written the way `Compiler.statics` writes them, which the cppia backend reads the same way, so
+	 * a host configures both targets identically and does not have to know which one it got.
+	 *
+	 * @param entries Each written `name=owner.path::field`.
+	 */
+	public function ambientStatics(entries:Array<String>):Void {
+		for (entry in entries) {
+			var equals:Int = entry.indexOf('=');
+			if (equals < 0)
+				continue;
+
+			var target:String = entry.substr(equals + 1);
+			var split:Int = target.indexOf('::');
+			if (split < 0)
+				continue;
+
+			ambientMembers.set(entry.substr(0, equals), {
+				owner: target.substr(0, split),
+				field: target.substr(split + 2)
+			});
+		}
 	}
 
 	/**

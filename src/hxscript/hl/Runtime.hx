@@ -24,6 +24,7 @@ package hxscript.hl;
 
 #if hxscript_hl
 import hxscript.proxy.TypeProxy.ICustomEnumValueType;
+import hxscript.runtime.Variable;
 import hxscript.types.AbstractTools;
 import hxscript.types.AbstractValue;
 import hxscript.types.ScriptedAbstractValue;

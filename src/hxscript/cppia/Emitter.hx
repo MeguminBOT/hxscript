@@ -1859,6 +1859,24 @@ class Emitter {
 	function emitField2(obj:Expr, name:String, pos:Position):Void {
 		var line:Int = pos == null ? 0 : pos.line;
 
+		switch (obj.e) {
+			case EIdent('super'):
+				/**
+				 * A variable is not virtual, so the base's copy of one and this class's are the same
+				 * slot and `this` reaches it. A method is virtual, and reading `super.m` without
+				 * calling it would answer with the override rather than the base's, which is the
+				 * wrong answer rather than a missing feature; `super.m(...)` is a call and is handled
+				 * where calls are, as CALLSUPER.
+				 */
+				if (methodArity.exists(currentSuper + ' ' + name))
+					throw new Unsupported('super.' + name + ' as a value rather than a call', pos);
+
+				emitField2({e: EIdent('this'), pos: pos}, name, pos);
+				return;
+
+			case _:
+		}
+
 		var asType:Null<String> = typeOf(obj);
 		if (asType != null) {
 			if (isEnumCtor(asType, name)) {

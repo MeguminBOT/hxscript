@@ -78,7 +78,7 @@ class Boot {
 			ambient.push(path);
 		}
 
-		#if hxscript_cppia
+		#if (hxscript_cppia || hxscript_hl)
 		var known:Array<String> = hxscript.compile.Compiler.ambient.copy();
 
 		for (path in ambient)
