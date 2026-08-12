@@ -31,7 +31,6 @@ import hxscript.hl.Bytecode.Instruction;
 import hxscript.compile.Capture;
 import hxscript.compile.Unsupported;
 import hxscript.hl.TypeEntry.Field;
-import hxscript.hl.TypeEntry.Proto;
 import hxscript.syntax.Expr;
 
 /** What a batch function looks like to a caller, before or after its body has been written. */
@@ -89,17 +88,23 @@ class Emitter {
 	/** The class whose body is being written, which is what an unqualified call names. */
 	var owning:String;
 
-	/** The type index of each class in the batch. */
-	var classes:StringMap<Int>;
+	/**
+	 * The classes of the batch, as a set.
+	 *
+	 * A name and nothing else, because a class of the batch is no longer a type this module holds.
+	 * The interpreter's own object is what a script gets from `new`, and this module contributes the
+	 * bodies of its methods; so what there is to know here is only whether a name is one of them.
+	 */
+	var classes:StringMap<Bool>;
 
-	/** Which slot each instance field sits in, by class then field name. */
-	var members:StringMap<StringMap<Int>>;
-
-	/** The type of each instance field, by class then slot. */
-	var memberTypes:StringMap<Array<Int>>;
-
-	/** What each instance field starts as, by class, for the fields declared with a value. */
-	var openings:StringMap<Array<{slot:Int, value:Expr}>>;
+	/**
+	 * The names each class declares as instance members, by class.
+	 *
+	 * Names and nothing else. Where a field sits and what type it holds are the world's business now,
+	 * but whether a bare name inside a method means `this.name` is still this module's, because that
+	 * is decided when the body is written rather than when it runs.
+	 */
+	var members:StringMap<StringMap<Bool>>;
 
 	/** The accessors of each property, by class then name. A property is not a field. */
 	var props:StringMap<StringMap<{get:String, set:String}>>;
@@ -184,8 +189,6 @@ class Emitter {
 		owning = '';
 		classes = new StringMap();
 		members = new StringMap();
-		memberTypes = new StringMap();
-		openings = new StringMap();
 		props = new StringMap();
 		owned = new StringMap();
 		declared = new StringMap();
@@ -219,7 +222,8 @@ class Emitter {
 		for (decl in decls) {
 			switch (decl.d) {
 				case DClass(c):
-					classes.set(c.name, module.reserveType());
+					classes.set(c.name, true);
+					declared.set(c.name, true);
 
 				case DEnum(e):
 					declared.set(e.name, true);
@@ -255,10 +259,17 @@ class Emitter {
 	}
 
 	/**
-	 * Works out a class's instance shape and declares everything it offers.
+	 * Declares everything a class offers, without giving it a shape of its own.
 	 *
-	 * Its own type index already exists, because its methods take it as their first argument and a
-	 * class whose methods could not be typed until the class was typed could never be declared.
+	 * **A class of the batch is not a type this module holds.** Its instances are the interpreter's,
+	 * made by the world and carrying everything a scripted instance carries, and what is written here
+	 * is only the bodies of its methods. So there are no fields to lay out and no protos to declare:
+	 * an instance method takes the instance as an ordinary dynamic first argument, exactly as a
+	 * function taking any other host value would.
+	 *
+	 * That is what makes `super`, `is`, and an override reached from a base-typed reference mean the
+	 * same thing compiled as interpreted. A module that made its own objects could answer none of
+	 * those about the world's, because the two were never the same object.
 	 *
 	 * A function that declares no return type still returns something, unless it is a constructor.
 	 * Reading it as `Void` would compile away the value it hands back.
@@ -266,34 +277,20 @@ class Emitter {
 	 * @param c The class.
 	 */
 	function shape(c:ClassDecl):Void {
-		var self:Int = classes.get(c.name);
-		var fields:Array<Field> = [];
-		var protos:Array<Proto> = [];
-		var slots:StringMap<Int> = new StringMap();
-		var starts:Array<{slot:Int, value:Expr}> = [];
 		var accessors:StringMap<{get:String, set:String}> = new StringMap();
 		var statics:StringMap<Bool> = new StringMap();
+		var own:StringMap<Bool> = new StringMap();
 
 		for (f in c.fields) {
 			switch (f.kind) {
 				case KVar(v):
-					if (isStatic(f)) {
+					if (isStatic(f))
 						statics.set(f.name, true);
-						if (property(v))
-							accessors.set(f.name, {get: v.get, set: v.set});
-						continue;
-					}
+					else if (!property(v))
+						own.set(f.name, true);
 
-					if (property(v)) {
+					if (property(v))
 						accessors.set(f.name, {get: v.get, set: v.set});
-						continue;
-					}
-
-					slots.set(f.name, fields.length);
-					if (v.expr != null)
-						starts.push({slot: fields.length, value: v.expr});
-
-					fields.push({name: module.stringId(f.name), type: typeOf(v.type)});
 
 				case KFunction(_):
 					if (isStatic(f))
@@ -301,9 +298,7 @@ class Emitter {
 			}
 		}
 
-		members.set(c.name, slots);
-		memberTypes.set(c.name, [for (f in fields) f.type]);
-		openings.set(c.name, starts);
+		members.set(c.name, own);
 		props.set(c.name, accessors);
 		owned.set(c.name, statics);
 
@@ -318,7 +313,7 @@ class Emitter {
 			var args:Array<Int> = [];
 
 			if (!isStatic(f))
-				args.push(self);
+				args.push(tDyn);
 
 			for (a in fn.args)
 				args.push(typeOf(a.t));
@@ -332,15 +327,8 @@ class Emitter {
 				type: module.typeId(TFun(args, ret))
 			};
 
-			if (isStatic(f)) {
-				signatures.set(c.name + '.' + f.name, sig);
-			} else {
-				signatures.set(c.name + '#' + f.name, sig);
-				protos.push({name: module.stringId(f.name), findex: sig.findex});
-			}
+			signatures.set(c.name + (isStatic(f) ? '.' : '#') + f.name, sig);
 		}
-
-		module.defineType(self, TObj(module.stringId(c.name), fields, protos));
 	}
 
 	/**
@@ -571,7 +559,7 @@ class Emitter {
 					case EIdent(name) if (inside != null && props.get(inside).exists(name)):
 						setField(thisExpr(e.pos), name, value, e.pos);
 
-					case EIdent(name) if (fieldOf(thisExpr(e.pos), name) != null):
+					case EIdent(name) if (isMemberOf(name)):
 						setField(thisExpr(e.pos), name, value, e.pos);
 
 					case EField({e: EIdent(cls)}, name, _) if (isStaticOf(cls, name)):
@@ -955,7 +943,7 @@ class Emitter {
 					return;
 				}
 
-				if (fieldOf(thisExpr(e.pos), name) != null) {
+				if (isMemberOf(name)) {
 					getField(thisExpr(e.pos), name, slot, e.pos);
 					return;
 				}
@@ -977,7 +965,7 @@ class Emitter {
 				callSupport('get', [looseOwner(), named(name)], slot);
 
 			case EField({e: EIdent('super')}, name, _):
-				throw new Unsupported('super.' + name + ', because a class of this batch is compiled with no base', e.pos);
+				callSupport('superGet', [dynOf(thisExpr(e.pos)), named(name)], slot);
 
 			case EField({e: EIdent(cls)}, name, _) if (isStaticOf(cls, name)):
 				staticRead(cls, name, slot, e.pos);
@@ -1057,9 +1045,6 @@ class Emitter {
 				emitLambda(args, body, name, slot, e.pos);
 
 			case EBinop('is', v, t):
-				if (classes.exists(calledName(t) ?? ''))
-					throw new Unsupported('is ' + calledName(t) + ', whose instances this module makes its own', e.pos);
-
 				callSupport('isOfType', [dynOf(v), typeValue(t, e.pos)], slot);
 
 			case EArrayDecl(items):
@@ -1272,35 +1257,19 @@ class Emitter {
 	function emitCall(callee:Expr, params:Array<Expr>, slot:Int, pos:Position):Void {
 		switch (callee.e) {
 			case EField({e: EIdent('super')}, name, _):
-				throw new Unsupported('super.' + name + ', because a class of this batch is compiled with no base', pos);
+				callSupport('superCall', [dynOf(thisExpr(pos)), named(name), gathered(params)], slot);
+				return;
 
 			case EIdent('super'):
-				throw new Unsupported('super(), because a class of this batch is compiled with no base', pos);
+				callSupport('superNew', [dynOf(thisExpr(pos)), gathered(params)], slot);
+				return;
 
 			case _:
 		}
 
-		var method:Null<{on:Expr, sig:Signature}> = methodCall(callee);
-		if (method != null) {
-			if (params.length != method.sig.args.length - 1)
-				throw new Unsupported('a call given ' + params.length + ' of its ' + (method.sig.args.length - 1) + ' arguments', pos);
-
-			var self:Int = reg(method.sig.args[0]);
-			into(method.on, self);
-
-			var landed:Int = regs[slot] == method.sig.ret ? slot : reg(method.sig.ret);
-			var args:Array<Int> = [landed, method.sig.findex, self];
-
-			for (i in 0...params.length) {
-				var holder:Int = reg(method.sig.args[i + 1]);
-				into(params[i], holder);
-				args.push(holder);
-			}
-
-			ops.push({op: callFor(params.length + 1), args: args});
-
-			if (landed != slot)
-				move(landed, slot);
+		var own:Null<String> = selfCall(callee);
+		if (own != null) {
+			callSupport('invoke', [dynOf(thisExpr(pos)), named(own), gathered(params)], slot);
 			return;
 		}
 
@@ -1557,11 +1526,13 @@ class Emitter {
 	}
 
 	/**
-	 * Writes an instantiation: allocate, fill in what the fields were declared with, then run the
-	 * constructor over what was allocated.
+	 * Writes an instantiation, which is the world's to perform.
 	 *
-	 * The declared values go in first so a constructor that reads one of its own fields sees what
-	 * the declaration promised rather than the zero the allocation left.
+	 * **Every `new` goes through the world**, whether the class is one of the batch or one the host
+	 * offers, because the object a script gets has to be the same object the interpreter would have
+	 * given it. That is what carries the scripted class, the field slots, the accessors and the
+	 * `super` mirror, none of which this module could have built. Field initialisers and the
+	 * constructor run inside that, where the interpreter already runs them.
 	 *
 	 * @param cls The class being built.
 	 * @param params Its constructor's arguments.
@@ -1569,74 +1540,28 @@ class Emitter {
 	 * @param pos Where it appears.
 	 */
 	function emitNew(cls:String, params:Array<Expr>, slot:Int, pos:Position):Void {
-		var self:Null<Int> = classes.get(cls);
+		if (!declared.exists(cls))
+			throw new Unsupported('new ' + cls + ', which is neither a type of this batch nor one the host offers', pos);
 
-		if (self == null) {
-			if (!declared.exists(cls))
-				throw new Unsupported('new ' + cls + ', which is neither a type of this batch nor one the host offers', pos);
+		var given:Int = reg(tDyn);
+		callSupport('array', [], given);
+		for (p in params)
+			callSupport('push', [given, dynOf(p)], reg(tDyn));
 
-			var given:Int = reg(tDyn);
-			callSupport('array', [], given);
-			for (p in params)
-				callSupport('push', [given, dynOf(p)], reg(tDyn));
-
-			callSupport('make', [ownerOf(cls), given], slot);
-			return;
-		}
-
-		ops.push({op: ONew, args: [slot]});
-
-		var types:Array<Int> = memberTypes.get(cls);
-		for (start in openings.get(cls)) {
-			var v:Int = reg(types[start.slot]);
-			into(start.value, v);
-			ops.push({op: OSetField, args: [slot, start.slot, v]});
-		}
-
-		var sig:Null<Signature> = signatures.get(cls + '#new');
-		if (sig == null) {
-			if (params.length > 0)
-				throw new Unsupported('new ' + cls + ' with arguments, when it declares no constructor', pos);
-			return;
-		}
-
-		if (params.length != sig.args.length - 1)
-			throw new Unsupported('new ' + cls + ' given ' + params.length + ' of its ' + (sig.args.length - 1) + ' arguments', pos);
-
-		var discard:Int = reg(sig.ret);
-		var args:Array<Int> = [discard, sig.findex, slot];
-
-		for (i in 0...params.length) {
-			var holder:Int = reg(sig.args[i + 1]);
-			into(params[i], holder);
-			args.push(holder);
-		}
-
-		ops.push({op: callFor(params.length + 1), args: args});
+		callSupport('make', [ownerOf(cls), given], slot);
 	}
 
 	/**
-	 * @return The slot an instance field sits in, or null when the expression is not an instance of a
-	 *         class of this batch or has no such field.
-	 */
-	function fieldOf(obj:Expr, name:String):Null<Int> {
-		var cls:Null<String> = classNamed(typeOfExpr(obj));
-		if (cls == null)
-			return null;
-
-		var slots:Null<StringMap<Int>> = members.get(cls);
-		return slots == null ? null : slots.get(name);
-	}
-
-	/**
-	 * Writes a field read, by offset when the batch declared the field and by name otherwise.
+	 * Writes a field read.
 	 *
-	 * Reading by name is what makes a host object usable: `ODynGet` asks the value itself, so a
-	 * string's length or an object's member is one instruction whether or not anything here knew
-	 * the field existed.
+	 * **By name, through the world's own reader, never by offset and never by `ODynGet`.** A scripted
+	 * instance keeps its fields where the interpreter put them and answers for them through custom
+	 * reflection, so the opcode would look straight past a field that is plainly there. `Runtime.get`
+	 * is the reader the interpreter itself uses, so the two agree about properties and accessors
+	 * without either having to know about the other.
 	 */
 	function getField(obj:Expr, name:String, slot:Int, pos:Position):Void {
-		var cls:Null<String> = classNamed(infer(obj));
+		var cls:Null<String> = ownerNamed(obj);
 		var reader:Null<{get:String, set:String}> = cls == null ? null : props.get(cls).get(name);
 
 		if (reader != null) {
@@ -1647,25 +1572,12 @@ class Emitter {
 			return;
 		}
 
-		var index:Null<Int> = fieldOf(obj, name);
-		if (index != null) {
-			var holder:Int = reg(typeOfExpr(obj));
-			into(obj, holder);
-			ops.push({op: OField, args: [slot, holder, index]});
-			return;
-		}
-
-		var host:Int = dynOf(obj);
-		var held:Int = landing(slot);
-		ops.push({op: ODynGet, args: [held, host, module.stringId(name)]});
-
-		if (held != slot)
-			move(held, slot);
+		callSupport('get', [dynOf(obj), named(name)], slot);
 	}
 
-	/** Writes a field write, by offset when the batch declared the field and by name otherwise. */
+	/** Writes a field write, by name and through the world, for the reasons `getField` gives. */
 	function setField(obj:Expr, name:String, value:Expr, pos:Position):Void {
-		var cls:Null<String> = classNamed(infer(obj));
+		var cls:Null<String> = ownerNamed(obj);
 		var writer:Null<{get:String, set:String}> = cls == null ? null : props.get(cls).get(name);
 
 		if (writer != null) {
@@ -1677,36 +1589,57 @@ class Emitter {
 			return;
 		}
 
-		var index:Null<Int> = fieldOf(obj, name);
-		if (index != null) {
-			var cls:String = classNamed(typeOfExpr(obj));
-			var holder:Int = reg(typeOfExpr(obj));
-			into(obj, holder);
+		callSupport('set', [dynOf(obj), named(name), dynOf(value)], reg(tDyn));
+	}
 
-			var v:Int = reg(memberTypes.get(cls)[index]);
-			into(value, v);
+	/**
+	 * @param obj An expression.
+	 * @return The batch class it is statically known to be an instance of, or null.
+	 *
+	 * Only properties need this now, and only because a property is not a field: reading one has to
+	 * become a call to its accessor, and nothing at runtime would tell us that. `this` is the case
+	 * that matters, since a class reads its own properties by bare name.
+	 */
+	/**
+	 * Builds an array holding a call's arguments, for the support calls that take one.
+	 *
+	 * @param params The arguments.
+	 * @return A register holding the array.
+	 */
+	function gathered(params:Array<Expr>):Int {
+		var given:Int = reg(tDyn);
+		callSupport('array', [], given);
 
-			ops.push({op: OSetField, args: [holder, index, v]});
-			return;
+		for (p in params)
+			callSupport('push', [given, dynOf(p)], reg(tDyn));
+
+		return given;
+	}
+
+	/**
+	 * @param name A bare name inside a method body.
+	 * @return Whether the enclosing class declares it as an instance member, so it means `this.name`.
+	 */
+	function isMemberOf(name:String):Bool {
+		if (inside == null)
+			return false;
+
+		var own:Null<StringMap<Bool>> = members.get(inside);
+		return own != null && own.exists(name);
+	}
+
+	function ownerNamed(obj:Expr):Null<String> {
+		return switch (obj.e) {
+			case EIdent('this'): inside;
+			case EParent(inner): ownerNamed(inner);
+			case ENew(cls, _) if (classes.exists(cls)): cls;
+			case _: null;
 		}
-
-		var host:Int = dynOf(obj);
-		var v:Int = dynOf(value);
-		ops.push({op: ODynSet, args: [host, module.stringId(name), v]});
 	}
 
 	/** @return An expression naming the instance the body being written belongs to. */
 	function thisExpr(pos:Position):Expr {
 		return {e: EIdent('this'), pos: pos};
-	}
-
-	/** @return The class a type index names, or null when it names something else. */
-	function classNamed(type:Int):Null<String> {
-		for (name => id in classes) {
-			if (id == type)
-				return name;
-		}
-		return null;
 	}
 
 	/** @return The type an expression produces, without refusing when it is an instance. */
@@ -2010,12 +1943,7 @@ class Emitter {
 
 			case EIdent(name):
 				var slot:Null<Int> = lookup(name);
-				if (slot != null) {
-					regs[slot];
-				} else {
-					var own:Null<Int> = inside == null ? null : members.get(inside).get(name);
-					own == null ? tDyn : memberTypes.get(inside)[own];
-				}
+				slot != null ? regs[slot] : tDyn;
 
 			case EBinop(op, a, b) if (COMPARE.exists(op) || op == '&&' || op == '||'): tBool;
 
@@ -2033,19 +1961,13 @@ class Emitter {
 				var r:Int = infer(no);
 				l == r ? l : ((l == tI32 && r == tF64) || (l == tF64 && r == tI32) ? tF64 : tDyn);
 
-			case ENew(cls, _):
-				var self:Null<Int> = classes.get(cls);
-				self == null ? tDyn : self;
+			case ENew(_, _): tDyn;
 
-			case EField(obj, name, _):
-				var cls:Null<String> = classNamed(infer(obj));
-				var slot:Null<Int> = cls == null ? null : members.get(cls).get(name);
-				slot == null ? tDyn : memberTypes.get(cls)[slot];
+			case EField(_, _, _): tDyn;
 
 			case ECall(callee, _):
-				var method:Null<{on:Expr, sig:Signature}> = methodCall(callee);
-				if (method != null) {
-					method.sig.ret;
+				if (selfCall(callee) != null) {
+					tDyn;
 				} else {
 					var sig:Null<Signature> = calledSignature(callee);
 					sig == null ? tDyn : sig.ret;
@@ -2077,7 +1999,6 @@ class Emitter {
 			case CTPath(['Float'], _): tF64;
 			case CTPath(['Bool'], _): tBool;
 			case CTPath(['Void'], _): tVoid;
-			case CTPath([name], _) if (classes.exists(name)): classes.get(name);
 			case CTParent(inner): typeOf(inner);
 			case _: tDyn;
 		}
@@ -2163,30 +2084,19 @@ class Emitter {
 	}
 
 	/**
-	 * Works out whether a call is a method on an instance of a class in this batch.
-	 *
 	 * @param callee What is being called.
-	 * @return What to call it on and its shape, or null when it is not one.
+	 * @return The instance and the method name, when the call is a method on `this` written bare.
+	 *
+	 * **The name, not a function index.** A method call has to find whatever the instance actually
+	 * has, because a subclass overriding it must win, and the instance is the world's rather than
+	 * this module's. Calling the index a bare name resolved to at emit time would call the class the
+	 * body was written in, which is right until somebody extends it and then silently is not.
 	 */
-	function methodCall(callee:Expr):Null<{on:Expr, sig:Signature}> {
-		switch (callee.e) {
-			case EField(obj, name, _):
-				var cls:Null<String> = try classNamed(infer(obj)) catch (e:Unsupported) null;
-				if (cls == null)
-					return null;
-
-				var sig:Null<Signature> = signatures.get(cls + '#' + name);
-				return sig == null ? null : {on: obj, sig: sig};
-
-			case EIdent(name) if (inside != null && lookup(name) == null):
-				var sig:Null<Signature> = signatures.get(inside + '#' + name);
-				return sig == null ? null : {on: {e: EIdent('this'), pos: callee.pos}, sig: sig};
-
-			case EParent(inner):
-				return methodCall(inner);
-
-			case _:
-				return null;
+	function selfCall(callee:Expr):Null<String> {
+		return switch (callee.e) {
+			case EParent(inner): selfCall(inner);
+			case EIdent(name) if (inside != null && lookup(name) == null && signatures.exists(inside + '#' + name)): name;
+			case _: null;
 		}
 	}
 

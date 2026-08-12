@@ -63,9 +63,33 @@ class EmitProbe {
 		}
 	}
 
+	/**
+	 * Compiles a case and runs it.
+	 *
+	 * **A world is built even though this reaches for the emitter directly.** A class of the batch is
+	 * no longer a type the module holds, so `new T()` asks the world for the class the same way a
+	 * script naming a host type does, and without one there is nothing for that binding to resolve
+	 * to. Everything else here still goes around the backend on purpose, which is what makes this a
+	 * probe of the emitter rather than a second corpus run.
+	 */
 	static function compiled(src:String):String {
 		var emitter:Emitter = new Emitter();
-		var decls = new hxscript.syntax.Parser().parseModule(src, 'emit', 0, ['p']);
+		emitter.pack = 'p';
+
+		var env:Environment = new Environment();
+		var unit:Module = new Module('', 'T', ['p'], 'emit');
+
+		try {
+			unit.parse(src);
+			env.addModule(unit);
+			unit.init(env);
+			unit.start(env);
+			unit.startTypes(env);
+		} catch (e:Dynamic) {
+			return 'threw while loading ' + Std.string(e);
+		}
+
+		var decls = unit.decls;
 
 		try {
 			emitter.declare(decls, 'T');
@@ -96,10 +120,10 @@ class EmitProbe {
 					hxscript.hl.Emitter.support(binding.field);
 				case BConst:
 					binding.value;
-				case BOwner | BModule:
-					// Nothing here declares statics, and there is no world to resolve a class against
-					// without one. The corpus probe goes through the backend, which has both.
-					null;
+				case BOwner:
+					env.resolve(binding.owner);
+				case BModule:
+					unit.moduleFields;
 			});
 		}
 

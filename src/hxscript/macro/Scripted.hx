@@ -1004,7 +1004,13 @@ class Scripted {
 						superLocals.set(field, {r: f});
 				}
 
-				__interp.locals.set('super', {r: hxscript.runtime.Reference.RSuper(superLocals, __constructSuper)});
+				/**
+				 * Kept in `__vars` as well as in the frame, because a compiled body asks for it from
+				 * outside any frame of the interpreter's and would otherwise find nothing there.
+				 */
+				var __superRef:hxscript.runtime.Variable = {r: hxscript.runtime.Reference.RSuper(superLocals, __constructSuper)};
+				__interp.locals.set('super', __superRef);
+				__vars.set('super', __superRef);
 			}
 			/**
 			 * Binds a scripted class's own fields as interpreter locals.
@@ -1095,8 +1101,11 @@ class Scripted {
 					superLocals.set(f, __interp.locals.get(f));
 				}
 
-				if (isSuper)
-					__interp.locals.set('super', {r: hxscript.runtime.Reference.RSuper(superLocals, constructor ?? __constructSuper)});
+				if (isSuper) {
+					var __superRef:hxscript.runtime.Variable = {r: hxscript.runtime.Reference.RSuper(superLocals, constructor ?? __constructSuper)};
+					__interp.locals.set('super', __superRef);
+					__vars.set('super', __superRef);
+				}
 			}
 
 			/**

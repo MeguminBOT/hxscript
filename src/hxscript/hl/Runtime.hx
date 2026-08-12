@@ -24,9 +24,11 @@ package hxscript.hl;
 
 #if hxscript_hl
 import hxscript.proxy.TypeProxy.ICustomEnumValueType;
+import hxscript.runtime.Reference;
 import hxscript.runtime.Variable;
 import hxscript.types.AbstractTools;
 import hxscript.types.AbstractValue;
+import hxscript.types.IScriptedInstance;
 import hxscript.types.ScriptedAbstractValue;
 
 /**
@@ -242,6 +244,11 @@ class Runtime {
 	 * Through the library's own reflection rather than the standard one: a scripted class keeps its
 	 * statics somewhere the runtime cannot see, so asking the value itself is the only way to be
 	 * given what the interpreter would have been given.
+	 *
+	 * **A property is read through its getter**, which is what makes this the same reader the
+	 * interpreter is. Nothing here can tell a property from a plain field, and nothing needs to: a
+	 * value with no accessor for the name answers with the field, so asking for the property is the
+	 * one question with a right answer either way.
 	 */
 	public static function get(o:Dynamic, name:String):Dynamic {
 		if (o is ScriptedAbstractValue) {
@@ -250,7 +257,7 @@ class Runtime {
 				return boxed.owner.getField(boxed.boxed, name);
 		}
 
-		return hxscript.proxy.ReflectProxy.field(o, name);
+		return hxscript.proxy.ReflectProxy.getProperty(o, name);
 	}
 
 	/**
@@ -275,6 +282,118 @@ class Runtime {
 		return own == null ? null : Reflect.callMethod(o, own, args);
 	}
 
+	/**
+	 * The `super` mirror an instance carries, or null when it has none.
+	 *
+	 * **Read rather than reconstructed, and that is the whole design.** Every scripted instance is
+	 * given one when it is built, and it is built differently for the two kinds of base: extending a
+	 * host class snapshots `Reflect.field(this, f)` for each of the base's methods, and extending a
+	 * scripted class snapshots the base's own closures before the subclass's overwrite them. Either
+	 * way what comes out is the function `super.f` should reach, so taking it from here is the answer
+	 * the interpreter gets by definition rather than by imitation.
+	 *
+	 * Working it out here instead would be a second implementation of that rule, and the obvious
+	 * guess, `Reflect.field(self, name)`, is exactly the one that recurses forever on a scripted base
+	 * because the field it finds is the override doing the asking.
+	 *
+	 * Taken from `__vars` rather than the interpreter's locals: locals belong to a frame, and by the
+	 * time compiled code asks there is no frame of the interpreter's to belong to.
+	 *
+	 * @param self The instance.
+	 * @return Its mirror, or null.
+	 */
+	static function mirror(self:Dynamic):Dynamic {
+		if (!(self is IScriptedInstance))
+			return null;
+
+		var slots:Map<String, Variable> = @:privateAccess (cast self : IScriptedInstance).__vars;
+		if (slots == null)
+			return null;
+
+		var held:Variable = slots.get('super');
+		return held == null ? null : held.r;
+	}
+
+	/**
+	 * @param self The instance.
+	 * @param name The field.
+	 * @return The base's version of it, or null when there is none.
+	 */
+	static function superSlot(self:Dynamic, name:String):Dynamic {
+		var found:Dynamic = mirror(self);
+		if (found == null || !(found is Reference))
+			return null;
+
+		switch (cast(found, Reference)) {
+			case RSuper(locals, _):
+				if (locals == null || !locals.exists(name))
+					return null;
+
+				var slot:Variable = locals.get(name);
+				return slot.a ?? slot.r;
+
+			default:
+				return null;
+		}
+	}
+
+	/**
+	 * Calls the base class's version of a method.
+	 *
+	 * @param self The instance.
+	 * @param name The method.
+	 * @param args Its arguments.
+	 * @return What it answered.
+	 */
+	public static function superCall(self:Dynamic, name:String, args:Array<Dynamic>):Dynamic {
+		var found:Dynamic = superSlot(self, name);
+		return found == null ? null : Reflect.callMethod(self, found, args);
+	}
+
+	/**
+	 * Reads the base class's version of a field.
+	 *
+	 * A variable is not virtual, so a base that keeps no separate copy of one is not a failure: the
+	 * instance's own field is the same field, and reading it is the right answer.
+	 *
+	 * @param self The instance.
+	 * @param name The field.
+	 * @return Its value.
+	 */
+	public static function superGet(self:Dynamic, name:String):Dynamic {
+		var found:Dynamic = superSlot(self, name);
+		return found == null ? get(self, name) : found;
+	}
+
+	/**
+	 * Calls the base class's constructor.
+	 *
+	 * The mirror carries it beside the fields, which is where the interpreter takes it from, so a
+	 * scripted base's own `new` is reached rather than the bridge's.
+	 *
+	 * @param self The instance.
+	 * @param args The arguments.
+	 */
+	public static function superNew(self:Dynamic, args:Array<Dynamic>):Void {
+		var found:Dynamic = mirror(self);
+
+		if (found != null && found is Reference) {
+			switch (cast(found, Reference)) {
+				case RSuper(_, constructor):
+					if (constructor != null) {
+						Reflect.callMethod(self, constructor, args);
+						return;
+					}
+
+				default:
+			}
+		}
+
+		var built:Dynamic = Reflect.field(self, '__constructSuper');
+		if (built != null)
+			Reflect.callMethod(self, built, args);
+	}
+
 	/** @return A value as a `Float`, opening an abstract to what it wraps first. */
 	public static function toFloat(v:Dynamic):Float {
 		if (v is AbstractValue)
@@ -289,9 +408,9 @@ class Runtime {
 		return v == true;
 	}
 
-	/** Writes a named field of something a script declared. */
+	/** Writes a named field of something a script declared, through its setter when it has one. */
 	public static function set(o:Dynamic, name:String, v:Dynamic):Void {
-		hxscript.proxy.ReflectProxy.setField(o, name, v);
+		hxscript.proxy.ReflectProxy.setProperty(o, name, v);
 	}
 
 	/**
