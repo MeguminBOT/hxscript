@@ -33,3 +33,19 @@
 
 -main AllCpp
 -cpp bin_test/cpp/cppia
+
+--next
+
+# The frontier instrument, its own program because it is not a gate: see test/lib/Frontier.hx.
+-cp src
+-cp test/common
+-cp test/common/fixtures
+-cp test/lib
+-cp test/cpp
+-D scriptable
+-D hxscript_cppia
+-dce no
+--macro hxscript.macro.Keep.run()
+
+-main FrontierTest
+-cpp bin_test/cppia
