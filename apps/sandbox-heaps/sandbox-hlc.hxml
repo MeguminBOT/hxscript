@@ -1,0 +1,27 @@
+# The hxScript Sandbox for HashLink and Heaps, as an ordinary native binary.
+#
+#     cd apps/sandbox-heaps
+#     haxe sandbox-hlc.hxml
+#     sh ../../src/hxscript/hl/hlc.sh export/hlc --out export/hlc/Sandbox.exe
+#
+# `./build.sh hlc` does both and checks the toolchain first.
+#
+# **HL/C is the other way to ship a HashLink program.** Haxe writes C rather than bytecode, the C
+# compiles to a native executable, and there is no VM process and no `.hl` file beside it. It is what
+# a game with mod support on desktop or Android is most likely to be built as, and the reason this
+# app carries both is that being able to compare them is the point.
+#
+# Compiled scripts work here. `libhl` exports the executable memory allocator the jit needs, and the
+# loader is linked in rather than loaded by name; `docs/embedding.md` covers what that changes, which
+# is mostly when the decision is made rather than what it costs.
+#
+# This file is `common.hxml` plus two lines.
+
+common.hxml
+
+# Haxe hands the native build off to the `hashlink` haxelib once the C is written, and this app
+# drives that step itself. Without this the build ends in `Library hashlink is not installed` and
+# `Build failed` after having written correct and complete C, which is a confusing way to succeed.
+-D no-compilation
+
+-hl export/hlc/main.c

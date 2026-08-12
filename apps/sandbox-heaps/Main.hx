@@ -3,6 +3,7 @@ import h2d.Scene;
 import host.Api;
 import studio.Launcher;
 import studio.Metrics;
+import studio.Projects;
 import studio.Shell;
 import studio.Viewport;
 import ui.Gallery;
@@ -20,6 +21,9 @@ import ui.Theme;
  * scaled with it; the interface has another that is never scaled, which is what lets the bars keep
  * their size while what sits between them changes. One scene for both would mean choosing between a
  * project that is never scaled and an interface that always is.
+ *
+ * The shell's shortcuts are read from the window rather than from either scene, because the one that
+ * matters is the way back and it has to keep working while a project owns everything else.
  */
 class Main extends hxd.App {
 	static var wantsGallery:Bool = false;
@@ -30,7 +34,29 @@ class Main extends hxd.App {
 				wantsGallery = true;
 		}
 
+		if (!Projects.open(argument('--projects')))
+			Api.log('could not open a projects folder at ' + Projects.root);
+
+		Shell.autoRun = argument('--run');
+
 		new Main();
+	}
+
+	/**
+	 * Reads a `--name value` command-line argument.
+	 *
+	 * @param name The flag, including its dashes.
+	 * @return The value after it, or null when the flag is absent.
+	 */
+	static function argument(name:String):Null<String> {
+		var args:Array<String> = Sys.args();
+
+		for (i in 0...args.length) {
+			if (args[i] == name && i + 1 < args.length)
+				return args[i + 1];
+		}
+
+		return null;
 	}
 
 	/** The interface. */
@@ -76,8 +102,6 @@ class Main extends hxd.App {
 			Launcher.onScene = borrow;
 			Shell.mount(root, surface);
 
-			// The shell's shortcuts are read here rather than from the scene, because the one that
-			// matters is the way back and it has to work while a project owns everything else.
 			hxd.Window.getInstance().addEventTarget(function(e:hxd.Event):Void {
 				if (e.kind == EKeyDown)
 					Shell.pressed(e.keyCode);

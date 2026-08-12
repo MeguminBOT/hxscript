@@ -77,6 +77,14 @@ class Shell {
 
 	static var sheet:Null<Modal>;
 
+	/**
+	 * A project to select and run as soon as one is found, or null.
+	 *
+	 * What `--run <name>` sets. Its reason for existing is that everything else here needs somebody
+	 * to click something, so without it neither shipping mode can be checked without a person.
+	 */
+	public static var autoRun:Null<String> = null;
+
 	static var projects:Array<ProjectInfo> = [];
 	static var found:Array<ProjectInfo> = [];
 	static var selected:Int = -1;
@@ -231,6 +239,37 @@ class Shell {
 			note('no projects found in ${Projects.root}');
 
 		refreshStatus();
+		takeAutoRun();
+	}
+
+	/**
+	 * Runs whatever `--run` named, once, as soon as there is a list to find it in.
+	 *
+	 * Here rather than at startup because the name has to be matched against projects read from disk,
+	 * and here rather than in `mount` because a rescan is what produces that list. Cleared before it
+	 * acts, so a later rescan does not run the project a second time.
+	 */
+	static function takeAutoRun():Void {
+		if (autoRun == null)
+			return;
+
+		var wanted:String = autoRun;
+		autoRun = null;
+
+		var at:Int = -1;
+		for (i in 0...found.length)
+			if (found[i].name == wanted)
+				at = i;
+
+		if (at < 0) {
+			note('--run $wanted: no project of that name');
+			return;
+		}
+
+		note('--run $wanted');
+		list.index = at;
+		pick(at);
+		run();
 	}
 
 	/** Narrows the list to what the filter matches. */
@@ -427,14 +466,21 @@ class Shell {
 		var room = made.inner();
 		var at:Float = 0;
 
-		var modes:SegmentedControl = new SegmentedControl([Settings.INTERPRETED, Settings.BYTECODE],
-			Settings.mode == Settings.INTERPRETED ? 0 : 1, function(i:Int):Void {
-				Settings.mode = i == 0 ? Settings.INTERPRETED : Settings.BYTECODE;
-				Settings.save();
-				Settings.apply();
-			}, made.content);
-		modes.place(0, at, room.width, Theme.px(30));
-		at += Theme.px(42);
+		if (Settings.selectable()) {
+			var modes:SegmentedControl = new SegmentedControl([Settings.INTERPRETED, Settings.BYTECODE],
+				Settings.mode == Settings.INTERPRETED ? 0 : 1, function(i:Int):Void {
+					Settings.mode = i == 0 ? Settings.INTERPRETED : Settings.BYTECODE;
+					Settings.save();
+					Settings.apply();
+				}, made.content);
+			modes.place(0, at, room.width, Theme.px(30));
+			at += Theme.px(42);
+		} else {
+			var reason:Label = new Label('Scripts are interpreted: ' + Settings.why(), 13, Secondary, made.content);
+			reason.wrapAt = room.width;
+			reason.place(0, at, room.width, Theme.px(44));
+			at += Theme.px(52);
+		}
 
 		var overlay:ui.Checkbox = new ui.Checkbox('Show the overlay', Settings.overlay, function(on:Bool):Void {
 			Overlay.show(on);

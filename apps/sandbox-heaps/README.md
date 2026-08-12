@@ -51,42 +51,64 @@ build.bat           # cmd, on Windows
 | --- | --- |
 | `./build.sh run` | build, then launch |
 | `./build.sh bundle` | build, then assemble a folder that runs on a machine with no HashLink |
+| `./build.sh hlc` | build it as an ordinary native binary instead |
+| `./build.sh hlc run` `hlc bundle` | the same two, for that binary |
+| `./build.sh hlc --no-jit` | without the loader, which is the build an arm64 target gets |
 | `./build.sh --debug` | debug build |
-| `./build.sh --clean` | wipe `export/` first |
+| `./build.sh --clean` | wipe the output first |
 
-There is no lime under this one, so there is no `Project.xml` either: the build is a hxml and the
-result is a `.hl` the VM runs. You need [HashLink](https://hashlink.haxe.org) on your path, or
-`HLPATH` set to the directory holding it.
+There is no lime under this one, so there is no `Project.xml` either: the build is a hxml. You need
+[HashLink](https://hashlink.haxe.org) on your path, or `HLPATH` set to the directory holding it, for
+both ways of building.
 
-### Shipping it
+## The two ways to ship it
 
-`bundle` produces about 11 MB that runs anywhere:
+**A HashLink program can be bytecode a VM runs, or an ordinary native binary.** This app builds both,
+because being able to compare them is worth more than picking one, and because the second is what a
+game with mod support is most likely to be.
+
+They are the same program. `common.hxml` is the entire build and the two target files add one line
+each, which is the whole difference:
 
 ```
-bundle/
-  Sandbox.exe       the VM, renamed
-  hlboot.dat        this app's bytecode, renamed
-  libhl.dll  fmt.hdll  heaps.hdll  sdl.hdll  openal.hdll  SDL3.dll  OpenAL32.dll
-  hxscript.hdll     so scripts compile rather than only interpret
-  assets/templates
+sandbox.hxml       common.hxml + -hl export/sandbox.hl      bytecode, run by the VM
+sandbox-hlc.hxml   common.hxml + -hl export/hlc/main.c      C, compiled to a native binary
 ```
 
-Nothing is compiled or linked by that step. **A HashLink program is bytecode the VM runs, so shipping
-one means shipping the VM.** `hl` given no argument opens `hlboot.dat`, so a renamed VM beside a
-renamed `.hl` is a double-clickable application.
+`./build.sh bundle` and `./build.sh hlc bundle` are where they stop looking alike:
 
-One caveat worth knowing: `hlboot.dat` is opened relative to the **working** directory rather than to
-the executable. Explorer sets that to the folder it launched from, so double-clicking works, but a
-shortcut with a different "start in" does not.
+| | bytecode | HL/C |
+| --- | --- | --- |
+| the executable | HashLink's `hl`, renamed | the program itself |
+| the program | `hlboot.dat`, 1.9 MB beside it | inside the executable, 6.7 MB |
+| the script compiler | `hxscript.hdll` beside it | linked in, nothing to ship |
+| also needed | `libhl` and the `.hdll` files it binds | the same |
 
-> **HL/C is the other way to ship HashLink**, and it does not rule out compiled scripts: `haxe -hl
-> out.c` emits C that compiles to an ordinary native binary with no VM and no bytecode file, and
-> `libhl` still exports the executable-memory allocator the jit needs, so such a binary can compile
-> and run a script at runtime. `test/hlc/` is where that is checked.
->
-> **This app** is nonetheless shipped as bytecode, because it loads a whole `.hl` at runtime by
-> design and there is no reason to make it a native binary. A game is the other way round, and
-> [`../../docs/embedding.md`](../../docs/embedding.md) covers building one that way.
+Nothing is compiled or linked when bundling bytecode: `hl` given no argument opens `hlboot.dat`, so a
+renamed VM beside a renamed `.hl` is a double-clickable application. One caveat belongs to that mode
+only, and it is worth knowing: `hlboot.dat` is opened relative to the **working** directory rather
+than to the executable. Explorer sets that to the folder it launched from, so double-clicking works,
+but a shortcut with a different "start in" does not. The native binary has no such file and no such
+problem.
+
+**The extension is linked rather than loaded on HL/C**, and that changes when the decision is made
+rather than what it costs. A `.hdll` can be absent at startup and leave everything interpreted, so
+shipping it is a choice per release; a linked symbol resolves or the link fails, so an HL/C build
+decides when it is built. The app says which it is, under **Script environment**:
+
+```
+shipped   HL/C, a native binary
+compiler  linked into this binary
+```
+
+`--no-jit` builds the third case, which is what an architecture HashLink cannot jit for gets:
+everything links, `compiler` says why it cannot be used, and every script is interpreted. See
+[`../../docs/embedding.md`](../../docs/embedding.md).
+
+**What each bundle needs is read, not remembered.** `hlc.json` is written beside the generated C and
+names every library the program binds, so the bundle copies exactly those. The hand-written list this
+replaced was wrong: it carried `heaps` and `openal`, which this app does not bind, and omitted `ui`
+and `uv`, which it does, so a bundle made from it was missing two libraries.
 
 Setup installs [hxscript](https://github.com/MeguminBOT/hxscript) from git rather than from a
 release, because this app is written against the library as it currently is. A checkout of it at
@@ -182,6 +204,24 @@ else.
 > **Two modes here, not the other app's three.** cppia is bytecode that hxcpp interprets unless its
 > JIT is turned on, so there the two are worth separating. HashLink jits whatever it loads, so
 > bytecode here is already machine code and a third setting would be a control that did nothing.
+
+### Both templates are interpreted today, and the log says why
+
+Worth stating rather than letting somebody discover it. The HashLink backend answers 167 of the 168
+shared corpus cases, but the corpus is **self-contained scripts**, and a script in a real application
+is not self-contained. Two things it reaches for are not implemented yet, and each makes its module
+fall back to the interpreter:
+
+| the log says | what is missing |
+| --- | --- |
+| `super, which is neither a local nor a field here` | `super.m(...)` and `super(...)`. cppia emits `CALLSUPER`; HashLink has no equivalent yet |
+| `log, which is neither a local nor a field here` | bare `@:scriptStatic` names such as `log`, `info` and `overlayShown`. `hl.Backend.statics` is declared and unread |
+
+Both are the same shape of gap: **reaching out of the compiled batch into the host**, which
+`hl/Backend.hx` says outright it does not do yet. The refusal is the designed behaviour rather than a
+fault, and it costs speed and nothing else, which is why the templates still run correctly on every
+build here. It does mean this app currently demonstrates the *shipping* difference rather than a
+speed difference, and it is the reason to fix those two before it can demonstrate both.
 
 **The check takes ten seconds**: set the run mode to interpreted. If the behaviour changes back, it
 is the compiler rather than your script.
@@ -293,9 +333,12 @@ puts every widget on one screen, for comparing the two side by side. It is not p
 | [`studio/Shell.hx`](studio/Shell.hx) | the window |
 | [`studio/Viewport.hx`](studio/Viewport.hx) | the band, and why the bars are the size they are |
 | [`host/Project.hx`](host/Project.hx) | the base for a project with no framework under it |
-| [`host/Sandbox.hx`](host/Sandbox.hx) | one project, one world |
+| [`host/Sandbox.hx`](host/Sandbox.hx) | one project, one world, and which way this was shipped |
+| [`host/Hud.hx`](host/Hud.hx) | `info`, `overlayShown` and the rest, as bare names a script can call |
 | [`ui/`](ui) | the widgets |
 | [`Check.hx`](Check.hx) | the headless check |
+| [`common.hxml`](common.hxml) | the whole build, minus where it comes out |
+| [`sandbox.hxml`](sandbox.hxml) [`sandbox-hlc.hxml`](sandbox-hlc.hxml) | one line each: bytecode, or a native binary |
 
 Versions this was derived against: heaps 2.1.0, format 3.8.0, hlsdl 1.15.0, hlopenal 1.5.0, on Haxe
 4.3.7 and HashLink 1.16.0.

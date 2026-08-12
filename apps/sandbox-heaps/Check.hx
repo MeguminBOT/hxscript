@@ -40,6 +40,9 @@ class Check {
 
 		Sys.println(Boot.report());
 		Sys.println('');
+		Sys.println('shipped   ${Sandbox.shipping}');
+		Sys.println('compiler  ${Sandbox.compiler}');
+		Sys.println('');
 
 		if (!Projects.open(argument('--projects'))) {
 			Sys.println('no projects folder at ' + Projects.root);

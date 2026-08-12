@@ -31,6 +31,40 @@ class Sandbox {
 	/** What the runtime compiler did, for the status bar. */
 	public static var compiled:String = 'interpreted';
 
+	/**
+	 * How this program was shipped, which on HashLink is a real choice rather than a detail.
+	 *
+	 * `hlc` is defined by the compiler when the output is C rather than bytecode, so this is the
+	 * build answering for itself. The two are the same program, and this app exists partly to make
+	 * the comparison easy, so it says which one is running rather than leaving it to be inferred
+	 * from the file that was launched.
+	 */
+	public static var shipping(default, null):String =
+		#if hlc 'HL/C, a native binary' #else 'bytecode, run by the HashLink VM' #end;
+
+	/**
+	 * How the script compiler got into the process, or why it did not.
+	 *
+	 * The difference worth showing. On the VM the loader is `hxscript.hdll` beside what runs and can
+	 * be absent, which leaves everything interpreted and is a decision somebody can make per release.
+	 * On HL/C it is linked in, so the same decision was made when the binary was built and cannot be
+	 * revisited afterwards.
+	 */
+	public static var compiler(default, null):String = describeCompiler();
+
+	static function describeCompiler():String {
+		#if hxscript_hl
+		var why:Null<String> = hxscript.compile.Compiler.unavailable();
+
+		if (why != null)
+			return why;
+
+		return #if hlc 'linked into this binary' #else 'hxscript.hdll, loaded at startup' #end;
+		#else
+		return 'not in this build; add -D hxscript_hl';
+		#end
+	}
+
 	/** How many classes have a compiled form, so a readout can say so as a number. */
 	public static var classCount(default, null):Int = 0;
 
@@ -208,7 +242,13 @@ class Sandbox {
 		bytecode = 0;
 		classCount = 0;
 
-		#if hxscript_cppia
+		#if hxscript_hl
+		if (!hxscript.compile.Compiler.available) {
+			compiled = 'interpreted: ' + hxscript.compile.Compiler.unavailable();
+			guard();
+			return;
+		}
+
 		if (!studio.Settings.compiling()) {
 			compiled = 'interpreted (by choice)';
 			guard();
@@ -233,7 +273,7 @@ class Sandbox {
 		compiled = parts.join('; ');
 		guard();
 		#else
-		compiled = 'interpreted (built without -D hxscript_cppia)';
+		compiled = 'interpreted (built without -D hxscript_hl)';
 		#end
 	}
 

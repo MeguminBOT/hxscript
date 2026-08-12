@@ -5,49 +5,65 @@ import h2d.Object;
 #end
 
 /**
- * What a project calls to reach the strip above it.
+ * What a running project can put on the shell's overlay.
  *
- * Named for what a script writes rather than for where it goes, because a script that has to know
- * about `studio.Overlay` to print a number is a script coupled to the app it happens to be running
- * in. Everything here is safe to call when the overlay is off and when nothing is running.
+ * Separate from `Api` because it answers a different question. `Api` is what every backend can tell a
+ * script about itself, such as the screen, the clock and how to stop. This is a place to put things,
+ * and it is the shell's screen rather than the project's, so a project reaching it is asking the host
+ * for space rather than drawing on its own.
+ *
+ * Marked the same way, so a script writes `info('speed', v)` rather than `host.Hud.info(...)`, and
+ * gets the same name whether its module ends up interpreted or compiled.
+ *
+ * Nothing here fails when the overlay is off, and nothing here fails in a build with no window in it
+ * either, since the headless check is exactly that build. A project that reports values
+ * unconditionally is doing the right thing; whether anything shows them is the host's business and
+ * the watcher's, not the project's.
  */
-@:scriptable
 @:scriptAmbient
 class Hud {
 	/**
-	 * Puts a named value on the strip, replacing whatever was there under that name.
+	 * Shows a named value, replacing what that name showed before.
 	 *
-	 * The cheap one, and meant to be called every frame: naming a value means its label is built
-	 * once and only the text changes afterwards.
+	 * Meant to be called every frame with a value that changes. Naming it is what makes that cheap:
+	 * the label is made once and its text is replaced afterwards, so a readout costs a string per
+	 * frame rather than a widget.
 	 *
-	 * @param name What to call it.
-	 * @param value What it is now.
+	 * @param name What the value is.
+	 * @param value Anything; stringified.
 	 */
+	@:scriptStatic('info')
 	public static function info(name:String, value:Dynamic):Void {
 		#if heaps
 		studio.Overlay.set(name, value);
 		#end
 	}
 
-	/** Drops every named value. */
+	/** Drops every line and every widget the project added. */
+	@:scriptStatic('infoClear')
 	public static function infoClear():Void {
 		#if heaps
 		studio.Overlay.clear();
 		#end
 	}
 
-	/**
-	 * @return Where to put a control of your own, for a project that has outgrown a readout.
-	 *
-	 * Everything added to it is dropped when the project stops.
-	 */
 	#if heaps
+	/**
+	 * The container a project adds its own widgets to.
+	 *
+	 * Anything `h2d` can build goes in here, positioned by the project. Emptied when the project
+	 * stops, so nothing has to be cleaned up on the way out.
+	 *
+	 * @return The container, or null before the shell has mounted one.
+	 */
+	@:scriptStatic('overlay')
 	public static function overlay():Object {
 		return studio.Overlay.surface();
 	}
 	#end
 
-	/** @return Whether anyone is looking, so the work of filling it can be skipped. */
+	/** Whether the overlay is on screen, for a project that would rather not compute what nobody sees. */
+	@:scriptStatic('overlayShown')
 	public static function overlayShown():Bool {
 		#if heaps
 		return studio.Overlay.shown();

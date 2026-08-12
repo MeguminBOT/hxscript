@@ -147,6 +147,25 @@ class Settings {
 	}
 
 	/**
+	 * Whether choosing between the two modes means anything in this build.
+	 *
+	 * It does not when there is no compiler to choose, which is a real build rather than a broken
+	 * one: an HL/C binary for an architecture HashLink cannot jit for links the extension in and
+	 * still has no loader inside it. Offering a control that cannot change what happens is worse than
+	 * showing why, so the sheet asks this and says the reason instead.
+	 *
+	 * @return Whether both modes are reachable.
+	 */
+	public static function selectable():Bool {
+		return hxscript.compile.Compiler.available;
+	}
+
+	/** @return Why the run mode cannot be chosen, or null when it can. */
+	public static function why():Null<String> {
+		return hxscript.compile.Compiler.unavailable();
+	}
+
+	/**
 	 * @param code The key code, or 0 for unbound.
 	 * @return Its name, or `none`.
 	 */

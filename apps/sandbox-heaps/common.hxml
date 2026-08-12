@@ -1,0 +1,34 @@
+# Everything the hxScript Sandbox for HashLink and Heaps is built from, except where it comes out.
+#
+# Not meant to be built on its own. `sandbox.hxml` and `sandbox-hlc.hxml` each add one line to this,
+# and that one line is the entire difference between the two ways of shipping a HashLink program:
+#
+#     sandbox.hxml       -hl export/sandbox.hl      bytecode, run by the VM
+#     sandbox-hlc.hxml   -hl export/hlc/main.c      C, compiled to an ordinary native binary
+#
+# Worth splitting rather than repeating, and worth reading as the point rather than as plumbing. The
+# same program, the same libraries, the same script compiler; a native build is a decision about how
+# it ships and not a different application. It is also forced: `-hl` cannot be overridden on the
+# command line, which answers `Multiple targets`.
+
+-lib heaps
+-lib hlsdl
+-lib hxscript
+
+-cp .
+
+# Names this app's own classes to hxScript, so `@:scriptable` on them means something and a script
+# can extend `host.Project`.
+-D hxscript_host=host
+
+# Compiles scripts to HashLink bytecode at runtime rather than only interpreting them, on both ways
+# of shipping. How the loader gets into the process is what differs: beside the output as
+# hxscript.hdll for the VM, and linked into the binary for HL/C. Without it every script is
+# interpreted and nothing else changes.
+-D hxscript_hl
+
+# Keeps the standard-library members a script reaches by reflection. `-lib hxscript` applies this
+# too; it is repeated here because it is the one flag whose absence looks like a bug in a script.
+-dce no
+
+-main Main

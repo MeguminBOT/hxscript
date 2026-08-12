@@ -178,6 +178,8 @@ class Panels {
 			lines.push('scripts   ${Sandbox.current.scripts.length} file(s)');
 			lines.push('classes   ${Sandbox.classes().length}');
 			lines.push('');
+			lines.push('shipped   ${Sandbox.shipping}');
+			lines.push('compiler  ${Sandbox.compiler}');
 			lines.push('mode      ${Settings.mode}');
 			lines.push(Sandbox.compiled);
 		}

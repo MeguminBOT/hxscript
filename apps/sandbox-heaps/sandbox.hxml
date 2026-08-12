@@ -1,4 +1,4 @@
-# The hxScript Sandbox for HashLink and Heaps.
+# The hxScript Sandbox for HashLink and Heaps, as bytecode the VM runs.
 #
 #     cd apps/sandbox-heaps
 #     haxe sandbox.hxml
@@ -9,26 +9,9 @@
 # here disturbs what the rest of the machine builds against.
 #
 # There is no lime under this one, so there is no Project.xml either: the build is a hxml and the
-# result is a .hl the VM runs.
+# result is a .hl the VM runs. `sandbox-hlc.hxml` beside this is the same program built as a native
+# binary instead, and `common.hxml` is everything the two have in common, which is everything else.
 
--lib heaps
--lib hlsdl
--lib hxscript
+common.hxml
 
--cp .
-
-# Names this app's own classes to hxScript, so `@:scriptable` on them means something and a script
-# can extend `host.Project`.
--D hxscript_host=host
-
-# Compiles scripts to HashLink bytecode at runtime rather than only interpreting them. Also builds
-# hxscript.hdll beside the output, which is what the VM needs to load what was compiled; without it
-# every script is interpreted and nothing else changes.
--D hxscript_hl
-
-# Keeps the standard-library members a script reaches by reflection. `-lib hxscript` applies this
-# too; it is repeated here because it is the one flag whose absence looks like a bug in a script.
--dce no
-
--main Main
 -hl export/sandbox.hl
