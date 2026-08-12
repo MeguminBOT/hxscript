@@ -375,6 +375,24 @@ class Corpus {
 			+ 'class Child extends Base { public function new() { super(); } '
 			+ 'public function borrowed():String return super.kept; }');
 
+		check('an optional argument left out', 'return pad(3);', '13',
+			'static function pad(n:Int, ?extra:Int):Int { return n + (extra == null ? 10 : extra); }');
+
+		check('an optional argument given', 'return pad(3, 4);', '7',
+			'static function pad(n:Int, ?extra:Int):Int { return n + (extra == null ? 10 : extra); }');
+
+		check('a default argument taken', 'return step(3);', '10',
+			'static function step(n:Int, k:Int = 7):Int { return n + k; }');
+
+		check('a default argument overridden', 'return step(3, 1);', '4',
+			'static function step(n:Int, k:Int = 7):Int { return n + k; }');
+
+		check('two optionals, one given', 'return three(1, 2);', '1/2/9',
+			'static function three(a:Int, ?b:Int, ?c:Int):String { return a + "/" + (b == null ? 8 : b) + "/" + (c == null ? 9 : c); }');
+
+		check('an optional method argument', 'return new T().grow(2);', '12',
+			'public function new() {} public function grow(n:Int, ?by:Int):Int { return n + (by == null ? 10 : by); }');
+
 		check('an override through a base reference', 'var v:Base = new Child(); return v.speak();', 'child',
 			null,
 			'class Base { public function new() {} public function speak():String return "base"; }\n'

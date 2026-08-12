@@ -337,8 +337,13 @@ class Emitter {
 			if (!isStatic(f))
 				args.push(tDyn);
 
+			/**
+			 * An argument that may be left out is typed dynamic whatever it was declared as, because
+			 * what a caller leaving it out passes is null and a typed register has nowhere to put
+			 * one. The body reads it as the interpreter does, which is null until its default runs.
+			 */
 			for (a in fn.args)
-				args.push(typeOf(a.t));
+				args.push(optional(a) ? tDyn : typeOf(a.t));
 
 			var ret:Int = fn.ret != null ? typeOf(fn.ret) : (f.name == 'new' ? tVoid : tDyn);
 
@@ -529,6 +534,22 @@ class Emitter {
 		for (i in 0...fn.args.length) {
 			regs.push(sig.args[i + first]);
 			scopes[scopes.length - 1].set(fn.args[i].name, i + first);
+		}
+
+		/**
+		 * An argument the caller left off arrives as null, and a declared default is what should have
+		 * been there instead. Written as the first thing the body does, so everything after it reads
+		 * the value the declaration promised, which is where the interpreter puts it too.
+		 */
+		for (i in 0...fn.args.length) {
+			var arg:Argument = fn.args[i];
+			if (arg.value == null)
+				continue;
+
+			var here:Int = i + first;
+			var over:Int = jump(OJNotNull, [here]);
+			into(arg.value, here);
+			land([over]);
 		}
 
 		var boxing = Capture.transform(fn.args, fn.expr);
@@ -1201,6 +1222,18 @@ class Emitter {
 			case ECall(callee, params):
 				emitCall(callee, params, slot, e.pos);
 
+			/**
+			 * An import or a `using` written inside a body has already done its work by the time
+			 * anything runs: the parser recorded it and the module resolved names against it. There
+			 * is nothing left to emit, and it still has to leave a value behind because it sits in a
+			 * block like anything else.
+			 */
+			case EImport(_, _) | EUsing(_):
+				var empty:Int = landing(slot);
+				ops.push({op: ONull, args: [empty]});
+				if (empty != slot)
+					move(empty, slot);
+
 			case _:
 				throw new Unsupported('this expression as a value', e.pos);
 		}
@@ -1364,7 +1397,7 @@ class Emitter {
 			return;
 		}
 
-		if (params.length != sig.args.length)
+		if (params.length > sig.args.length)
 			throw new Unsupported('a call given ' + params.length + ' of its ' + sig.args.length + ' arguments', pos);
 
 		var landed:Int = regs[slot] == sig.ret ? slot : reg(sig.ret);
@@ -1376,7 +1409,18 @@ class Emitter {
 			args.push(holder);
 		}
 
-		ops.push({op: callFor(params.length), args: args});
+		/**
+		 * A null for each argument the call left off, which is what an omitted optional is. Its
+		 * register is dynamic because `shape` made it one for exactly this, so there is somewhere for
+		 * the null to go, and the body turns it into the declared default if it has one.
+		 */
+		for (i in params.length...sig.args.length) {
+			var empty:Int = reg(sig.args[i]);
+			ops.push({op: ONull, args: [empty]});
+			args.push(empty);
+		}
+
+		ops.push({op: callFor(sig.args.length), args: args});
 
 		if (landed != slot)
 			move(landed, slot);
@@ -2277,6 +2321,17 @@ class Emitter {
 	 * @param name A field name.
 	 * @return Its accessors when it is a property of that class or one of its bases, or null.
 	 */
+	/**
+	 * @param a One of a function's arguments.
+	 * @return Whether a caller may leave it out.
+	 *
+	 * A default value implies it, since a caller supplying nothing is the only way for the default to
+	 * be what runs.
+	 */
+	inline function optional(a:Argument):Bool {
+		return a.opt == true || a.value != null;
+	}
+
 	function propertyOf(cls:Null<String>, name:String):Null<{get:String, set:String}> {
 		var at:Null<String> = cls;
 

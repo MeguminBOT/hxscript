@@ -37,4 +37,8 @@ if [ "$1" = "test" ]; then
 	# it; this deliberately does not, since a bridge is the thing being probed.
 	haxe -lib hxscript -cp test/hl/loader -D hxscript_hl -D hxscript_host=probe -main BridgeProbe -hl "$OUT/bridgeprobe.hl"
 	( cd "$OUT" && "$HL" bridgeprobe.hl )
+
+	# The cases the cppia test carries beyond the shared corpus, which need its fixtures.
+	haxe -cp src -cp test/hl/loader -cp test/common/fixtures -D hxscript_hl --macro "hxscript.macro.Keep.run()" -main HostTypesProbe -hl "$OUT/hosttypes.hl"
+	( cd "$OUT" && "$HL" hosttypes.hl )
 fi
