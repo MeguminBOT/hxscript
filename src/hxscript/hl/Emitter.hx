@@ -106,6 +106,18 @@ class Emitter {
 	 */
 	var members:StringMap<StringMap<Bool>>;
 
+	/** The base each class of the batch extends, when that base is also of the batch. */
+	var bases:StringMap<String>;
+
+	/**
+	 * Classes whose chain ends at a base this batch did not declare.
+	 *
+	 * Their members cannot be listed here, because the base is the host's and what it offers is only
+	 * known once the world has it. A bare name in one of those is therefore taken to be a field of
+	 * the instance rather than refused, which is what the interpreter does with the same name.
+	 */
+	var opened:StringMap<Bool>;
+
 	/** The accessors of each property, by class then name. A property is not a field. */
 	var props:StringMap<StringMap<{get:String, set:String}>>;
 
@@ -189,6 +201,8 @@ class Emitter {
 		owning = '';
 		classes = new StringMap();
 		members = new StringMap();
+		bases = new StringMap();
+		opened = new StringMap();
 		props = new StringMap();
 		owned = new StringMap();
 		declared = new StringMap();
@@ -301,6 +315,14 @@ class Emitter {
 		members.set(c.name, own);
 		props.set(c.name, accessors);
 		owned.set(c.name, statics);
+
+		var base:Null<String> = baseName(c.extend);
+		if (base != null) {
+			if (classes.exists(base))
+				bases.set(c.name, base);
+			else
+				opened.set(c.name, true);
+		}
 
 		for (f in c.fields) {
 			var fn:Null<FunctionDecl> = switch (f.kind) {
@@ -435,6 +457,45 @@ class Emitter {
 	}
 
 	/**
+	 * Wraps an instance method in a function that binds it to one instance.
+	 *
+	 * **What lets an object the interpreter built run a compiled method.** A compiled instance method
+	 * takes its receiver as an ordinary first argument, and the interpreter holds each method as a
+	 * closure that already knows its instance, so the two do not fit together until something binds
+	 * one to the other. That is exactly `OInstanceClosure`, which is what a lambda capturing its
+	 * environment already uses.
+	 *
+	 * Called once per method per instance, which is the same order of work the interpreter does when
+	 * it builds that method's closure, so nothing is paid that was not being paid before.
+	 *
+	 * @param name The method, written `Class#field`.
+	 * @param exposed The index of its boxing wrapper, since what the interpreter calls has to answer
+	 *        with a value the host can read.
+	 * @return The binder's index, or null when there is no such instance method.
+	 */
+	public function binder(name:String, exposed:Int):Null<Int> {
+		var sig:Null<Signature> = signatures.get(name);
+		if (sig == null || sig.args.length == 0)
+			return null;
+
+		var findex:Int = module.reserve();
+		var shape:Int = module.typeId(TFun(sig.args.slice(1), tDyn));
+
+		module.add({
+			type: module.typeId(TFun([tDyn], tDyn)),
+			findex: findex,
+			regs: [tDyn, shape, tDyn],
+			ops: [
+				{op: OInstanceClosure, args: [1, exposed, 0]},
+				{op: OMov, args: [2, 1]},
+				{op: ORet, args: [2]}
+			]
+		});
+
+		return findex;
+	}
+
+	/**
 	 * Writes one function's registers and body.
 	 *
 	 * Whether every path returns is not worked out here, so a body that can fall off its end is
@@ -556,10 +617,10 @@ class Emitter {
 					case EIdent(name) if (isStaticOf(owning, name)):
 						staticWrite(owning, name, value, e.pos);
 
-					case EIdent(name) if (inside != null && props.get(inside).exists(name)):
+					case EIdent(name) if (propertyOf(inside, name) != null):
 						setField(thisExpr(e.pos), name, value, e.pos);
 
-					case EIdent(name) if (isMemberOf(name)):
+					case EIdent(name) if (isMemberOf(name) || reachesHost()):
 						setField(thisExpr(e.pos), name, value, e.pos);
 
 					case EField({e: EIdent(cls)}, name, _) if (isStaticOf(cls, name)):
@@ -938,12 +999,12 @@ class Emitter {
 					return;
 				}
 
-				if (inside != null && props.get(inside).exists(name)) {
+				if (propertyOf(inside, name) != null) {
 					getField(thisExpr(e.pos), name, slot, e.pos);
 					return;
 				}
 
-				if (isMemberOf(name)) {
+				if (isMemberOf(name) || reachesHost()) {
 					getField(thisExpr(e.pos), name, slot, e.pos);
 					return;
 				}
@@ -965,7 +1026,7 @@ class Emitter {
 				callSupport('get', [looseOwner(), named(name)], slot);
 
 			case EField({e: EIdent('super')}, name, _):
-				callSupport('superGet', [dynOf(thisExpr(e.pos)), named(name)], slot);
+				callSupport('superGet', [dynOf(thisExpr(e.pos)), named(owningPath()), named(name)], slot);
 
 			case EField({e: EIdent(cls)}, name, _) if (isStaticOf(cls, name)):
 				staticRead(cls, name, slot, e.pos);
@@ -1257,11 +1318,11 @@ class Emitter {
 	function emitCall(callee:Expr, params:Array<Expr>, slot:Int, pos:Position):Void {
 		switch (callee.e) {
 			case EField({e: EIdent('super')}, name, _):
-				callSupport('superCall', [dynOf(thisExpr(pos)), named(name), gathered(params)], slot);
+				callSupport('superCall', [dynOf(thisExpr(pos)), named(owningPath()), named(name), gathered(params)], slot);
 				return;
 
 			case EIdent('super'):
-				callSupport('superNew', [dynOf(thisExpr(pos)), gathered(params)], slot);
+				callSupport('superNew', [dynOf(thisExpr(pos)), named(owningPath()), gathered(params)], slot);
 				return;
 
 			case _:
@@ -1540,15 +1601,19 @@ class Emitter {
 	 * @param pos Where it appears.
 	 */
 	function emitNew(cls:String, params:Array<Expr>, slot:Int, pos:Position):Void {
-		if (!declared.exists(cls))
-			throw new Unsupported('new ' + cls + ', which is neither a type of this batch nor one the host offers', pos);
-
 		var given:Int = reg(tDyn);
 		callSupport('array', [], given);
 		for (p in params)
 			callSupport('push', [given, dynOf(p)], reg(tDyn));
 
-		callSupport('make', [ownerOf(cls), given], slot);
+		/**
+		 * `typeNamed` rather than a refusal for anything not of the batch. A class of the batch is
+		 * resolved as the world's, and everything else is looked up by name the same way a type used
+		 * as a value is, so a script may build what the host offers as well as what it declared. A
+		 * name nothing answers to leaves a null to fail on rather than failing to compile, which is
+		 * what the interpreter does with the same line.
+		 */
+		callSupport('make', [typeNamed(cls), given], slot);
 	}
 
 	/**
@@ -1562,7 +1627,7 @@ class Emitter {
 	 */
 	function getField(obj:Expr, name:String, slot:Int, pos:Position):Void {
 		var cls:Null<String> = ownerNamed(obj);
-		var reader:Null<{get:String, set:String}> = cls == null ? null : props.get(cls).get(name);
+		var reader:Null<{get:String, set:String}> = propertyOf(cls, name);
 
 		if (reader != null) {
 			if (reader.get != 'get')
@@ -1578,7 +1643,7 @@ class Emitter {
 	/** Writes a field write, by name and through the world, for the reasons `getField` gives. */
 	function setField(obj:Expr, name:String, value:Expr, pos:Position):Void {
 		var cls:Null<String> = ownerNamed(obj);
-		var writer:Null<{get:String, set:String}> = cls == null ? null : props.get(cls).get(name);
+		var writer:Null<{get:String, set:String}> = propertyOf(cls, name);
 
 		if (writer != null) {
 			if (writer.set != 'set')
@@ -1617,15 +1682,70 @@ class Emitter {
 	}
 
 	/**
+	 * @return The full path of the class whose body is being written.
+	 *
+	 * What `super` is resolved against. The interpreter binds `super` lexically, so two classes deep
+	 * each body means its own base, and naming the class the body belongs to is the only way to say
+	 * which of them is meant.
+	 */
+	function owningPath():String {
+		var here:String = inside ?? owning;
+		return pack.length > 0 ? pack + '.' + here : here;
+	}
+
+	/**
 	 * @param name A bare name inside a method body.
 	 * @return Whether the enclosing class declares it as an instance member, so it means `this.name`.
 	 */
-	function isMemberOf(name:String):Bool {
-		if (inside == null)
-			return false;
+	/**
+	 * @return Whether the enclosing class's chain reaches a base this batch did not declare.
+	 *
+	 * When it does, a name nothing here recognises is still likely to be a field, since the base
+	 * brought members along that only the world can list.
+	 */
+	function reachesHost():Bool {
+		var at:Null<String> = inside;
 
-		var own:Null<StringMap<Bool>> = members.get(inside);
-		return own != null && own.exists(name);
+		while (at != null) {
+			if (opened.exists(at))
+				return true;
+
+			at = bases.get(at);
+		}
+
+		return false;
+	}
+
+	function isMemberOf(name:String):Bool {
+		var at:Null<String> = inside;
+
+		/**
+		 * Up the chain, because a field a base declared is as much this class's as its own. Only
+		 * bases of the batch are walked: one the host owns has members nothing here can enumerate,
+		 * and a bare name that reaches nothing known stays a refusal rather than a quiet null.
+		 */
+		while (at != null) {
+			var own:Null<StringMap<Bool>> = members.get(at);
+			if (own != null && own.exists(name))
+				return true;
+
+			at = bases.get(at);
+		}
+
+		return false;
+	}
+
+	/**
+	 * @param t A class's `extends` clause.
+	 * @return The name it gives, or null when there is none.
+	 */
+	function baseName(t:Null<CType>):Null<String> {
+		return switch (t) {
+			case null: null;
+			case CTPath(parts, _): parts[parts.length - 1];
+			case CTParent(inner): baseName(inner);
+			case _: null;
+		}
 	}
 
 	function ownerNamed(obj:Expr):Null<String> {
@@ -2007,25 +2127,63 @@ class Emitter {
 	/**
 	 * Works out whether an expression names something the host owns.
 	 *
-	 * Anything written `Owner.field` where `Owner` is capitalised and is not a class of this batch
-	 * is taken to be the host's. Whether it really is cannot be settled here: the answer comes when
-	 * the module is loaded and the binding is resolved, and a name nothing answers to leaves a null
-	 * in the global rather than failing to compile.
+	 * Anything written `Owner.field`, where the owner's last segment is capitalised and is not a type
+	 * of this batch, is taken to be the host's. Whether it really is cannot be settled here: the
+	 * answer comes when the module is loaded and the binding is resolved, and a name nothing answers
+	 * to leaves a null in the global rather than failing to compile.
+	 *
+	 * **The owner may be a whole path.** A script writes `hxd.Timer.dt` as readily as `Timer.dt`, and
+	 * the only difference is how many segments precede the type; the last capitalised one is the
+	 * type and everything before it is its package.
 	 *
 	 * @param e The expression.
 	 * @return The owner and field, or null when it is not that shape.
 	 */
 	function hostName(e:Expr):Null<{owner:String, field:String}> {
-		return switch (e.e) {
-			case EField({e: EIdent(owner)}, field,
-				_) if (isTypeName(owner) && !classes.exists(owner) && !declared.exists(owner) && !signatures.exists(owner + '.' + field)):
-				{owner: owner, field: field};
-
+		switch (e.e) {
 			case ECall(callee, _):
-				hostName(callee);
+				return hostName(callee);
 
 			case EParent(inner):
-				hostName(inner);
+				return hostName(inner);
+
+			case EField(obj, field, _):
+				var path:Null<String> = dotted(obj);
+				if (path == null)
+					return null;
+
+				var parts:Array<String> = path.split('.');
+				if (!isTypeName(parts[parts.length - 1]))
+					return null;
+
+				if (declared.exists(path) || signatures.exists(path + '.' + field))
+					return null;
+
+				return {owner: path, field: field};
+
+			case _:
+				return null;
+		}
+	}
+
+	/**
+	 * @param e An expression.
+	 * @return It written out as a dotted path, or null when it is not one.
+	 *
+	 * A local of the head's name means it is a value being read rather than a package being named,
+	 * which is what stops `player.stats.hp` being mistaken for a type path.
+	 */
+	function dotted(e:Expr):Null<String> {
+		return switch (e.e) {
+			case EIdent(name) if (lookup(name) == null && !isMemberOf(name) && !isStaticOf(owning, name)):
+				name;
+
+			case EField(obj, name, false):
+				var head:Null<String> = dotted(obj);
+				head == null ? null : head + '.' + name;
+
+			case EParent(inner):
+				dotted(inner);
 
 			case _:
 				null;
@@ -2095,9 +2253,42 @@ class Emitter {
 	function selfCall(callee:Expr):Null<String> {
 		return switch (callee.e) {
 			case EParent(inner): selfCall(inner);
-			case EIdent(name) if (inside != null && lookup(name) == null && signatures.exists(inside + '#' + name)): name;
+			case EIdent(name) if (lookup(name) == null && isMethodOf(name)): name;
 			case _: null;
 		}
+	}
+
+	/** @return Whether the enclosing class or one of its bases declares `name` as an instance method. */
+	function isMethodOf(name:String):Bool {
+		var at:Null<String> = inside;
+
+		while (at != null) {
+			if (signatures.exists(at + '#' + name))
+				return true;
+
+			at = bases.get(at);
+		}
+
+		return false;
+	}
+
+	/**
+	 * @param cls A class of the batch, or null.
+	 * @param name A field name.
+	 * @return Its accessors when it is a property of that class or one of its bases, or null.
+	 */
+	function propertyOf(cls:Null<String>, name:String):Null<{get:String, set:String}> {
+		var at:Null<String> = cls;
+
+		while (at != null) {
+			var here:Null<StringMap<{get:String, set:String}>> = props.get(at);
+			if (here != null && here.exists(name))
+				return here.get(name);
+
+			at = bases.get(at);
+		}
+
+		return null;
 	}
 
 	/**
@@ -2170,7 +2361,7 @@ class Emitter {
 
 	/** Writes a read of a static, through its accessor when it has one. */
 	function staticRead(cls:String, name:String, slot:Int, pos:Position):Void {
-		var accessor:Null<{get:String, set:String}> = props.get(cls).get(name);
+		var accessor:Null<{get:String, set:String}> = propertyOf(cls, name);
 
 		if (accessor != null) {
 			if (accessor.get != 'get')
@@ -2185,7 +2376,7 @@ class Emitter {
 
 	/** Writes a write of a static, through its accessor when it has one. */
 	function staticWrite(cls:String, name:String, value:Expr, pos:Position):Void {
-		var accessor:Null<{get:String, set:String}> = props.get(cls).get(name);
+		var accessor:Null<{get:String, set:String}> = propertyOf(cls, name);
 
 		if (accessor != null) {
 			if (accessor.set != 'set')
@@ -2627,7 +2818,7 @@ class Emitter {
 	 * a value made here and a value made by the interpreter answer the same about what they are.
 	 */
 	function typeNamed(name:String):Int {
-		if (classes.exists(name))
+		if (declared.exists(name))
 			return ownerOf(name);
 
 		var slot:Int = reg(tDyn);

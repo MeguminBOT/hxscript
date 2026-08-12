@@ -41,6 +41,33 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 	/** The class's own interpreter, hosting its statics and initializer. */
 	public var interp:Interp;
 
+	/**
+	 * Instance methods a backend compiled, as functions that bind one to an instance.
+	 *
+	 * Null until something fills it, which is the usual case: a world nobody compiled runs entirely
+	 * interpreted and should not pay a map for the fact. A backend that does compile puts a binder
+	 * here per method, and the generated bridge asks for one as it builds each instance.
+	 *
+	 * Binders rather than the functions themselves, because a compiled method takes its receiver as
+	 * an argument and the interpreter holds a closure that already knows its own.
+	 */
+	public var compiledMembers:Null<Map<String, Dynamic>> = null;
+
+	/**
+	 * Binds one of this class's compiled instance methods to an instance.
+	 *
+	 * @param name The method.
+	 * @param instance What to bind it to.
+	 * @return The bound closure, or null when nothing compiled that method.
+	 */
+	public function boundMember(name:String, instance:Dynamic):Null<Dynamic> {
+		if (compiledMembers == null)
+			return null;
+
+		var make:Null<Dynamic> = compiledMembers.get(name);
+		return make == null ? null : make(instance);
+	}
+
 	/** The resolved base (a scripted class or a native class), resolved lazily and cached. */
 	public var extending(get, never):Dynamic;
 

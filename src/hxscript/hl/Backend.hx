@@ -146,20 +146,42 @@ class Backend {
 			return;
 		}
 
-		var exposed:Array<{path:String, field:String, findex:Int}> = [];
+		var exposed:Array<{path:String, field:String, findex:Int, member:Bool}> = [];
 
 		for (decl in module.decls) {
 			switch (decl.d) {
 				case DClass(c):
 					for (f in c.fields) {
 						var findex:Null<Int> = emitter.expose(c.name + '.' + f.name);
-						if (findex == null)
+
+						if (findex != null) {
+							exposed.push({
+								path: pathOf(module, c.name),
+								field: f.name,
+								findex: findex,
+								member: false
+							});
+							continue;
+						}
+
+						/**
+						 * An instance method is exposed the same way and then wrapped again, because
+						 * what the interpreter holds per instance is a closure that already knows its
+						 * receiver. The binder is what turns one into the other.
+						 */
+						var own:Null<Int> = emitter.expose(c.name + '#' + f.name);
+						if (own == null)
+							continue;
+
+						var bound:Null<Int> = emitter.binder(c.name + '#' + f.name, own);
+						if (bound == null)
 							continue;
 
 						exposed.push({
 							path: pathOf(module, c.name),
 							field: f.name,
-							findex: findex
+							findex: bound,
+							member: true
 						});
 					}
 				case _:
@@ -191,7 +213,17 @@ class Backend {
 			if (fn == null)
 				continue;
 
-			(cast owner : ScriptedClass).reflectSetField(entry.field, fn);
+			var cls:ScriptedClass = cast owner;
+
+			if (entry.member) {
+				if (cls.compiledMembers == null)
+					cls.compiledMembers = new Map<String, Dynamic>();
+
+				cls.compiledMembers.set(entry.field, fn);
+			} else {
+				cls.reflectSetField(entry.field, fn);
+			}
+
 			report.compiled.push(entry.path + '.' + entry.field);
 		}
 

@@ -375,6 +375,21 @@ class Corpus {
 			+ 'class Child extends Base { public function new() { super(); } '
 			+ 'public function borrowed():String return super.kept; }');
 
+		check('an override through a base reference', 'var v:Base = new Child(); return v.speak();', 'child',
+			null,
+			'class Base { public function new() {} public function speak():String return "base"; }\n'
+			+ 'class Child extends Base { public function new() { super(); } '
+			+ 'override public function speak():String return "child"; }');
+
+		check('a method calling another on this', 'return new T().outer();', '21',
+			'public function new() {} public function inner():Int return 21; public function outer():Int return inner();');
+
+		check('a field set by the base and read by the child', 'return new Child().read();', '7',
+			null,
+			'class Base { public var kept:Int; public function new() { kept = 7; } }\n'
+			+ 'class Child extends Base { public function new() { super(); } '
+			+ 'public function read():Int return kept; }');
+
 		check('super two deep', 'return new C().name();', 'A/B/C',
 			null,
 			'class A { public function new() {} public function name():String return "A"; }\n'

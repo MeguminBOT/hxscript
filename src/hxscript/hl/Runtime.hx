@@ -257,7 +257,17 @@ class Runtime {
 				return boxed.owner.getField(boxed.boxed, name);
 		}
 
-		return hxscript.proxy.ReflectProxy.getProperty(o, name);
+		var through:Dynamic = hxscript.proxy.ReflectProxy.getProperty(o, name);
+
+		/**
+		 * A plain field read straight, when asking for the property answered with nothing.
+		 *
+		 * The two are one question on most values, and not on a generated bridge: its property hook
+		 * answers for what the script declared as a property and says nothing about a plain field,
+		 * so a field on a class extending a host type reads as null through the first and correctly
+		 * through the second. Trying the property first keeps a getter winning where there is one.
+		 */
+		return through != null ? through : hxscript.proxy.ReflectProxy.field(o, name);
 	}
 
 	/**
@@ -302,7 +312,7 @@ class Runtime {
 	 * @param self The instance.
 	 * @return Its mirror, or null.
 	 */
-	static function mirror(self:Dynamic):Dynamic {
+	static function mirror(self:Dynamic, owner:String):Dynamic {
 		if (!(self is IScriptedInstance))
 			return null;
 
@@ -310,7 +320,10 @@ class Runtime {
 		if (slots == null)
 			return null;
 
-		var held:Variable = slots.get('super');
+		var held:Variable = slots.get('super@' + owner);
+		if (held == null)
+			held = slots.get('super');
+
 		return held == null ? null : held.r;
 	}
 
@@ -319,8 +332,8 @@ class Runtime {
 	 * @param name The field.
 	 * @return The base's version of it, or null when there is none.
 	 */
-	static function superSlot(self:Dynamic, name:String):Dynamic {
-		var found:Dynamic = mirror(self);
+	static function superSlot(self:Dynamic, owner:String, name:String):Dynamic {
+		var found:Dynamic = mirror(self, owner);
 		if (found == null || !(found is Reference))
 			return null;
 
@@ -345,8 +358,21 @@ class Runtime {
 	 * @param args Its arguments.
 	 * @return What it answered.
 	 */
-	public static function superCall(self:Dynamic, name:String, args:Array<Dynamic>):Dynamic {
-		var found:Dynamic = superSlot(self, name);
+	public static function superCall(self:Dynamic, owner:String, name:String, args:Array<Dynamic>):Dynamic {
+		var found:Dynamic = superSlot(self, owner, name);
+
+		/**
+		 * Nothing in the mirror means the base is the host's and the method is one of its own that
+		 * the bridge overrode. The bridge's override is what to call: it runs the script's version
+		 * only when it is not already running it, so entering it from inside falls through to the
+		 * native one, which is what `super` means here.
+		 *
+		 * Safe from looping only because a scripted base always has the name in its mirror, so this
+		 * is reached exactly when there is a guard on the other side of it.
+		 */
+		if (found == null)
+			found = Reflect.field(self, name);
+
 		return found == null ? null : Reflect.callMethod(self, found, args);
 	}
 
@@ -360,8 +386,8 @@ class Runtime {
 	 * @param name The field.
 	 * @return Its value.
 	 */
-	public static function superGet(self:Dynamic, name:String):Dynamic {
-		var found:Dynamic = superSlot(self, name);
+	public static function superGet(self:Dynamic, owner:String, name:String):Dynamic {
+		var found:Dynamic = superSlot(self, owner, name);
 		return found == null ? get(self, name) : found;
 	}
 
@@ -374,8 +400,8 @@ class Runtime {
 	 * @param self The instance.
 	 * @param args The arguments.
 	 */
-	public static function superNew(self:Dynamic, args:Array<Dynamic>):Void {
-		var found:Dynamic = mirror(self);
+	public static function superNew(self:Dynamic, owner:String, args:Array<Dynamic>):Void {
+		var found:Dynamic = mirror(self, owner);
 
 		if (found != null && found is Reference) {
 			switch (cast(found, Reference)) {

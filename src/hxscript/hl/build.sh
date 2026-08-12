@@ -31,4 +31,10 @@ if [ "$1" = "test" ]; then
 
 	haxe -cp src -cp test/hl/loader -D hxscript_hl --macro "hxscript.macro.Keep.run()" -main HostProbe -hl "$OUT/hostprobe.hl"
 	( cd "$OUT" && "$HL" hostprobe.hl )
+
+	# `-lib hxscript` rather than `-cp src`, because this one needs a bridge generated for its host
+	# base and that is what the library's own setup does. Everything above deliberately goes around
+	# it; this deliberately does not, since a bridge is the thing being probed.
+	haxe -lib hxscript -cp test/hl/loader -D hxscript_hl -D hxscript_host=probe -main BridgeProbe -hl "$OUT/bridgeprobe.hl"
+	( cd "$OUT" && "$HL" bridgeprobe.hl )
 fi
