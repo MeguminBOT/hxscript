@@ -79,11 +79,14 @@ One caveat worth knowing: `hlboot.dat` is opened relative to the **working** dir
 the executable. Explorer sets that to the folder it launched from, so double-clicking works, but a
 shortcut with a different "start in" does not.
 
-> **This app cannot be built as HL/C**, which is the other way to ship HashLink: `haxe -hl out.c`
-> emits C that compiles to an ordinary native binary with no VM and no bytecode file. That route has
-> no JIT to hand a script to, and this app exists to load bytecode at runtime. A game that only wants
-> the *interpreter* has no such problem, and can be HL/C; see
-> [`../../docs/embedding.md`](../../docs/embedding.md).
+> **HL/C is the other way to ship HashLink**, and it does not rule out compiled scripts: `haxe -hl
+> out.c` emits C that compiles to an ordinary native binary with no VM and no bytecode file, and
+> `libhl` still exports the executable-memory allocator the jit needs, so such a binary can compile
+> and run a script at runtime. `test/hlc/` is where that is checked.
+>
+> **This app** is nonetheless shipped as bytecode, because it loads a whole `.hl` at runtime by
+> design and there is no reason to make it a native binary. A game is the other way round, and
+> [`../../docs/embedding.md`](../../docs/embedding.md) covers building one that way.
 
 Setup installs [hxscript](https://github.com/MeguminBOT/hxscript) from git rather than from a
 release, because this app is written against the library as it currently is. A checkout of it at

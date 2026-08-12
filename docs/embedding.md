@@ -138,7 +138,7 @@ Each disables one step, for a host that would rather do it itself or is minimisi
 | `-D hxscript_no_bridges` | generating a bridge per scriptable base. The expensive step |
 | `-D hxscript_no_abstracts` | giving native abstracts a runtime form |
 | `-D hxscript_no_shims` | registering emulations for members with no runtime form |
-| `-D hxscript_no_hdll` | building the HashLink extension beside the output |
+| `-D hxscript_no_hdll` | building the HashLink extension, and on HL/C writing what to link |
 
 ## Metadata
 
@@ -435,7 +435,7 @@ On hxcpp:
 -dce no
 ```
 
-On HashLink:
+On HashLink, whether the program ships as bytecode or as HL/C:
 
 ```
 -D hxscript_hl
@@ -443,25 +443,34 @@ On HashLink:
 ```
 
 Check at startup rather than wondering. `Compiler.available` answers for whichever target you built
-for, and on HashLink it also answers for the extension below, which is not a build-time question:
+for, and on HashLink it also answers for the extension below, which on that target is not only a
+build-time question:
 
 ```haxe
 if (!hxscript.compile.Compiler.available)
     trace('no compiler in this build; everything will be interpreted');
 ```
 
+`Compiler.unavailable()` gives the same answer as a sentence saying which of the several reasons it
+is, which is worth reporting on HashLink and never interesting on hxcpp. It is
+[covered below](#why-nothing-can-be-compiled).
+
 ### The HashLink extension
 
-HashLink needs one thing hxcpp does not: `hxscript.hdll` beside what runs. Its bytecode loader is
-compiled into `hl.exe` rather than into `libhl`, so a host has no way to reach it; the extension
+HashLink needs one thing hxcpp does not: some C of its own. Its bytecode loader is compiled into
+`hl.exe` rather than into `libhl`, on every platform, so a host has no way to reach it; the extension
 carries hashlink's own `code.c`, `module.c` and `jit.c` and calls them, which keeps the VM stock.
-Ship it beside the other `.hdll`s and run `hl game.hl` as before.
 
-**The extension is optional at runtime, not just at build time.** A program built with
+**How that C gets into the process is the only thing that differs between the two ways of shipping
+HashLink**, and the same `hxscript.c` does both. On HL/JIT it is `hxscript.hdll` beside what runs,
+which is the rest of this section. On HL/C it is linked in, which is [the next one](#shipping-as-hlc).
+
+**On HL/JIT the extension is optional at runtime, not just at build time.** A program built with
 `-D hxscript_hl` runs with or without it: missing, corrupt, or built for a different VM, the library
 reports itself unusable and every script is interpreted, exactly as if the define had never been set.
 Shipping the extension is a decision you can make per release, or leave to whoever is running it,
-rather than one baked into the binary.
+rather than one baked into the binary. HL/C is the one place that is not true, for the reason given
+there.
 
 **You do not normally build it by hand.** `-D hxscript_hl` is taken as asking for the extension too,
 so a build produces it next to its own output and says so once:
@@ -523,6 +532,120 @@ the wrong place.
 The build deliberately does not carry `gc.c` or `allocator.c`. Those are already in the running
 `libhl`, and a second copy would give loaded modules their own heap, leaving their objects invisible
 to the host's collector.
+
+### Shipping as HL/C
+
+Everything above is HL/JIT: the program is bytecode, `hl` runs it, and the extension is a `.hdll` the
+VM loads by name. **HL/C is the other way**, and the one a game with mod support is most likely to
+be built as. `haxe -hl out.c` writes C that compiles to an ordinary native binary, with no VM
+process and no bytecode file beside it.
+
+Compiled scripts work there. `libhl` exports the executable-memory allocator the jit needs, and the
+loader is carried in for the same reason it is carried into the `.hdll`: `hl_code_read` and
+`hl_module_init` live in `hl.exe` rather than in `libhl` on every platform, so neither way of
+shipping can reach them without them.
+
+**The extension is linked rather than loaded, and the same `hxscript.c` does both.** Haxe writes a
+header for the natives a program binds, and it declares exactly the symbols that file already
+defines, so nothing about it changes:
+
+```c
+HL_API hxs_module* hxscript_load(vbyte*,int);
+```
+
+**What does not carry over is the `?`.** On HL/JIT the natives are marked optional, so a missing
+extension leaves them as stubs and the program interprets. A linked symbol either resolves or the
+link fails, so an **HL/C host decides at build time whether it can compile scripts**, where an
+HL/JIT host decides at startup. That is a difference in when, not in what: a build that leaves the
+extension out is a build that interprets, and everything else about it is the same.
+
+A build with `-D hxscript_hl` on an HL/C target writes `hxscript.flags` beside the generated C, one
+argument per line, and says so once. Hand it to whatever drives your native build:
+
+```
+hxscript: HL/C links the extension rather than loading it; what to add is in out/hxscript.flags
+```
+
+The same list, printed rather than written, for a build you are configuring by hand:
+
+```sh
+haxelib run hxscript hlc --flags
+sh hlc.sh --flags                 # the standalone script, no Haxe involved
+```
+
+```
+-I<hashlink>/src -I<hxscript>/src/hxscript/hl
+  <hxscript>/src/hxscript/hl/hxscript.c
+  <hashlink>/src/code.c <hashlink>/src/module.c <hashlink>/src/jit.c
+  -ldbghelp
+```
+
+And for someone with no native build of their own, one command that produces the binary:
+
+```sh
+haxelib run hxscript hlc out --out game.exe
+sh hlc.sh out --out game.exe
+```
+
+It reads `hlc.json`, which Haxe wrote beside the C, for the libraries the program binds and for the
+file to compile. **One file, not the list.** Haxe writes a file per type and then a main file that
+`#include`s every one of them unless `HL_MAKE` says otherwise, so compiling the list as well defines
+everything twice. Separate compilation is faster on a machine with cores to spare and is what a real
+build system should do; this is the fallback for someone with none.
+
+Two things a first HL/C build runs into, neither of them to do with hxScript: `hlc_main.c`'s entry
+point is `wmain`, so Windows needs `-municode`, and it resolves symbols through dbghelp, so it needs
+`-ldbghelp`. You will also see `LNK4217` once per native, because the generated header declares them
+as imports and this build defines them in the same binary. The linker resolves them locally and says
+so; it is not a problem and the shipped tooling filters it.
+
+**Compiling a script replaces machinery the host was already using.** `hlc_main.c` installs
+`hlc_static_call` and `hlc_get_wrapper`, which are how a program generated as C makes a call whose
+signature is not known until runtime. The first time anything is jitted, `jit.c` overwrites both,
+process-wide and permanently, and from then on every dynamic call in the program goes through the
+jit's trampoline instead of the table the C generator wrote. This is checked rather than assumed:
+`test/hlc/CallbackProbe.hx` runs fifteen signatures before and after the first compile, and they
+agree. Exceptions cross both ways and are checked the same way.
+
+**x86 and x86-64 only.** HashLink's jit emits no other machine code. `jit.c` says so itself but only
+tests for 32-bit ARM, and arm64 does not define `__arm__`, so there it would compile cleanly and
+write x86 bytes into executable memory; hashlink's own Makefile is the plainer statement, since it
+skips building the VM on arm64 entirely. So `hxscript.c` compiles its loader only where it can work.
+
+Everywhere else it still defines every native, which is what lets the same file link into a build for
+any architecture. There `Compiler.available` is false, `Loader.why()` says why, and every script is
+interpreted, which is the answer the library already gives when the extension is absent. That build
+needs no hashlink source tree either, only `hl.h`, which the binary distributions do ship:
+
+```sh
+haxelib run hxscript hlc out --no-jit
+```
+
+**So an Android build works and interprets.** Making compiled scripts worth something there would
+mean an arm64 backend for hashlink's jit, or an interpreter for the bytecode this emits. Neither
+exists, and nothing here pretends otherwise.
+
+### Why nothing can be compiled
+
+`Compiler.available` is a boolean, and on HashLink a false has four causes that are fixed four
+different ways. `Compiler.unavailable()` gives the sentence, on every target, so a host reporting it
+does not have to know which target it is:
+
+```haxe
+var why = hxscript.compile.Compiler.unavailable();
+if (why != null)
+    trace('scripts will be interpreted: ' + why);
+```
+
+| | |
+| --- | --- |
+| `Usable` | it works |
+| `NotLinked` | no `hxscript.hdll` beside what is running, which only HL/JIT can be |
+| `Disagrees` | the extension was built against a different hashlink than the one running |
+| `NoLoader` | the build carries no loader, because the jit is x86 and x86-64 only |
+
+`hxscript.hl.Loader.availability` is the same answer as a value rather than a sentence, for a host
+that wants to act on which one it is.
 
 **The whole integration:**
 

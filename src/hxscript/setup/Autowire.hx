@@ -5,6 +5,7 @@ import haxe.macro.Compiler;
 import haxe.macro.Context;
 import haxe.macro.Expr;
 import hxscript.setup.Extension.Outcome;
+import hxscript.setup.Native.Advice;
 import sys.FileSystem;
 import sys.io.File;
 
@@ -82,6 +83,11 @@ class Autowire {
 		if (into == null || into.length == 0)
 			into = '.';
 
+		if (Context.defined('hlc')) {
+			native(into, carried);
+			return;
+		}
+
 		switch (Extension.ensure(into, carried)) {
 			case Ready(_):
 				if (Context.defined('hxscript_verbose'))
@@ -92,6 +98,46 @@ class Autowire {
 
 			case Missing(reason, remedy):
 				Context.warning('hxscript: ' + reason + ', so scripts will be interpreted. To compile them, ' + remedy, Context.currentPos());
+		}
+	}
+
+	/**
+	 * Leaves an HL/C build what it needs to link the extension in.
+	 *
+	 * There is no `.hdll` on this target and nothing to build here: the C is compiled into the
+	 * program and resolved by the linker, and Haxe hands the native build off to whatever is driving
+	 * it. So the useful thing to do is not to compile but to answer, in a form that can be read
+	 * without anyone being at a terminal.
+	 *
+	 * Written beside the generated C as `hxscript.flags`, one argument per line, so a Makefile,
+	 * CMake list or shell script can take it whole. The one line printed is what a first build needs
+	 * to see, because the alternative to being told is a link that fails on `hxscript_load` with
+	 * nothing saying why.
+	 *
+	 * @param into The directory Haxe generated the C into.
+	 * @param carried The directory holding `hxscript.c`.
+	 */
+	static function native(into:String, carried:String):Void {
+		switch (Native.recipe(carried)) {
+			case Ready(recipe):
+				var args:Array<String> = Native.flags(recipe);
+				var listed:String = haxe.io.Path.join([into, 'hxscript.flags']);
+
+				try {
+					if (!FileSystem.exists(into))
+						FileSystem.createDirectory(into);
+					File.saveContent(listed, args.join('\n') + '\n');
+				} catch (e:Dynamic) {
+					Context.warning('hxscript: could not write ' + listed, Context.currentPos());
+				}
+
+				if (Context.defined('hxscript_verbose'))
+					Context.info('hxscript: add to the native build: ' + args.join(' '), Context.currentPos());
+				else
+					Context.info('hxscript: HL/C links the extension rather than loading it; what to add is in ' + listed, Context.currentPos());
+
+			case Missing(reason, remedy):
+				Context.warning('hxscript: ' + reason + ', so this HL/C build cannot compile scripts. To fix it, ' + remedy, Context.currentPos());
 		}
 	}
 

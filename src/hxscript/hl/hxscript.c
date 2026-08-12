@@ -1,6 +1,36 @@
+/*
+	Whether this build carries the loader at all.
+
+	Decided before hl.h is included, and it has to be: something hl.h reaches defines the compiler's
+	own architecture macros back again, so a test written after it is answered by the header rather
+	than by the machine being built for.
+
+	HashLink's jit emits x86 and x86-64 machine code and nothing else. jit.c says so itself, but only
+	for 32-bit ARM, and its test is `__arm__`, which arm64 does not define: on arm64 it compiles
+	cleanly and writes x86 bytes into executable memory. hashlink's own Makefile is the plainer
+	statement of the same fact, since it skips building the VM there entirely:
+
+	    ifeq ($(ARCH),arm64)
+	        $(warning HashLink vm is not supported on arm64, skipping)
+
+	So the loader is compiled only where it can work, and everything below still exists everywhere.
+	Every native is defined either way, which is what lets an HL/C program on any architecture link
+	against this file unchanged; on one without the loader they answer that they cannot help, the
+	library reports itself unusable, and every script is interpreted. That is the same answer, by the
+	same path, that a HashLink host already gets when the extension is not there at all.
+
+	Where this is not defined, code.c, module.c and jit.c do not need to be compiled or linked.
+	`-DHXS_NO_JIT` asks for that build on a machine that could have had the loader, which is how it
+	is tested on one and is also the smaller binary for a host that only ever wants the interpreter.
+*/
+#if !defined(HXS_NO_JIT)
+#	if defined(__x86_64__) || defined(__amd64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#		define HXS_LOADER
+#	endif
+#endif
+
 #define HL_NAME(n) hxscript_##n
 #include <hl.h>
-#include <hlmodule.h>
 
 /*
 	Loading emitted bytecode into a running HashLink process.
@@ -11,7 +41,20 @@
 
 	Nothing here allocates: gc.c and allocator.c stay in libhl, so a module loaded through this one
 	shares the host's heap and collector rather than getting its own.
+
+	The same file is also what an HL/C program compiles in. There it is linked rather than loaded,
+	and the header Haxe generates for its natives declares exactly the symbols defined below, so
+	nothing about it changes between the two ways of shipping.
 */
+
+/** Why the loader cannot be used, as `state` reports it. */
+#define HXS_STATE_USABLE	0
+#define HXS_STATE_NO_LOADER	1
+#define HXS_STATE_DISAGREES	2
+
+#ifdef HXS_LOADER
+
+#include <hlmodule.h>
 
 typedef struct {
 	void (*finalize)(void *);
@@ -43,7 +86,7 @@ static void hxs_module_finalize(hxs_module *h) {
 	values are put through libhl's own allocators and read back at the offsets this build believes
 	in. Cheap, and it fails where the mistake is rather than somewhere unrelated later.
 */
-HL_PRIM bool HL_NAME(agrees)(void) {
+static bool hxs_layouts_agree(void) {
 	vclosure *c;
 	varray *a;
 	vdynamic *d;
@@ -67,17 +110,8 @@ HL_PRIM bool HL_NAME(agrees)(void) {
 	return true;
 }
 
-/** @return The hashlink this was built against, for a host that wants to say so in a report. */
-HL_PRIM int HL_NAME(built_for)(void) {
-	return HL_VERSION;
-}
-
 /** The last failure's message, for a host that wants to report rather than guess. */
 static char *hxs_last_error = NULL;
-
-HL_PRIM vbyte *HL_NAME(last_error)(void) {
-	return (vbyte *)hxs_last_error;
-}
 
 /**
 	Reads, links and jits a module.
@@ -164,7 +198,66 @@ HL_PRIM void HL_NAME(set_global)(hxs_module *h, int index, vdynamic *value) {
 	*(vdynamic **)(h->m->globals_data + h->m->globals_indexes[index]) = value;
 }
 
+/** @return Why the loader cannot be used, or HXS_STATE_USABLE when it can. */
+HL_PRIM int HL_NAME(state)(void) {
+	return hxs_layouts_agree() ? HXS_STATE_USABLE : HXS_STATE_DISAGREES;
+}
+
+HL_PRIM vbyte *HL_NAME(last_error)(void) {
+	return (vbyte *)hxs_last_error;
+}
+
+#else
+
+/*
+	The same seven natives on an architecture hashlink cannot jit for.
+
+	They exist so that the link is the same everywhere and a host has one thing to ask rather than
+	two. What they answer is that there is no loader here, which the library already knows how to act
+	on: `Loader.available` is false, `Compiler.available` is false, and scripts are interpreted.
+*/
+
+typedef struct {
+	void (*finalize)(void *);
+} hxs_module;
+
+HL_PRIM hxs_module *HL_NAME(load)(vbyte *data, int size) {
+	return NULL;
+}
+
+HL_PRIM int HL_NAME(entry_index)(hxs_module *h) {
+	return -1;
+}
+
+HL_PRIM vclosure *HL_NAME(closure)(hxs_module *h, int findex) {
+	return NULL;
+}
+
+HL_PRIM void HL_NAME(set_global)(hxs_module *h, int index, vdynamic *value) {
+}
+
+HL_PRIM int HL_NAME(state)(void) {
+	return HXS_STATE_NO_LOADER;
+}
+
+HL_PRIM vbyte *HL_NAME(last_error)(void) {
+	return (vbyte *)"this build carries no loader, because HashLink's jit is x86 and x86-64 only";
+}
+
+#endif
+
+/** @return Whether the loader is here and agrees with the libhl it is running against. */
+HL_PRIM bool HL_NAME(agrees)(void) {
+	return HL_NAME(state)() == HXS_STATE_USABLE;
+}
+
+/** @return The hashlink this was built against, for a host that wants to say so in a report. */
+HL_PRIM int HL_NAME(built_for)(void) {
+	return HL_VERSION;
+}
+
 DEFINE_PRIM(_BOOL, agrees, _NO_ARG);
+DEFINE_PRIM(_I32, state, _NO_ARG);
 DEFINE_PRIM(_I32, built_for, _NO_ARG);
 DEFINE_PRIM(_BYTES, last_error, _NO_ARG);
 DEFINE_PRIM(_VOID, set_global, _ABSTRACT(hxs_module) _I32 _DYN);

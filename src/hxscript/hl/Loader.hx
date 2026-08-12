@@ -29,6 +29,32 @@ import haxe.io.Bytes;
 typedef Loaded = hl.Abstract<"hxs_module">;
 
 /**
+ * Why a build can or cannot run compiled scripts.
+ *
+ * Three of the four are things a host may want to put in front of whoever is running it, since they
+ * are all fixable and each is fixed differently. `available` is the same question asked as a
+ * boolean, for the far more common case of not caring which.
+ */
+enum abstract Availability(Int) from Int to Int {
+	/** The loader is here and agrees with the libhl it is running against. */
+	var Usable = 0;
+
+	/** This build carries no loader, because HashLink's jit is x86 and x86-64 only. */
+	var NoLoader = 1;
+
+	/** The loader is here and was built against a different hashlink than the one running. */
+	var Disagrees = 2;
+
+	/**
+	 * There is no extension.
+	 *
+	 * Only reachable on HL/JIT, where the natives are marked optional and resolve to stubs when
+	 * `hxscript.hdll` is absent. An HL/C program links them or fails to link at all.
+	 */
+	var NotLinked = 3;
+}
+
+/**
  * Reaches HashLink's bytecode loader, which the VM does not otherwise offer.
  *
  * `hl_code_read` and `hl_module_init` are compiled into `hl.exe` rather than into `libhl`, so there
@@ -45,17 +71,74 @@ class Loader {
 	/** Whether the extension is here and agrees with this VM, which is what decides if this can be used. */
 	public static var available(get, never):Bool;
 
-	static var probed:Null<Bool> = null;
+	/** The same question asked so that a negative answer says which negative it is. */
+	public static var availability(get, never):Availability;
+
+	static var probed:Null<Availability> = null;
 
 	static function get_available():Bool {
+		return get_availability() == Usable;
+	}
+
+	/**
+	 * Works out which of the four this is, once.
+	 *
+	 * `state` is asked for separately from `read` because an extension built before it existed is a
+	 * real thing to run into: it answers `agrees` and nothing else, and treating that as no extension
+	 * at all would interpret everything on a machine that had gone to the trouble of building one.
+	 */
+	static function get_availability():Availability {
 		if (probed == null) {
 			try {
-				probed = hl.Api.isPrimLoaded(read) && agrees();
+				if (!hl.Api.isPrimLoaded(read))
+					probed = NotLinked;
+				else if (hl.Api.isPrimLoaded(state))
+					probed = (state() : Availability);
+				else
+					probed = agrees() ? Usable : Disagrees;
 			} catch (e:Dynamic) {
-				probed = false;
+				probed = NotLinked;
 			}
 		}
 		return probed;
+	}
+
+	/**
+	 * @return One sentence naming what is wrong and what would fix it, or null when nothing is.
+	 *
+	 * For a host that reports rather than guesses. Everything here is already knowable from
+	 * `availability`; this is the wording, so that every host does not write its own.
+	 */
+	public static function why():Null<String> {
+		return switch (get_availability()) {
+			case Usable:
+				null;
+
+			case NoLoader:
+				'this build carries no loader, because HashLink\'s jit is x86 and x86-64 only; '
+					+ 'scripts are interpreted on every other architecture';
+
+			case Disagrees:
+				'the extension was built against hashlink ' + version(builtFor()) + ' and does not match the one running; '
+					+ 'rebuild it against this HashLink';
+
+			case NotLinked:
+				'there is no hxscript.hdll beside what is running; '
+					+ 'build one with hdll.sh, hdll.bat, or haxelib run hxscript hdll';
+		}
+	}
+
+	/**
+	 * @param packed What `built_for` reports, which is hashlink's own `HL_VERSION`.
+	 * @return The version as hashlink tags them.
+	 *
+	 * One byte each, so 0x011000 is 1.16.0.
+	 */
+	static function version(packed:Int):String {
+		if (packed < 0)
+			return 'an unknown version';
+
+		return ((packed >> 16) & 0xFF) + '.' + ((packed >> 8) & 0xFF) + '.' + (packed & 0xFF);
 	}
 
 	/**
@@ -138,6 +221,10 @@ class Loader {
 
 	@:hlNative("?hxscript", "agrees") static function agrees():Bool {
 		return false;
+	}
+
+	@:hlNative("?hxscript", "state") static function state():Int {
+		return Availability.NotLinked;
 	}
 
 	@:hlNative("?hxscript", "built_for") static function builtVersion():Int {

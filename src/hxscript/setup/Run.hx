@@ -59,6 +59,9 @@ class Run {
 			case 'hdll':
 				hdll(args, carried);
 
+			case 'hlc':
+				hlc(args, carried);
+
 			case 'help' | '--help' | '-h':
 				usage();
 
@@ -94,6 +97,79 @@ class Run {
 				Sys.println('hxscript: ' + reason);
 				Sys.println('          to fix it, ' + remedy);
 				Sys.exit(1);
+		}
+	}
+
+	/**
+	 * Puts the runtime compiler into an HL/C build.
+	 *
+	 * Two things, because there are two kinds of caller. A build system that already exists wants to
+	 * be told what to add and will add it itself, which is `--flags`. Someone with no native build of
+	 * their own wants a binary, which is everything else.
+	 *
+	 * @param args Whatever followed the command.
+	 * @param carried The directory holding `hxscript.c`, or null when this install has none.
+	 */
+	static function hlc(args:Array<String>, carried:Null<String>):Void {
+		if (carried == null) {
+			Sys.println('hxscript: could not find hxscript.c, so this is not a complete install of the library');
+			Sys.exit(1);
+		}
+
+		var printing:Bool = false;
+		var jit:Null<Bool> = null;
+		var out:Null<String> = null;
+		var cdir:Null<String> = null;
+
+		var i:Int = 0;
+		while (i < args.length) {
+			switch (args[i]) {
+				case '--flags':
+					printing = true;
+
+				case '--no-jit':
+					jit = false;
+
+				case '--out':
+					out = args[++i];
+
+				case _:
+					cdir = args[i];
+			}
+			i++;
+		}
+
+		switch (hxscript.setup.Native.recipe(carried, jit)) {
+			case Missing(reason, remedy):
+				Sys.println('hxscript: ' + reason);
+				Sys.println('          to fix it, ' + remedy);
+				Sys.exit(1);
+
+			case Ready(recipe):
+				if (printing) {
+					Sys.println(hxscript.setup.Native.flags(recipe).join(' '));
+					return;
+				}
+
+				if (cdir == null) {
+					Sys.println('hxscript: name the directory Haxe generated the HL/C into, or pass --flags');
+					Sys.exit(1);
+				}
+
+				if (out == null)
+					out = haxe.io.Path.join([cdir, Sys.systemName() == 'Windows' ? 'main.exe' : 'main']);
+
+				if (!recipe.loader)
+					Sys.println('hxscript: building without the loader, so scripts will be interpreted');
+
+				var problem:Null<String> = hxscript.setup.Native.build(cdir, out, recipe);
+				if (problem != null) {
+					Sys.println('hxscript: the build failed');
+					Sys.println(problem);
+					Sys.exit(1);
+				}
+
+				Sys.println('hxscript: built ' + out);
 		}
 	}
 
@@ -142,6 +218,16 @@ class Run {
 		Sys.println('    Builds hxscript.hdll, which lets a HashLink host run compiled scripts.');
 		Sys.println('    Goes in the current directory unless one is named. A build with');
 		Sys.println('    -lib hxscript -D hxscript_hl does this on its own, beside its output.');
+		Sys.println('');
+		Sys.println('  haxelib run hxscript hlc [directory]');
+		Sys.println('    Builds an HL/C program that can compile scripts, from the C Haxe wrote into');
+		Sys.println('    that directory. --out names the executable.');
+		Sys.println('');
+		Sys.println('  haxelib run hxscript hlc --flags');
+		Sys.println('    Prints what to add to a native build you already have, and builds nothing.');
+		Sys.println('');
+		Sys.println('    --no-jit on either one leaves the loader out, which is what an architecture');
+		Sys.println('    HashLink cannot jit for needs. Scripts are then interpreted.');
 		Sys.println('');
 		Sys.println('  Environment');
 		Sys.println('    HLPATH             where the HashLink VM is, when it is not on the path');

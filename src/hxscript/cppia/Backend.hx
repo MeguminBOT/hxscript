@@ -50,6 +50,21 @@ class Backend {
 		#end
 	}
 
+	/**
+	 * @return One sentence naming why this build cannot compile, or null when it can.
+	 *
+	 * Only ever a build-time answer here, where the emitter and everything it needs are in the
+	 * binary or are not. HashLink's has runtime answers too, which is why a host asks this rather
+	 * than assuming its own.
+	 */
+	public static function unavailable():Null<String> {
+		#if hxscript_cppia
+		return null;
+		#else
+		return 'this build carries no compiler; add -D hxscript_cppia, -D scriptable and -dce no';
+		#end
+	}
+
 	#if hxscript_cppia
 	/** `Class.method` to record readably while emitting, for inspecting what a hot method became. */
 	public static var echoTarget:Null<String> = null;

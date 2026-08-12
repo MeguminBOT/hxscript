@@ -19,6 +19,12 @@ import hxscript.types.ScriptedClass;
  * of loading them when a module starts, which also means the `?` that makes the extension optional
  * on HL/JIT has nothing to do here.
  *
+ * **Both builds are a pass, and they check different things.** With the loader, scripts have to
+ * compile and answer. Without it, which is what an architecture HashLink cannot jit for gets, the
+ * binary still has to link, say plainly why it will not compile, and go on answering every question
+ * correctly by interpreting. The second is not a lesser result; it is the one that makes such a
+ * build possible at all, so it is required rather than tolerated.
+ *
  * Prints one line per fact so a failure names which of them broke.
  */
 class HlcProbe {
@@ -43,9 +49,7 @@ class T {
 	static var failures:Int = 0;
 
 	public static function main():Void {
-		Sys.println('-- a compiled script inside an HL/C binary --');
-
-		say('the extension is here', Loader.available);
+		Sys.println('-- a script inside an HL/C binary --');
 
 		var world:Environment = new Environment();
 		var module:Module = new Module('', 'T', ['p'], 'hlc');
@@ -56,12 +60,21 @@ class T {
 		module.startTypes(world);
 
 		var report:Report = Compiler.compile(world, [module]);
+		var compiling:Bool = Loader.available;
 
-		say('the compiler is in this build', Compiler.available);
-		say('it took the module', report.compiled.length > 0);
+		if (compiling) {
+			say('the extension is here and usable', true);
+			say('the compiler is in this build', Compiler.available);
+			say('it took the module', report.compiled.length > 0);
 
-		if (report.skipped.length > 0)
-			Sys.println('  refused: ' + report.skipped[0].reason);
+			if (report.skipped.length > 0)
+				Sys.println('  refused: ' + report.skipped[0].reason);
+		} else {
+			Sys.println('  this build carries no loader, so everything below is interpreted');
+			say('it says why, rather than only that it will not', Compiler.unavailable() != null);
+			say('and it is not pretending it can compile', !Compiler.available && report.compiled.length == 0);
+			Sys.println('  it says: ' + Compiler.unavailable());
+		}
 
 		var cls:ScriptedClass = cast world.resolve('p.T');
 
@@ -77,7 +90,7 @@ class T {
 			last = Reflect.callMethod(null, cls.reflectGetField('total'), [10000]);
 		var took:Float = (haxe.Timer.stamp() - began) * 1000;
 
-		Sys.println('  200 x total(10000) in ' + Math.round(took * 100) / 100 + ' ms');
+		Sys.println('  200 x total(10000) in ' + Math.round(took * 100) / 100 + ' ms, ' + (compiling ? 'compiled' : 'interpreted'));
 		say('and still right after all of them', Std.string(last) == '149985000');
 
 		Sys.println(failures == 0 ? '== it works ==' : '== ' + failures + ' failed ==');
@@ -89,7 +102,7 @@ class T {
 			failures++;
 
 		var pad:String = what;
-		while (pad.length < 40)
+		while (pad.length < 48)
 			pad += ' ';
 
 		Sys.println('  ' + pad + (ok ? 'yes' : 'NO'));

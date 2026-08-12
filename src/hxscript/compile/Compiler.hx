@@ -54,6 +54,23 @@ class Compiler {
 		#end
 	}
 
+	/**
+	 * Why nothing can be compiled, for a host that wants to say so rather than only act on it.
+	 *
+	 * Everything here is knowable from `available` plus which target this is; the point is that a
+	 * host should not have to know which target this is. On HashLink the answer is often a runtime
+	 * one and is different per cause, and on hxcpp it is always the same build-time one.
+	 *
+	 * @return One sentence naming what is wrong and what would fix it, or null when nothing is.
+	 */
+	public static function unavailable():Null<String> {
+		#if (hxscript_cppia || hxscript_hl)
+		return Backend.unavailable();
+		#else
+		return 'this build carries no compiler; add -D hxscript_cppia on hxcpp, or -D hxscript_hl on HashLink';
+		#end
+	}
+
 	#if (hxscript_cppia || hxscript_hl)
 	/**
 	 * Types a script may name without importing them, as full paths.

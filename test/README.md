@@ -53,6 +53,7 @@ is fixed; if the target still fails, the runner will say so.
 | `common/fixtures/` | `OpVec`, `OpBare`, `OpColor`, `OpName`, which `AbstractTest` asserts against |
 | `cpp/` | the 8 hxcpp-only tests plus `AllCpp`, and the manual tools |
 | `eval/ js/ java/ neko/ python/ lua/ php/ hl/` | a `build.hxml` each; target-specific tests land here as they appear |
+| `hlc/` | the HL/C suite, which is a native build rather than a target: `sh test/hlc/build.sh` |
 | `xbench/` `mbench/` | the benchmarks, not tests: see [benchmarks.md](../docs/benchmarks.md) and [mode-benchmarks.md](../docs/mode-benchmarks.md) |
 | `Bench.hx` | the micro-benchmark, see [performance.md](../docs/performance.md) |
 

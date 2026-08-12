@@ -69,6 +69,24 @@ class Backend {
 	}
 
 	/**
+	 * @return One sentence naming why this build cannot compile, or null when it can.
+	 *
+	 * On HashLink this is not a build-time question the way it is on hxcpp. The define puts the
+	 * emitter in; whether it can be used depends on the extension being there, matching, and having
+	 * been built for an architecture HashLink can jit for, and those fail differently enough that a
+	 * host reporting one of them should not have to guess which.
+	 */
+	public static function unavailable():Null<String> {
+		#if (hl && hxscript_hl)
+		return Loader.why();
+		#elseif hl
+		return 'this build carries no compiler; add -D hxscript_hl';
+		#else
+		return 'this is not a HashLink build';
+		#end
+	}
+
+	/**
 	 * Does this backend's share of compiling a world.
 	 *
 	 * `Compiler` owns the shape every backend follows, and calls this for the part only HashLink

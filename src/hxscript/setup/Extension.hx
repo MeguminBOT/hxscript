@@ -199,7 +199,7 @@ class Extension {
 	 *
 	 * @return The tree's root, or null when this machine has none.
 	 */
-	static function tree():Null<String> {
+	public static function tree():Null<String> {
 		var named:Null<String> = Sys.getEnv('HL_SRC');
 		if (named != null && isTree(named))
 			return named;
@@ -244,7 +244,7 @@ class Extension {
 	 * @param header A path to `hl.h`.
 	 * @return The version it declares, or null when it declares none this can read.
 	 */
-	static function stamped(header:String):Null<String> {
+	public static function stamped(header:String):Null<String> {
 		if (!FileSystem.exists(header))
 			return null;
 
@@ -335,8 +335,11 @@ class Extension {
 
 		try {
 			process = new Process(cc, args);
-			var code:Int = process.exitCode();
+
 			var complaint:String = process.stderr.readAll().toString();
+			process.stdout.readAll();
+
+			var code:Int = process.exitCode();
 			process.close();
 
 			if (code != 0)
@@ -377,7 +380,7 @@ class Extension {
 	 * @param args Its arguments.
 	 * @return Its output, or null when it could not be run or failed.
 	 */
-	static function say(cmd:String, args:Array<String>):Null<String> {
+	public static function say(cmd:String, args:Array<String>):Null<String> {
 		var process:Process = null;
 
 		try {
