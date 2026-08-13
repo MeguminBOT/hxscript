@@ -351,3 +351,119 @@ compiled instead, and everything that could not be compiled keeps running interp
 A module can therefore be in one of three states, and the report says which: compiled, refused with a
 reason and a position, or failed to load. There is no state where a script silently stops working
 because the compiler could not express it.
+
+## A worked example
+
+Two methods from `Board` in the Tetris project under `apps/sandbox`, chosen because one returns an
+`Int` and the other returns a `Bool`, and the difference shows.
+
+```haxe
+public function get(x:Int, y:Int):Int {
+    if (x < 0 || x >= cols || y < 0 || y >= total) {
+        return 0;
+    }
+    return cells[y * cols + x];
+}
+
+public function solid(x:Int, y:Int):Bool {
+    if (x < 0 || x >= cols || y >= total || y < 0) {
+        return true;
+    }
+    return cells[y * cols + x] != 0;
+}
+```
+
+A module opens with its two pools, which is what the numbers in the body refer to. Names and types
+are written once and referenced by index from then on:
+
+```
+CPPIA
+11
+0
+4 cols
+5 total
+5 cells
+3 new
+3 get
+1 x
+1 y
+5 solid
+3 run
+6 string
+7
+0
+3 p.T
+7 Dynamic
+3 Int
+9 Array.int
+4 Bool
+3 Std
+```
+
+`get` becomes this. The pairs like `0 3` before each token are position records, so a fault in
+compiled code can still name a line:
+
+```
+FUNCTION 0 0 5 3 2 6 0 3 7 0 3 0 7 FUN 3 2 6 1 0 3 0 7 2 0 3 0 0 7 BLOCK 1
+0 3 BLOCK 2
+0 3 IFELSE 0 3 || 0 3 || 0 3 || 0 3 < 0 3 VAR 1 0 3 i 0 0 3 >= 0 3 VAR 1
+      0 3 FTHISINST 1 1 0 3 < 0 3 VAR 2 0 3 i 0 0 3 >= 0 3 VAR 2 0 3 FTHISINST 1 2 0 3 BLOCK 1
+0 3 RETVAL 2 0 3 i 0
+0 3 NULL
+0 3 RETVAL 2 0 3 ARRAYI 4 0 3 FTHISINST 1 3 0 3 + 0 3 * 0 3 VAR 2 0 3 FTHISINST 1 1 0 3 VAR 1
+```
+
+Reading the tokens that carry meaning:
+
+| token | what it is |
+| --- | --- |
+| `VAR 1`, `VAR 2` | the arguments `x` and `y`, by slot |
+| `FTHISINST 1 1` | a field on `this`, by slot: type 1 is `p.T`, name 1 is `cols` |
+| `ARRAYI 4` | an indexed read, element type 4 is `Array.int` |
+| `i 0` | the integer constant `0` |
+| `IFELSE` | the conditional |
+| `RETVAL` | return a value |
+| `BLOCK n` | a block of `n` statements |
+
+Two things are worth pointing at.
+
+**The stream is prefix.** `cells[y * cols + x]` comes out as `ARRAYI`, then `cells`, then `+`, then
+`*`, then `y`, then `cols`, then `x`. Operators arrive before their operands, so writing the module is
+a straight recursive walk of the tree: visit a node, write its token, then visit its children. That is
+the whole reason the emitter can be the same shape as the interpreter, and it is why this was
+approachable at all.
+
+**The `NULL` after the first `RETVAL` is an empty else.** The source has no else. The emitter writes
+one anyway, because the loader gives `IFELSE` no value when a branch is missing while the interpreter
+hands back the branch it took. One token buys agreement between the two.
+
+Now `solid`, which is the same shape with one difference:
+
+```
+FUNCTION 0 0 8 2 2 6 0 3 7 0 3 0 7 FUN 5 2 6 3 0 3 0 7 4 0 3 0 0 7 BLOCK 1
+0 3 BLOCK 2
+0 3 IFELSE ...
+0 3 RETVAL 2 0 3 CASTBOOL 0 3 true
+0 3 NULL
+0 3 RETVAL 2 0 3 CASTBOOL 0 3 != 0 3 ARRAYI 4 0 3 FTHISINST 1 3
+      0 3 + 0 3 * 0 3 VAR 4 0 3 FTHISINST 1 1 0 3 VAR 3 0 3 i 0
+```
+
+Both returns are wrapped in `CASTBOOL`, and `get` has no such wrapper anywhere. That is the boolean
+problem from earlier, in the bytecode: `solid` is declared to return `Bool`, cppia carries booleans as
+integers, and without the wrapper the method would answer `1` rather than `true` to anything that
+looks at the value instead of testing it. The emitter knows the declared return type, so it can put
+the wrapper exactly where it is needed and nowhere else.
+
+The class record above these declares the fields the methods reach:
+
+```
+CLASS 1 2 0 7
+VAR 0 N N 0 1 3 0
+VAR 0 N N 0 2 3 0
+VAR 0 N N 0 3 4 0
+```
+
+`cols` and `total` as `Int`, `cells` as `Array.int`, each with the access codes Haxe would give them.
+Those codes are what let `FTHISINST` reach a field by slot rather than by name, which is the
+difference between a pointer offset and a hash lookup on every access.
