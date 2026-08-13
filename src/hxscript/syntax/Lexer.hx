@@ -32,7 +32,6 @@ using hxscript.types.TypeTools;
 
 /** A recursive-descent parser/lexer that turns script source into `Expr`/`ModuleDecl` trees. */
 class Lexer {
-	/** The current 1-based line number. */
 	/** Operator precedence, keyed by operator (lower binds looser). */
 	public var opPriority:Map<String, Int>;
 

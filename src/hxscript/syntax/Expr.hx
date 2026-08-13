@@ -252,7 +252,6 @@ typedef ModuleType = {
 	var isPrivate:Bool;
 }
 
-/** A `class` or `interface` declaration. */
 /** An `abstract` declaration: a class-like body plus the type it boxes and its implicit casts. */
 typedef AbstractDecl = {
 	> ClassDecl,
@@ -267,6 +266,7 @@ typedef AbstractDecl = {
 	var to:Array<CType>;
 }
 
+/** A `class` or `interface` declaration. */
 typedef ClassDecl = {
 	> ModuleType,
 

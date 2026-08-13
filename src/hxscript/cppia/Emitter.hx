@@ -2927,11 +2927,6 @@ class Emitter {
 	}
 
 	/**
-	 * Writes the declared type of a variable slot.
-	 *
-	 * @param path The declared type, or the empty string when there was none.
-	 */
-	/**
 	 * The type an unannotated local gets from a literal it is initialised with.
 	 *
 	 * @param init The initialiser.
@@ -2950,6 +2945,11 @@ class Emitter {
 		}
 	}
 
+	/**
+	 * Writes the declared type of a variable slot.
+	 *
+	 * @param path The declared type, or the empty string when there was none.
+	 */
 	function storableType(path:String):Void {
 		if (path == null || path.length == 0) {
 			w.unknownType();
@@ -3000,7 +3000,6 @@ class Emitter {
 		}
 	}
 
-	/** An array type carrying an element kind, or null for anything else. */
 	/** The element type of an array type, or null when it is not a written array type. */
 	static function arrayElemOf(t:Null<CType>):Null<CType> {
 		if (t == null)
@@ -3015,11 +3014,11 @@ class Emitter {
 		}
 	}
 
+	/** An array type carrying an element kind, or null for anything else. */
 	static function elementArray(name:Null<String>):Null<String> {
 		return (name != null && name.length > 6 && name.substr(0, 6) == 'Array.') ? name : null;
 	}
 
-	/** Whether an accessor keyword leaves a field as ordinary storage. */
 	/**
 	 * The type to declare a field with, inferred from a literal initialiser when none was written.
 	 *
@@ -3036,13 +3035,6 @@ class Emitter {
 		return typeName(v.type);
 	}
 
-	/**
-	 * Whether a declared field really has storage, following Haxe's `is_physical_var_field`.
-	 *
-	 * @param f The field.
-	 * @param v Its variable declaration.
-	 * @return Whether cppia should give it a slot.
-	 */
 	/**
 	 * @param owner The class holding it.
 	 * @param name The member name.
@@ -3146,6 +3138,13 @@ class Emitter {
 			throw new Unsupported(name + ' named inside its own accessor with no field behind it; it wants @:isVar', pos);
 	}
 
+	/**
+	 * Whether a declared field really has storage, following Haxe's `is_physical_var_field`.
+	 *
+	 * @param f The field.
+	 * @param v Its variable declaration.
+	 * @return Whether cppia should give it a slot.
+	 */
 	static function physicalField(f:FieldDecl, v:VarDecl):Bool {
 		if (v.get == null || v.get == 'default' || v.get == 'null')
 			return true;
@@ -3163,6 +3162,7 @@ class Emitter {
 		return false;
 	}
 
+	/** Whether an accessor keyword leaves a field as ordinary storage. */
 	static function plainAccess(access:String):Bool {
 		return access == null || access == 'default' || access == 'null' || access == 'never';
 	}
@@ -3283,12 +3283,6 @@ class Emitter {
 		}
 	}
 
-	/**
-	 * The abstract a written type name refers to, when it is one from this batch.
-	 *
-	 * @param name The type name as written.
-	 * @return Its full path, or null when it names something else.
-	 */
 	/**
 	 * Records how many arguments a batch method declares.
 	 *
@@ -3418,6 +3412,12 @@ class Emitter {
 		return found == null ? null : {owner: owner, name: found};
 	}
 
+	/**
+	 * The abstract a written type name refers to, when it is one from this batch.
+	 *
+	 * @param name The type name as written.
+	 * @return Its full path, or null when it names something else.
+	 */
 	function abstractPathOf(name:String):Null<String> {
 		var full:Null<String> = declaredClass(name);
 		if (full == null)
@@ -3446,12 +3446,6 @@ class Emitter {
 		return moduleAbstracts.exists(full) ? full : null;
 	}
 
-	/**
-	 * The wrapper class standing in for a NATIVE abstract, when the path names one.
-	 *
-	 * @param path The full type path.
-	 * @return The wrapper class, or null when the path is not a wrapped native abstract.
-	 */
 	/**
 	 * @param items A map literal's entries.
 	 * @return The map class it builds, by what its keys are.
@@ -3494,6 +3488,12 @@ class Emitter {
 		}
 	}
 
+	/**
+	 * The wrapper class standing in for a NATIVE abstract, when the path names one.
+	 *
+	 * @param path The full type path.
+	 * @return The wrapper class, or null when the path is not a wrapped native abstract.
+	 */
 	function nativeAbstract(path:String):Null<Class<Dynamic>> {
 		if (moduleClasses.exists(path) || moduleAbstracts.exists(path))
 			return null;
@@ -4021,16 +4021,6 @@ class Emitter {
 		}
 	}
 
-	/**
-	 * Spells an array type the way cppia names its specialisations, so element access reaches the
-	 * typed builtin instead of the boxed one.
-	 *
-	 * Only the suffixes the loader knows may be produced; it throws on any other, so an element type
-	 * it has no spelling for becomes `Array.Object`.
-	 *
-	 * @param params The array's type parameters, if written.
-	 * @return The cppia type name.
-	 */
 	/** The cppia spelling for a written array type, or null when it is not one. */
 	function arrayNameOf(t:Null<CType>):Null<String> {
 		if (t == null)
@@ -4045,6 +4035,16 @@ class Emitter {
 		}
 	}
 
+	/**
+	 * Spells an array type the way cppia names its specialisations, so element access reaches the
+	 * typed builtin instead of the boxed one.
+	 *
+	 * Only the suffixes the loader knows may be produced; it throws on any other, so an element type
+	 * it has no spelling for becomes `Array.Object`.
+	 *
+	 * @param params The array's type parameters, if written.
+	 * @return The cppia type name.
+	 */
 	function arrayTypeName(params:Null<Array<CType>>):String {
 		if (params == null || params.length != 1)
 			return 'Array';
