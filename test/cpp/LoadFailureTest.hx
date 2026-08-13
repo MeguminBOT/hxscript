@@ -56,10 +56,12 @@ class LoadFailureTest {
 	/**
 	 * A module the emitter refuses is reported with its position and leaves the rest compiling.
 	 *
-	 * A local property is the refusal used, because it is short, has a position, and means the same thing
-	 * interpreted as it would compiled, so the fallback can be checked by its answer rather than only by not
-	 * throwing. What is being checked is not that this construct is unsupported, which may change, but that
-	 * a refusal carries where it was and does not take the batch with it.
+	 * A mixed array and map literal is the refusal used, because it is short and has a position. It sits in a
+	 * branch nothing takes, so the module still answers interpreted and the fallback can be checked by its
+	 * answer rather than only by not throwing, and so that what a refusal costs is visible: the emitter turns
+	 * the whole module down over an expression that never runs. What is being checked is not that this
+	 * construct is unsupported, which may change, but that a refusal carries where it was and does not take
+	 * the batch with it.
 	 */
 	static function skipping():Void {
 		var good:String = 'package w;\nclass Good {\n\tpublic static function go():Int { return 41 + 1; }\n}\n';
@@ -67,9 +69,8 @@ class LoadFailureTest {
 		var bad:String = 'package w;\n'
 			+ 'class Bad {\n'
 			+ '\tpublic static function go():Int {\n'
-			+ '\t\tvar x(get, never):Int;\n'
-			+ '\t\tfunction get_x():Int return 1;\n'
-			+ '\t\treturn x;\n'
+			+ '\t\tif (false) { var m = [1 => 2, 3]; }\n'
+			+ '\t\treturn 1;\n'
 			+ '\t}\n'
 			+ '}\n';
 

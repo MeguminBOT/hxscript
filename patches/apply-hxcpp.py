@@ -98,6 +98,53 @@ FIXES = [
                   makeAddress(sJitTemp1,inTarget);
                   callNative( (void *)objToFloat, sJitArg0.as(jtPointer), sJitTemp1.as(jtPointer));""",
     },
+    {
+        'issue': 7,
+        'name': 'a jitted throw is raised at the boundary instead of left on the context',
+        'file': 'src/hx/cppia/CppiaFunction.cpp',
+        'count': 2,
+        'before': """   if (compiled)
+   {
+      AutoFrame frame(ctx);
+      //printf("Running compiled code...\\n");
+      compiled(ctx);
+      //printf("Done.\\n");
+   }
+   else""",
+        'after': """   if (compiled)
+   {
+      {
+      AutoFrame frame(ctx);
+      //printf("Running compiled code...\\n");
+      compiled(ctx);
+      //printf("Done.\\n");
+      }
+      if (ctx->exception)
+      {
+         Dynamic caught = ctx->exception;
+         ctx->exception = nullptr;
+         HX_STACK_DO_THROW(caught);
+      }
+   }
+   else""",
+    },
+    {
+        'issue': 7,
+        'name': 'a jitted closure raises its exception rather than answering null',
+        'file': 'src/hx/cppia/CppiaFunction.cpp',
+        'before': """         if (!ctx->exception)
+         {
+            switch(function->returnType)""",
+        'after': """         if (ctx->exception)
+         {
+            Dynamic caught = ctx->exception;
+            ctx->exception = nullptr;
+            HX_STACK_DO_THROW(caught);
+         }
+
+         {
+            switch(function->returnType)""",
+    },
 ]
 
 
@@ -167,8 +214,9 @@ def main():
 
         text, newline = working[path]
         want, have = (fix['before'], fix['after']) if revert else (fix['after'], fix['before'])
+        wanted = fix.get('count', 1)
 
-        if want in text:
+        if text.count(want) == wanted:
             print('  already  %s' % label)
             already += 1
             continue
@@ -178,11 +226,11 @@ def main():
                      '           script has not been taught, and nothing has been written.'
                      % (label, fix['file']))
 
-        if text.count(have) != 1:
-            sys.exit('  AMBIGUOUS %s\n           %d places match in %s, expected one.'
-                     % (label, text.count(have), fix['file']))
+        if text.count(have) != wanted:
+            sys.exit('  AMBIGUOUS %s\n           %d places match in %s, expected %d.'
+                     % (label, text.count(have), fix['file'], wanted))
 
-        working[path] = (text.replace(have, want, 1), newline)
+        working[path] = (text.replace(have, want, wanted), newline)
         changed.append((path, label))
 
     if not changed:

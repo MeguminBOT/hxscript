@@ -218,3 +218,50 @@ Worked around in `test/lib/conformance.sh` by sending stderr to a real file, nev
 which is worth doing anyway because the reasons are what a refusal is worth reading for.
 
 ---
+
+## 7. A jitted `throw` never leaves the context, so the caller reads null and the process stays poisoned
+
+**`src/hx/cppia/CppiaFunction.cpp`, `ScriptCallable::runFunction`, `ScriptCallable::runFunctionClosure`,
+and the compiled branch of `CppiaClosure::__run`.**
+
+Jitted cppia does not throw. `ThrowExpr::genCode` writes the value to `ctx->exception` and calls
+`addThrow()`, which jumps to the function epilogue, and the epilogue is a plain return. Every call
+jitted code makes to other jitted code follows it with `checkException()`, so within jitted code the
+unwind is complete and correct.
+
+Nothing did that at the boundary back to native code. `runFunction` calls `compiled(ctx)` and returns
+without ever looking at `ctx->exception`. The closure path does look, but only to decide not to read
+a return value, and then answers `null()` with the exception still set.
+
+Two things follow, and the second is the worse one:
+
+1. The immediate caller reads `null` where it should have caught something.
+2. `ctx->exception` is never cleared, so the next jitted function to run hits its first
+   `checkException()` and returns at once. Every call after the first throw answers `null`, for the
+   life of the process.
+
+### Confirmed by building it
+
+A script whose compiled body throws is the only way to reach this, and until a compiled body could
+throw at all, nothing here ever did. Two conformance cases now do: reading a local declared
+`var x(never, default)` and writing one declared `var x(default, never)`. Interpreted cppia raises
+both correctly. Jitted cppia answered `null` for the case itself and then `null` for all 49 cases
+after it, in case order, whichever case was placed first.
+
+### The patch
+
+At each of the three sites, raise it where the interpreter would have and clear it:
+
+```cpp
+if (ctx->exception)
+{
+   Dynamic caught = ctx->exception;
+   ctx->exception = nullptr;
+   HX_STACK_DO_THROW(caught);
+}
+```
+
+This is the same shape `TryExpr::runVoid` already uses on the interpreted path, which ends its own
+unwind with `if (ctx->exception) handleException(ctx, ctx->exception);`.
+
+---

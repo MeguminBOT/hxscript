@@ -429,7 +429,7 @@ class Capture {
 	}
 
 	/** Rebuilds a node with every child mapped, preserving every field the node carries. */
-	function mapChildren(e:Expr, rewrite:Expr->Expr):Expr {
+	public static function mapChildren(e:Expr, rewrite:Expr->Expr):Expr {
 		var d:ExprDef = switch (e.e) {
 			case EConst(_) | EIdent(_) | EBreak | EContinue | EImport(_, _) | EUsing(_) | EDecl(_): e.e;
 			case EParent(inner): EParent(rewrite(inner));

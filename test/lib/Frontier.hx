@@ -89,6 +89,12 @@ class Frontier {
 		probe('local property write is never', 'var x(default, never):Int; x = 3; return Std.string(x);');
 		probe('local property accessor reads its own slot',
 			'var x(get, never):Int = 5; function get_x() return x + 1; return Std.string(x);');
+		probe('an argument shadowing a local property',
+			'var x(get, never):Int; function get_x() return 7; function twice(x:Int) return x * 2; return Std.string(twice(4));');
+		probe('a loop variable shadowing a local property',
+			'var x(get, never):Int; function get_x() return 7; var n = 0; for (x in 1...4) n += x; return Std.string(n);');
+		probe('a catch variable shadowing a local property',
+			'var x(get, never):Int; function get_x() return 7; try { throw "boom"; } catch (x:String) { return x; } return "no";');
 		probe('mixed array and map literal', 'var m = [1 => 2, 3]; return Std.string(m);');
 		probe('a property declared dynamic', 'return Std.string(v);', 'public static var v(dynamic, never):Int; static function get_v() return 7;');
 		probe('a property declared null', 'return Std.string(new T().v);', 'public var v(null, null):Int = 7; public function new() {}');

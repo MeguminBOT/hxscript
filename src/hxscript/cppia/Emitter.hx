@@ -26,6 +26,7 @@ import hxscript.compile.Unsupported;
 
 #if hxscript_cppia
 import hxscript.compile.Capture;
+import hxscript.compile.Accessors;
 import hxscript.Config;
 import haxe.ds.StringMap;
 import haxe.io.Bytes;
@@ -906,7 +907,8 @@ class Emitter {
 		}
 
 		var boxedBody:Expr = body;
-		var boxing = Capture.transform(args, {e: EBlock(prologue.concat([body])), pos: pos});
+		var whole:Expr = Accessors.apply({e: EBlock(prologue.concat([body])), pos: pos});
+		var boxing = Capture.transform(args, whole);
 		boxedBody = boxing.body;
 
 		w.pos(pos == null ? 0 : pos.line);
