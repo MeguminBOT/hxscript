@@ -10,9 +10,9 @@ None. Every case with a written answer produced it in every column that ran it.
 
 ## Compiled against interpreted, per target
 
-**cppia** against `cpp-interp`: 263 agree, **0 differ**, 8 refused, 0 fell back to the interpreter, 0 killed the process.
+**cppia** against `cpp-interp`: 266 agree, **0 differ**, 5 refused, 0 fell back to the interpreter, 0 killed the process.
 
-**cppia-jit** against `cpp-interp`: 263 agree, **0 differ**, 8 refused, 0 fell back to the interpreter, 0 killed the process.
+**cppia-jit** against `cpp-interp`: 266 agree, **0 differ**, 5 refused, 0 fell back to the interpreter, 0 killed the process.
 
 ## Where the interpreter itself reads differently per target
 
@@ -262,11 +262,11 @@ None. Every case with a written answer produced it in every column that ran it.
 | 232 | a host static that changes | true | true | true | true |
 | 233 | a host method on a value | AB | AB | AB | AB |
 | 234 | a host class constructed | hi | hi | hi | hi |
-| 235 | a host enum value | None | None | refused: unresolved identifier haxe | refused: unresolved identifier haxe |
-| 236 | a host enum matched | 7 | 7 | refused: unresolved identifier haxe | refused: unresolved identifier haxe |
+| 235 | a host enum value | None | None | None | None |
+| 236 | a host enum matched | 7 | 7 | 7 | 7 |
 | 237 | an abstract Map through its alias | **killed** | 1 | 1 | 1 |
 | 238 | Lambda over an array | 3 | 3 | 3 | 3 |
-| 239 | haxe.Json round trip | {"a":1} | {"a":1} | refused: unresolved identifier haxe | refused: unresolved identifier haxe |
+| 239 | haxe.Json round trip | {"a":1} | {"a":1} | {"a":1} | {"a":1} |
 | 240 | StringTools through using | FF | FF | FF | FF |
 | 241 | Math functions | 4 | 4 | 4 | 4 |
 | 242 | String.fromCharCode | A | A | A | A |

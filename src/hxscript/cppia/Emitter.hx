@@ -3777,11 +3777,30 @@ class Emitter {
 				var path:Null<String> = dottedPath(e);
 				if (path != null && moduleClasses.exists(path))
 					return path;
-				return null;
+				return hostTypePath(path);
 
 			case _:
 				return null;
 		}
+	}
+
+	/**
+	 * @param path The dotted name, or null when the chain was not all plain names.
+	 * @return The path when the host has that type, otherwise null.
+	 */
+	function hostTypePath(path:Null<String>):Null<String> {
+		if (path == null || path.indexOf('.') < 0)
+			return null;
+
+		var root:String = path.substr(0, path.indexOf('.'));
+		if (lookupVar(root) != null || members.exists(root) || statics.exists(root) || moduleFields.exists(root))
+			return null;
+
+		var infos:Array<hxscript.types.TypeCollection.TypeInfo> = hxscript.types.TypeCollection.main.fromPath(path);
+		if (infos == null || infos.length == 0)
+			infos = hxscript.types.TypeCollection.main.fromCompilePath(path);
+
+		return (infos != null && infos.length > 0) ? path : null;
 	}
 
 	/** The dotted name a field-access chain spells, or null if anything in it is not a plain name. */
