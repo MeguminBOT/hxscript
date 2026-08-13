@@ -197,6 +197,21 @@ class Emitter {
 	/** Its superclass's path, or the empty string when it has none. */
 	var currentSuper:String;
 
+	/** The method being emitted, so a property accessor can reach its own field directly. */
+	var currentMethod:String = '';
+
+	/** `class field` of each member declared as a property, to whether it has a real slot behind it. */
+	var props:StringMap<Bool> = new StringMap();
+
+	/** `class field` of each member property whose writes go through a setter method. */
+	var propSetters:StringMap<Bool> = new StringMap();
+
+	/** Whether the member initialisers are being emitted, which assign the field rather than call the setter. */
+	var emittingInits:Bool = false;
+
+	/** Whether the method being emitted was declared to return `Bool`, which cppia cannot carry as one. */
+	var returnsBool:Bool = false;
+
 	/** Its instance fields, to whether each is a method rather than a var holding one. */
 	var members:StringMap<Bool>;
 
@@ -361,6 +376,17 @@ class Emitter {
 						switch (f.kind) {
 							case KVar(v) if (plainAccess(v.get) && plainAccess(v.set)):
 								vars.set(f.name, v.type == null ? '' : typeName(v.type));
+
+							case KVar(v):
+								var backed:Bool = physicalField(f, v);
+								props.set(full + ' ' + f.name, backed);
+
+								if (v.set == 'set' || v.set == 'dynamic')
+									propSetters.set(full + ' ' + f.name, true);
+
+								if (backed)
+									vars.set(f.name, v.type == null ? '' : typeName(v.type));
+
 							case _:
 						}
 					}
@@ -706,7 +732,8 @@ class Emitter {
 			switch (f.kind) {
 				case KVar(v) if (v.expr != null):
 					var target:Expr = {e: EField({e: EIdent('this'), pos: pos}, f.name, false), pos: pos};
-					memberInits.push({e: EBinop('=', target, v.expr), pos: pos});
+					var assign:Expr = {e: EBinop('=', target, v.expr), pos: pos};
+					memberInits.push({e: EMeta(':hxsFieldInit', [], assign), pos: pos});
 				case _:
 			}
 		}
@@ -781,6 +808,7 @@ class Emitter {
 		switch (f.kind) {
 			case KFunction(fn):
 				var isConstructor:Bool = f.name == 'new';
+				currentMethod = f.name;
 
 				if (echoTarget != null && echoTarget == currentClass + '.' + f.name) {
 					w.echo = new StringBuf();
@@ -791,7 +819,8 @@ class Emitter {
 				w.bool(isStatic || isConstructor);
 				w.bool(hasAccess(f, ADynamic));
 				w.str(f.name);
-				w.type(fn.ret == null ? '' : typeName(fn.ret));
+				returnsBool = Backend.isBool(fn.ret);
+				w.type(fn.ret == null || returnsBool ? '' : typeName(fn.ret));
 				w.int(fn.args.length);
 				for (a in fn.args) {
 					w.str(a.name);
@@ -808,7 +837,7 @@ class Emitter {
 				w.bool(isStatic);
 				w.token(accessCode(v.get, true, pos));
 				w.token(accessCode(v.set, false, pos));
-				w.bool(false);
+				w.bool(!physicalField(f, v));
 				w.str(f.name);
 				w.type(v.type == null || Backend.isBool(v.type) ? '' : typeName(v.type));
 
@@ -1039,7 +1068,10 @@ class Emitter {
 				} else {
 					w.token('RETVAL');
 					w.type('');
-					expr(v);
+					if (returnsBool)
+						boolean(v, line);
+					else
+						expr(v);
 				}
 
 			case EThrow(v):
@@ -1209,6 +1241,11 @@ class Emitter {
 			case ECheckType(inner, _):
 				expr(inner);
 
+			case EMeta(':hxsFieldInit', _, inner):
+				emittingInits = true;
+				expr(inner);
+				emittingInits = false;
+
 			case EMeta(_, _, inner):
 				expr(inner);
 
@@ -1364,6 +1401,12 @@ class Emitter {
 		var line:Int = pos == null ? 0 : pos.line;
 
 		if (op == '=') {
+			var member:Null<Expr> = memberSetterCall(e1, e2, pos);
+			if (member != null) {
+				expr(member);
+				return;
+			}
+
 			var setter:Null<String> = staticSetterFor(e1);
 			if (setter != null) {
 				w.pos(line);
@@ -1646,7 +1689,21 @@ class Emitter {
 				if (usingStatics.exists(name))
 					throw new Unsupported('$name through a static extension on a receiver whose type is not known here', pos);
 
-				var wantedMember:Int = padArgs(instanceClassOf(obj), name, params.length);
+				var receiver:Null<String> = instanceClassOf(obj);
+				var wantedMember:Int = padArgs(receiver, name, params.length);
+
+				/**
+				 * A member call is dispatched by name, because naming the class asks the loader for a
+				 * vtable slot and this emitter does not number its functions the way that lookup
+				 * expects. Dispatching by name loses what the method was declared to return, and a
+				 * `Bool` declared return is the one case where that changes the value rather than only
+				 * the type: it arrives boxed as an integer.
+				 */
+				if (returnsBoolOf(receiver, name)) {
+					w.pos(line);
+					w.token('CASTBOOL');
+				}
+
 				w.pos(line);
 				w.token('CALLMEMBER');
 				w.type('');
@@ -1926,7 +1983,10 @@ class Emitter {
 		writingTo = false;
 
 		var holder:Null<String> = (obj.e.match(EIdent('this'))) ? currentClass : instanceClassOf(obj);
-		if (holder != null && instanceVar(holder, name) != null) {
+		if (holder != null)
+			checkAccessorSelf(holder, name, pos);
+
+		if (holder != null && instanceVar(holder, name) != null && directField(holder, name)) {
 			// An instance field declared `Bool` is laid out as cppia's integer type, so reading one
 			// hands back 0 or 1: a condition and a comparison are still right, but `Std.string`,
 			// concatenation and reflection all see the number. Comparing it produces a real boolean,
@@ -2021,8 +2081,9 @@ class Emitter {
 		}
 
 		if (members.exists(v)) {
+			checkAccessorSelf(currentClass, v, pos);
 			w.pos(line);
-			w.token(instanceVar(currentClass, v) != null ? 'FTHISINST' : 'FTHISNAME');
+			w.token(instanceVar(currentClass, v) != null && directField(currentClass, v) ? 'FTHISINST' : 'FTHISNAME');
 			w.type(currentClass);
 			w.str(v);
 			return;
@@ -2863,6 +2924,151 @@ class Emitter {
 	}
 
 	/** Whether an accessor keyword leaves a field as ordinary storage. */
+	/**
+	 * Whether a declared field really has storage, by Haxe's own rule.
+	 *
+	 * `is_physical_var_field` in the compiler: a var is physical when its read is `default`, `null`
+	 * or `inline`, or its write is `default` or `null`, and otherwise only when `@:isVar` says so. A
+	 * property with accessors on both sides has no field behind it, and reading one that is not there
+	 * has to answer nothing rather than answer a slot.
+	 *
+	 * @param f The field.
+	 * @param v Its variable declaration.
+	 * @return Whether cppia should give it a slot.
+	 */
+	/**
+	 * Whether a member may be reached as a slot rather than by name.
+	 *
+	 * A property with a slot behind it is still a property: reading it has to run its getter, which
+	 * a by-name access does and a slot access does not. The exception is the accessor itself, where
+	 * the name means the field, and where going by name would call the accessor from inside itself
+	 * and never return.
+	 *
+	 * @param owner The class holding it.
+	 * @param name The member name.
+	 * @return Whether to emit a direct slot access.
+	 */
+	function directField(owner:String, name:String):Bool {
+		var key:String = owner + ' ' + name;
+		if (!props.exists(key))
+			return true;
+
+		if (!props.get(key))
+			return false;
+
+		return owner == currentClass && (emittingInits || insideAccessor(name));
+	}
+
+	/**
+	 * Rewrites a write to a property into the call it really is.
+	 *
+	 * The read side needs nothing: a by-name access runs the accessor, which is what the access code
+	 * declares. The write side does, because a by-name reference is not something the loader can
+	 * assign to, and it says so by refusing the whole module with `Bad Set expr`.
+	 *
+	 * @param target What is being assigned to.
+	 * @param value What is being assigned.
+	 * @param pos Where the assignment is.
+	 * @return The setter call, or null when the target is not a property with one.
+	 */
+	function memberSetterCall(target:Expr, value:Expr, pos:Position):Null<Expr> {
+		if (emittingInits)
+			return null;
+
+		switch (target.e) {
+			case EIdent(name):
+				if (lookupVar(name) != null || !members.exists(name) || !hasPropSetter(currentClass, name))
+					return null;
+
+				return call({e: EIdent('this'), pos: pos}, name, value, pos);
+
+			case EField(obj, name, _):
+				var owner:Null<String> = obj.e.match(EIdent('this')) ? currentClass : instanceClassOf(obj);
+				if (owner == null || !hasPropSetter(owner, name))
+					return null;
+
+				return call(obj, name, value, pos);
+
+			case _:
+				return null;
+		}
+	}
+
+	/**
+	 * @param owner The class holding it.
+	 * @param name The member name.
+	 * @return Whether writing it means calling its setter here.
+	 */
+	function hasPropSetter(owner:String, name:String):Bool {
+		return propSetters.exists(owner + ' ' + name) && !directField(owner, name);
+	}
+
+	/**
+	 * @param obj The receiver.
+	 * @param name The property.
+	 * @param value What to store.
+	 * @param pos Where the assignment is.
+	 * @return `obj.set_name(value)`.
+	 */
+	function call(obj:Expr, name:String, value:Expr, pos:Position):Expr {
+		return {e: ECall({e: EField(obj, 'set_' + name, false), pos: pos}, [value]), pos: pos};
+	}
+
+	/**
+	 * @param owner The class holding the method, or null when it is not known.
+	 * @param name The method name.
+	 * @return Whether it was declared to return `Bool`.
+	 */
+	function returnsBoolOf(owner:Null<String>, name:String):Bool {
+		if (owner == null)
+			return false;
+
+		var rets:Null<StringMap<String>> = methodReturns.get(owner);
+		return rets != null && rets.get(name) == 'Bool';
+	}
+
+	/**
+	 * @param name A property of the current class.
+	 * @return Whether the method being emitted is one of its accessors.
+	 */
+	function insideAccessor(name:String):Bool {
+		return currentMethod == 'get_' + name || currentMethod == 'set_' + name;
+	}
+
+	/**
+	 * Refuses a property with no field behind it being named inside its own accessor.
+	 *
+	 * Haxe rejects this outright, telling the author to add `@:isVar`. Compiled it would be a read by
+	 * name, which runs the accessor, from inside the accessor, and never returns. A refusal costs the
+	 * module its speedup; a hang costs the process.
+	 *
+	 * @param owner The class holding it.
+	 * @param name The member being named.
+	 * @param pos Where it is named.
+	 */
+	function checkAccessorSelf(owner:String, name:String, pos:Position):Void {
+		var key:String = owner + ' ' + name;
+		if (props.exists(key) && !props.get(key) && owner == currentClass && insideAccessor(name))
+			throw new Unsupported(name + ' named inside its own accessor with no field behind it; it wants @:isVar', pos);
+	}
+
+	static function physicalField(f:FieldDecl, v:VarDecl):Bool {
+		if (v.get == null || v.get == 'default' || v.get == 'null')
+			return true;
+
+		if (v.set == null || v.set == 'default' || v.set == 'null')
+			return true;
+
+		if (f.meta != null) {
+			for (m in f.meta) {
+				if (m.name == ':isVar')
+					return true;
+			}
+		}
+
+		return false;
+	}
+
 	static function plainAccess(access:String):Bool {
 		return access == null || access == 'default' || access == 'null' || access == 'never';
 	}

@@ -84,6 +84,14 @@ class Frontier {
 		probe('a property declared null', 'return Std.string(new T().v);', 'public var v(null, null):Int = 7; public function new() {}');
 		probe('a property through Reflect.field', 'return Std.string(Reflect.field(new T(), "v"));',
 			'public var v(get, never):Int; function get_v() return 7; public function new() {}');
+		probe('a get set property through Reflect.field', 'return Std.string(Reflect.field(new T(), "v"));',
+			'public var v(get, set):Int; var held:Int = 3; function get_v() return held; function set_v(n:Int) return held = n; public function new() {}');
+		probe('a default null property through Reflect.field', 'return Std.string(Reflect.field(new T(), "v"));',
+			'public var v(default, null):Int = 7; public function new() {}');
+		probe('an isVar property through Reflect.field', 'return Std.string(Reflect.field(new T(), "v"));',
+			'@:isVar public var v(get, set):Int = 7; function get_v() return v; function set_v(n:Int) return v = n; public function new() {}');
+		probe('a property read inside its own class', 'return Std.string(new T().doubled());',
+			'public var v(get, never):Int; function get_v() return 7; public function doubled():Int return v * 2; public function new() {}');
 		probe('super as a value, not a call', 'return new Child().grab();', null,
 			'class Base { public function new() {} public function speak():String return "base"; }\n'
 			+ 'class Child extends Base { public function new() { super(); } '
