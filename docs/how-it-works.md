@@ -201,3 +201,153 @@ form the machine can run directly.
 
 The next part covers what cppia is, why it turned out to be reachable at run time, and how the
 emitter turns the tree above into bytecode that answers the same way.
+
+# Part two: compiling to cppia
+
+## What cppia is
+
+cppia is hxcpp's scriptable bytecode. Haxe can already target it: `haxe -m Script --cppia out.cppia`
+produces a module that a compiled hxcpp program can load and run, so a program can be extended
+without being rebuilt.
+
+Two properties of it are what this whole idea rests on.
+
+**It is text.** A cppia module is a header, a pool of strings, a pool of type names, and then class
+records made of whitespace separated tokens. Here is a whole one, for a class with a single method
+that returns `a * b`:
+
+```
+CPPIA
+5
+0
+3 run
+1 a
+1 b
+6 Script
+2
+0
+6 Script
+1
+CLASS 1 0 0 1
+FUNCTION 1 0 1 0 0 5 RETVAL 5 0 5 * 0 5 VAR 1 0 5 VAR 2
+NOMAIN
+RESOURCES 0
+```
+
+**Nothing about producing it requires a compiler.** Building that is string concatenation. There is
+no Haxe toolkit involved, no process to spawn, no temporary files. If you can work out which tokens
+mean what, you can write them from inside a running program.
+
+That is the part that had stopped me earlier. I had assumed reaching cppia meant shelling out to
+`haxe`, which would rule it out for a shipped application. It does not. The toolkit is needed to
+compile the *host*, once, the way any Haxe program is compiled. It is not needed to produce a module
+at run time.
+
+## What the host needs
+
+The host needs `-D scriptable`, which emits the scriptable interface that lets a module loaded later
+find host classes by name. That one is not optional.
+
+Dead code elimination is worth understanding but is the host author's choice. A script reaches
+library types by name, so DCE has every reason to strip members nothing in the host itself touches,
+and a script that reached one of them would fail at run time. `hxscript.macro.Keep` is the answer to
+that: `-lib hxscript` applies it, and it forces the members a script is likely to reach to survive
+under the default `-dce std`. Turning DCE off entirely is one blunt way to get the same guarantee,
+and it is what parts of this repository's own test suite do, but it is not a requirement and it costs
+binary size.
+
+Loading is three calls:
+
+```haxe
+var loaded = cpp.cppia.Module.fromData(bytes.getData());
+loaded.boot();
+var cls = loaded.resolveClass('p.T');
+```
+
+and the JIT is one more, `cpp.cppia.Host.enableJit(true)`, which has to happen before the module
+boots because compilation runs over the whole module at boot.
+
+## The emitter
+
+`hxscript.cppia.Emitter` walks the same `Expr` tree the interpreter walks. Where the interpreter
+would compute a value, the emitter writes the tokens that compute it later.
+`hxscript.cppia.Writer` owns the pools and the output, handing out string and type ids and assembling
+the final module.
+
+The mapping is mostly direct. `EIf` becomes `IFELSE`, `EBlock` becomes `BLOCK`, a local read becomes
+`VAR` and a slot number, a field read becomes `FLINK` or `FTHISNAME` depending on whether the field's
+class is known. Where it stops being direct is the interesting part, and there are three kinds of
+place where it does.
+
+### Where the tree has to be rewritten first
+
+Two passes run over a function body before a token is written, both in `hxscript.compile`.
+
+`Capture` boxes any local that a closure both captures and assigns into a one element array, because
+cppia closures cannot share a stack slot. It also rewrites a named local function into a variable and
+an assignment, which strips the name off the function.
+
+`Accessors` turns a local declared with property accessors into the calls it stands for, rewriting
+reads into `get_x()` and writes into `set_x(v)`.
+
+The order matters and was learned the hard way. `Accessors` has to run first: an accessor that names
+its own property captures it, so by the time `Capture` has run there is no identifier left to
+rewrite, only an array index. That is why this lives in a tree pass rather than in the emitter, which
+is where the first attempt put it.
+
+### Where cppia has no spelling for something
+
+Some constructs have no bytecode form. The emitter throws `Unsupported`, and the module is left
+interpreted rather than compiled.
+
+That is safe, but it is not free: a refusal costs the whole module its compiled form, over one
+expression that may never run. So `Backend.batch` does not give up on a rejected group. It splits the
+batch in half and tries each half, down to single modules, so one refusal costs one module rather
+than everything offered alongside it.
+
+For a construct that fails at run time rather than at compile time, refusing is the wrong answer
+entirely, because the interpreter would have compiled the module and thrown when the line ran. Those
+emit a call to a runtime helper instead. `hxscript.runtime.Raise` throws what the interpreter throws,
+carrying the same type and the same text.
+
+### Where the answer would differ
+
+This is the category that matters most, and `Bool` is the recurring example.
+
+cppia has no boolean expression type. Booleans ride as integers, which is fine for a condition and
+fine for a comparison, and wrong the moment the value itself is looked at: `Std.string` prints `1`,
+and reflection answers `1` rather than `true`. So a method declared to return `Bool` gets its result
+wrapped in `CASTBOOL`, and a field declared `Bool` needs the storage hxcpp gives a boolean rather than
+the integer slot it would otherwise get.
+
+Three of the hxcpp patches this project carries come out of that single fact.
+
+## Helpers, and how they are reached
+
+Some decisions cannot be made when the bytecode is written because they depend on a value that does
+not exist yet. `a[i]` is one: an array is indexed, a map is keyed, and an abstract may declare either.
+The interpreter decides per evaluation, so compiled code has to decide the same way, and
+`hxscript.runtime.Indexing` does it. `hxscript.runtime.Using` does the same for a static extension on
+a receiver whose type is not known where the call is written.
+
+How they are reached is worth stating, because getting it wrong is silent. The emitter writes the
+call as `FSTATIC` with the helper's path directly:
+
+```haxe
+w.token('FSTATIC');
+w.type('hxscript.runtime.Indexing');
+w.str('get');
+```
+
+Building the path as a field chain and pushing it through the ordinary expression path does not work
+the same way, and the failure it produces does not look like a wrong path.
+
+## What comes out
+
+`Backend.run` compiles a group, loads it, and binds each compiled class back into the world in place
+of its scripted form. From then on the world is *substituting*: calls that used to walk the tree run
+compiled instead, and everything that could not be compiled keeps running interpreted alongside it.
+
+A module can therefore be in one of three states, and the report says which: compiled, refused with a
+reason and a position, or failed to load. There is no state where a script silently stops working
+because the compiler could not express it.
