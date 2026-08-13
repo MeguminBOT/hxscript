@@ -1,0 +1,1088 @@
+/*
+ * Copyright (C)2015-2016 Haxe Foundation
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ */
+#include <hl.h>
+#include <hlmodule.h>
+
+#ifdef HL_WIN
+#	undef _GUID
+#	include <windows.h>
+EXTERN_C IMAGE_DOS_HEADER __ImageBase;
+#	define dlopen(l,p)		(void*)( (l) ? LoadLibraryA(l) : (HMODULE)&__ImageBase)
+#	define dlsym(h,n)		GetProcAddress((HANDLE)h,n)
+#else
+#	include <dlfcn.h>
+#endif
+
+#define HOT_RELOAD_EXTRA_GLOBALS	4096
+
+HL_API void hl_prim_not_loaded( const uchar *err );
+
+static hl_module **cur_modules = NULL;
+static int modules_count = 0;
+
+static bool module_resolve_pos( hl_module *m, void *addr, int *fidx, int *fpos ) {
+	int code_pos = ((int)(int_val)((unsigned char*)addr - (unsigned char*)m->jit_code));
+	int min, max;
+	hl_debug_infos *dbg;
+	hl_function *fdebug;
+	if( m->jit_debug == NULL )
+		return false;
+	// lookup function from code pos
+	min = 0;
+	max = m->code->nfunctions;
+	while( min < max ) {
+		int mid = (min + max) >> 1;
+		hl_debug_infos *p = m->jit_debug + mid;
+		if( p->start <= code_pos )
+			min = mid + 1;
+		else
+			max = mid;
+	}
+	if( min == 0 )
+		return false; // hl_callback
+	do {
+		min--;
+		*fidx = min;
+		dbg = m->jit_debug + min;
+		fdebug = m->code->functions + min;
+	} while( !dbg->offsets );
+	// lookup inside function
+	min = 0;
+	max = fdebug->nops;
+	code_pos -= dbg->start;
+	while( min < max ) {
+		int mid = (min + max) >> 1;
+		int offset = dbg->large ? ((int*)dbg->offsets)[mid] : ((unsigned short*)dbg->offsets)[mid];
+		if( offset <= code_pos )
+			min = mid + 1;
+		else
+			max = mid;
+	}
+	if( min == 0 )
+		return false; // ???
+	*fpos = min - 1;
+	return true;
+}
+
+uchar *hl_module_resolve_symbol_full( void *addr, uchar *out, int *outSize, int **r_debug_addr ) {
+	int *debug_addr;
+	int file, line;
+	int pos = 0;
+	int fidx, fpos;
+	hl_function *fdebug;
+	int i;
+	hl_module *m = NULL;
+	for(i=0;i<modules_count;i++) {
+		m = cur_modules[i];
+		if( addr >= m->jit_code && addr <= (void*)((char*)m->jit_code + m->codesize) ) break;
+	}
+	if( i == modules_count )
+		return NULL;
+	if( !module_resolve_pos(m,addr,&fidx,&fpos) )
+		return NULL;
+	// extract debug info
+	fdebug = m->code->functions + fidx;
+	debug_addr = fdebug->debug + ((fpos&0xFFFF) * 2);
+	file = debug_addr[0];
+	line = debug_addr[1];
+	if( r_debug_addr ) {
+		*r_debug_addr = debug_addr;
+		if( file < 0 ) return NULL; // already cached
+	}
+	if( !out )
+		return NULL;
+	int size = *outSize;
+	if( fdebug->obj )
+		pos += usprintf(out,size - pos,USTR("%s.%s("),fdebug->obj->name,fdebug->field.name);
+	else if( fdebug->field.ref )
+		pos += usprintf(out,size - pos,USTR("%s.~%s.%d("),fdebug->field.ref->obj->name, fdebug->field.ref->field.name, fdebug->ref);
+	else
+		pos += usprintf(out,size - pos,USTR("fun$%d("),fdebug->findex);
+	pos += hl_from_utf8(out + pos,size - pos,m->code->debugfiles[file&0x7FFFFFFF]);
+	pos += usprintf(out + pos, size - pos, USTR(":%d)"), line);
+	*outSize = pos;
+	return out;
+}
+
+static uchar *module_resolve_symbol( void *addr, uchar *out, int *outSize ) {
+	return hl_module_resolve_symbol_full(addr,out,outSize,NULL);
+}
+
+int hl_module_capture_stack_range( void *stack_top, void **stack_ptr, void **out, int size ) {
+#if defined(HL_64) && defined(HL_WIN)
+#else
+	void *stack_bottom = stack_ptr;
+#endif
+	int count = 0;
+	if( modules_count == 1 ) {
+		hl_module *m = cur_modules[0];
+		unsigned char *code = m->jit_code;
+		int code_size = m->codesize;
+		if( m->jit_debug ) {
+			int s = m->jit_debug[0].start;
+			code += s;
+			code_size -= s;
+		}
+		while( stack_ptr < (void**)stack_top ) {
+#if defined(HL_64) && defined(HL_WIN)
+			void *module_addr = *stack_ptr++; // EIP
+			if( module_addr >= (void*)code && module_addr < (void*)(code + code_size) ) {
+				if( out ) {
+					if( count == size ) break;
+					out[count++] = module_addr;
+				} else
+					count++;
+			}
+#else
+			void *stack_addr = *stack_ptr++; // EBP
+			if( stack_addr > stack_bottom && stack_addr < stack_top ) {
+				void *module_addr = *stack_ptr; // EIP
+				if( module_addr >= (void*)code && module_addr < (void*)(code + code_size) ) {
+					if( out ) {
+						if( count == size ) break;
+						out[count++] = module_addr;
+					} else {
+						count++;
+					}
+				}
+			}
+#endif
+		}
+	} else {
+		while( stack_ptr < (void**)stack_top ) {
+#if defined(HL_64) && defined(HL_WIN)
+			void *module_addr = *stack_ptr++; // EIP
+			{
+#else
+			void *stack_addr = *stack_ptr++; // EBP
+			if( stack_addr > stack_bottom && stack_addr < stack_top ) {
+				void *module_addr = *stack_ptr; // EIP
+#endif
+				int i;
+				for(i=0;i<modules_count;i++) {
+					hl_module *m = cur_modules[i];
+					unsigned char *code = m->jit_code;
+					int code_size = m->codesize;
+					if( module_addr >= (void*)code && module_addr < (void*)(code + code_size) ) {
+						if( out && count == size ) {
+							stack_ptr = stack_top;
+							break;
+						}
+						if( m->jit_debug ) {
+							int s = m->jit_debug[0].start;
+							code += s;
+							code_size -= s;
+							if( module_addr < (void*)code || module_addr >= (void*)(code + code_size) ) continue;
+						}
+						if( out )
+							out[count++] = module_addr;
+						else
+							count++;
+						break;
+					}
+				}
+			}
+		}
+	}
+	return count;
+}
+
+static int module_capture_stack( void **stack, int size ) {
+#ifdef WIN64_UNWIND_TABLES
+	CONTEXT context;
+	RtlCaptureContext(&context);
+	int count = 0;
+	while(true) {
+		DWORD64 base;
+		DWORD64 ip = context.Rip;
+		PRUNTIME_FUNCTION fn_entry = RtlLookupFunctionEntry(ip, &base, NULL);
+		if (!fn_entry) {
+			break;
+		}
+		void *module_addr = (void*)ip;
+		for(int i=0;i<modules_count;i++) {
+			hl_module *m = cur_modules[i];
+			unsigned char *code = m->jit_code;
+			int code_size = m->codesize;
+			if( module_addr >= (void*)code && module_addr < (void*)(code + code_size) ) {
+				if( stack && count == size ) {
+					break;
+				}
+
+				if( stack )
+					stack[count++] = module_addr;
+				else
+					count++;
+				break;
+			}
+		}
+
+		if (stack && count == size) {
+			break;
+		}
+
+		void* handler_data;
+		ULONG64 establisher_frame;
+		RtlVirtualUnwind(0, base, ip, fn_entry, &context, &handler_data, &establisher_frame, NULL);
+		if (context.Rip == 0) {
+			break;
+		}
+	}
+	return count;
+#else
+	return hl_module_capture_stack_range(hl_get_thread()->stack_top, (void**)&stack, stack, size);
+#endif
+}
+
+static void hl_module_types_dump( void (*fdump)( void *, int) ) {
+	int ntypes = 0;
+	int i, j, fcount = 0;
+	for(i=0;i<modules_count;i++)
+		ntypes += cur_modules[i]->code->ntypes;
+	fdump(&ntypes,4);
+	for(i=0;i<modules_count;i++) {
+		hl_module *m = cur_modules[i];
+		for(j=0;j<m->code->ntypes;j++) {
+			hl_type *t = m->code->types + j;
+			fdump(&t,sizeof(void*));
+			if( t->kind == HFUN ) fcount++;
+		}
+	}
+	fdump(&fcount,4);
+	for(i=0;i<modules_count;i++) {
+		hl_module *m = cur_modules[i];
+		for(j=0;j<m->code->ntypes;j++) {
+			hl_type *t = m->code->types + j;
+			if( t->kind == HFUN ) {
+				hl_type *ct = (hl_type*)&t->fun->closure_type;
+				fdump(&ct,sizeof(void*));
+			}
+		}
+	}
+}
+
+hl_module *hl_module_alloc( hl_code *c ) {
+	int i;
+	int gsize = 0;
+	hl_module *m = (hl_module*)malloc(sizeof(hl_module));
+	if( m == NULL )
+		return NULL;
+	memset(m,0,sizeof(hl_module));
+	m->code = c;
+	m->globals_indexes = (int*)malloc(sizeof(int)*c->nglobals);
+	if( m->globals_indexes == NULL ) {
+		hl_module_free(m);
+		return NULL;
+	}
+	for(i=0;i<c->nglobals;i++) {
+		gsize += hl_pad_size(gsize, c->globals[i]);
+		m->globals_indexes[i] = gsize;
+		gsize += hl_type_size(c->globals[i]);
+	}
+	m->globals_size = gsize;
+	m->globals_data = (unsigned char*)malloc(gsize);
+	if( m->globals_data == NULL ) {
+		hl_module_free(m);
+		return NULL;
+	}
+	memset(m->globals_data,0,gsize);
+	m->functions_ptrs = (void**)malloc(sizeof(void*)*(c->nfunctions + c->nnatives));
+	m->functions_indexes = (int*)malloc(sizeof(int)*(c->nfunctions + c->nnatives));
+	m->ctx.functions_types = (hl_type**)malloc(sizeof(void*)*(c->nfunctions + c->nnatives));
+	if( m->functions_ptrs == NULL || m->functions_indexes == NULL || m->ctx.functions_types == NULL ) {
+		hl_module_free(m);
+		return NULL;
+	}
+	memset(m->functions_ptrs,0,sizeof(void*)*(c->nfunctions + c->nnatives));
+	memset(m->functions_indexes,0xFF,sizeof(int)*(c->nfunctions + c->nnatives));
+	memset(m->ctx.functions_types,0,sizeof(void*)*(c->nfunctions + c->nnatives));
+	hl_alloc_init(&m->ctx.alloc);
+	m->ctx.functions_ptrs = m->functions_ptrs;
+	return m;
+}
+
+static void null_function() {
+	hl_error("Null function ptr");
+}
+
+static void append_fields( char **p, hl_type *t );
+
+static void append_type( char **p, hl_type *t ) {
+	*(*p)++ = TYPE_STR[t->kind];
+	switch( t->kind ) {
+	case HFUN:
+		{
+			int i;
+			for(i=0;i<t->fun->nargs;i++)
+				append_type(p,t->fun->args[i]);
+			*(*p)++ = '_';
+			append_type(p,t->fun->ret);
+			break;
+		}
+	case HREF:
+	case HNULL:
+		append_type(p,t->tparam);
+		break;
+	case HOBJ:
+		{
+			append_fields(p, t);
+			*(*p)++ = '_';
+		}
+		break;
+	case HABSTRACT:
+		*p += utostr(*p,100,t->abs_name);
+		*(*p)++ = '_';
+		break;
+	default:
+		break;
+	}
+}
+
+static void append_fields( char **p, hl_type *t ) {
+	int i;
+	if( t->obj->super )
+		append_fields(p, t->obj->super);
+	for(i=0;i<t->obj->nfields;i++)
+		append_type(p,t->obj->fields[i].t);
+}
+
+#define DISABLED_LIB_PTR ((void*)(int_val)2)
+
+static void *resolve_library( const char *lib, bool is_opt ) {
+	char tmp[256];
+	void *h;
+
+#	ifndef HL_CONSOLE
+	static char *DISABLED_LIBS = NULL;
+	if( !DISABLED_LIBS ) {
+		DISABLED_LIBS = getenv("HL_DISABLED_LIBS");
+		if( !DISABLED_LIBS ) DISABLED_LIBS = "";
+	}
+	char *disPart = strstr(DISABLED_LIBS, lib);
+	if( disPart ) {
+		disPart += strlen(lib);
+		if( *disPart == 0 || *disPart == ',' )
+			return DISABLED_LIB_PTR;
+	}
+#	endif
+
+	if( strcmp(lib,"builtin") == 0 )
+		return dlopen(NULL,RTLD_LAZY);
+
+	if( strcmp(lib,"std") == 0 ) {
+#	ifdef HL_WIN
+#		ifdef HL_64
+		h = dlopen("libhl64.dll",RTLD_LAZY);
+		if( h == NULL ) h = dlopen("libhl.dll",RTLD_LAZY);
+#		else
+		h = dlopen("libhl.dll",RTLD_LAZY);
+#		endif
+		if( h == NULL && !is_opt ) hl_fatal1("Failed to load library %s","libhl.dll");
+		return h;
+#	else
+		return RTLD_DEFAULT;
+#	endif
+	}
+
+	strcpy(tmp,lib);
+
+#	ifdef HL_64
+	strcpy(tmp+strlen(lib),"64.hdll");
+	h = dlopen(tmp,RTLD_LAZY);
+	if( h != NULL ) return h;
+#	endif
+
+	strcpy(tmp+strlen(lib),".hdll");
+	h = dlopen(tmp,RTLD_LAZY);
+	if( h == NULL && !is_opt )
+		hl_fatal1("Failed to load library %s",tmp);
+	return h;
+}
+
+static void disabled_primitive() {
+	hl_error("This library primitive has been disabled");
+}
+
+static void hl_module_init_indexes( hl_module *m ) {
+	int i;
+	for(i=0;i<m->code->nfunctions;i++) {
+		hl_function *f = m->code->functions + i;
+		m->functions_indexes[f->findex] = i;
+		m->ctx.functions_types[f->findex] = f->type;
+	}
+	for(i=0;i<m->code->nnatives;i++) {
+		hl_native *n = m->code->natives + i;
+		m->functions_indexes[n->findex] = i + m->code->nfunctions;
+		m->ctx.functions_types[n->findex] = n->t;
+	}
+	for(i=0;i<m->code->ntypes;i++) {
+		hl_type *t = m->code->types + i;
+		switch( t->kind ) {
+		case HOBJ:
+		case HSTRUCT:
+			t->obj->m = &m->ctx;
+			t->obj->global_value = ((int)(int_val)t->obj->global_value) ? (void**)(int_val)(m->globals_data + m->globals_indexes[(int)(int_val)t->obj->global_value-1]) : NULL;
+			{
+				int j;
+				for(j=0;j<t->obj->nproto;j++) {
+					hl_obj_proto *p = t->obj->proto + j;
+					hl_function *f = m->code->functions + m->functions_indexes[p->findex];
+					f->obj = t->obj;
+					f->field.name = p->name;
+				}
+				for(j=0;j<t->obj->nbindings;j++) {
+					int fid = t->obj->bindings[j<<1];
+					int mid = t->obj->bindings[(j<<1)|1];
+					hl_obj_field *of = hl_obj_field_fetch(t,fid);
+					switch( of->t->kind ) {
+					case HFUN:
+					case HDYN:
+						{
+							hl_function *f = m->code->functions + m->functions_indexes[mid];
+							f->obj = t->obj;
+							f->field.name = of->name;
+						}
+						break;
+					default:
+						break;
+					}
+				}
+			}
+			break;
+		case HENUM:
+			hl_init_enum(t,&m->ctx);
+			t->tenum->global_value = ((int)(int_val)t->tenum->global_value) ? (void**)(int_val)(m->globals_data + m->globals_indexes[(int)(int_val)t->tenum->global_value-1]) : NULL;
+			break;
+		case HVIRTUAL:
+			hl_init_virtual(t,&m->ctx);
+			break;
+		default:
+			break;
+		}
+	}
+	for(i=0;i<m->code->nfunctions;i++) {
+		int k;
+		hl_function *f = m->code->functions + i;
+		hl_function *real_f = f;
+		while( real_f && !real_f->obj ) real_f = real_f->field.ref;
+		if( real_f == NULL ) continue;
+		for(k=0;k<f->nops;k++) {
+			hl_opcode *op = f->ops + k;
+			switch( op->op ) {
+			case OCall0:
+			case OCall1:
+			case OCall2:
+			case OCall3:
+			case OCall4:
+			case OCallN:
+			case OStaticClosure:
+			case OInstanceClosure:
+				if( m->functions_indexes[op->p2] < m->code->nfunctions ) {
+					hl_function *floc = m->code->functions + m->functions_indexes[op->p2];
+					if( floc->obj ) continue;
+					floc->field.ref = real_f;
+					floc->ref = real_f->ref++;
+				}
+				break;
+			default:
+				break;
+			}
+		}
+	}
+
+	static hl_type_obj obj_entry = {0};
+	hl_function *fent = m->code->functions + m->functions_indexes[m->code->entrypoint];
+	obj_entry.name = USTR("");
+	fent->obj = &obj_entry;
+	fent->field.name = USTR("init");
+}
+
+#ifdef HL_VTUNE
+#include <jitprofiling.h>
+h_bool hl_module_init_vtune( hl_module *m ) {
+	int i;
+	if( !iJIT_IsProfilingActive() || m->jit_debug == NULL )
+		return false;
+	for(i=0;i<m->code->nfunctions;i++) {
+		hl_function *f = m->code->functions + i;
+		void *faddr = m->functions_ptrs[f->findex];
+
+		iJIT_Method_Load jm = {0};
+		char out[256];
+		jm.method_id = iJIT_GetNewMethodID();
+		if( f->obj ) {
+			jm.class_file_name = hl_to_utf8(f->obj->name);
+			jm.method_name = hl_to_utf8(f->field.name);
+		} else if( f->field.ref ) {
+			jm.class_file_name = hl_to_utf8(f->field.ref->obj->name);
+			jm.method_name = hl_to_utf8(f->field.ref->field.name);
+		} else {
+			sprintf(out,"fun$%d", f->findex);
+			jm.method_name = out;
+		}
+		jm.method_load_address = faddr;
+		jm.method_size = 0;
+		int j;
+		for(j=0;j<m->code->nfunctions;j++) {
+			hl_function *f2 = m->code->functions + j;
+			if( f2 == f ) continue;
+			void *addr = m->functions_ptrs[f2->findex];
+			int_val dif = (char*)addr - (char*)faddr;
+			if( dif <= 0 ) continue;
+			if( jm.method_size == 0 || dif < jm.method_size ) jm.method_size = (int)dif;
+		}
+
+		int file = f->debug[0] & 0x7FFFFFFF;
+		int curline = -1;
+		LineNumberInfo *lines = (LineNumberInfo*)malloc(sizeof(LineNumberInfo)*f->nops);
+		int nlines = 0;
+		hl_debug_infos *dbg = m->jit_debug + i;
+		jm.source_file_name = m->code->debugfiles[file];
+		for(j=0;j<f->nops;j++) {
+			int file2 = f->debug[j<<1] & 0x7FFFFFFF;
+			int line = f->debug[(j<<1)|1];
+			if( file2 != file || line == curline ) continue;
+			lines[nlines].Offset = dbg->large ? ((int*)dbg->offsets)[j] : ((unsigned short*)dbg->offsets)[j];
+			lines[nlines].LineNumber = line - 1;
+			curline = line;
+			nlines++;
+		}
+		if( nlines && jm.method_size ) {
+			jm.line_number_table = lines;
+			jm.line_number_size = nlines;
+		}
+		iJIT_NotifyEvent(iJVM_EVENT_TYPE_METHOD_LOAD_FINISHED,(void*)&jm);
+		free(lines);
+	}
+	return true;
+}
+static void modules_init_vtune() {
+	int i;
+	for(i=0;i<modules_count;i++)
+		hl_module_init_vtune(cur_modules[i]);
+}
+#endif
+
+static void hl_module_init_natives( hl_module *m ) {
+	char tmp[256];
+	int i;
+	void *libHandler = NULL;
+	const char *curlib = NULL, *sign;
+	for(i=0;i<m->code->nnatives;i++) {
+		hl_native *n = m->code->natives + i;
+		const char *lib = n->lib;
+		bool is_opt = *lib == '?';
+		char *p = tmp;
+		void *f;
+		if( is_opt ) lib++;
+#ifdef HXS_NATIVE_TABLE
+		/*
+			The only change made to hashlink's own source, and it is here because a module loaded at
+			runtime has no hdll to be found in. hxScript's runtime is compiled into the same binary
+			as this loader, so its natives are resolved from a table rather than from the filesystem,
+			which is also the only way they can be reached at all in an HL/C build.
+
+			Anything this does not claim falls through to hashlink's normal resolution, so a script
+			module may still name a real hdll.
+		*/
+		{
+			extern void *hxs_resolve_native( const char *lib, const char *name );
+			f = hxs_resolve_native(lib, n->name);
+			if( f ) {
+				m->functions_ptrs[n->findex] = f;
+				continue;
+			}
+		}
+#endif
+		if( curlib != lib ) {
+			curlib = lib;
+			libHandler = resolve_library(lib, is_opt);
+		}
+		if( libHandler == DISABLED_LIB_PTR ) {
+			m->functions_ptrs[n->findex] = disabled_primitive;
+			continue;
+		}
+		strcpy(p,"hlp_");
+		p += 4;
+		strcpy(p,n->name);
+		p += strlen(n->name);
+		*p++ = 0;
+		f = dlsym(libHandler,tmp);
+		if( f == NULL ) {
+			if( is_opt ) {
+				m->functions_ptrs[n->findex] = hl_prim_not_loaded;
+				continue;
+			}
+			hl_fatal2("Failed to load function %s@%s",n->lib,n->name);
+		}
+		m->functions_ptrs[n->findex] = ((void *(*)( const char **p ))f)(&sign);
+		p = tmp;
+		append_type(&p,n->t);
+		*p++ = 0;
+		if( sign && memcmp(sign,tmp,strlen(sign)+1) != 0 )
+			hl_fatal4("Invalid signature for function %s@%s : %s required but %s found in hdll",n->lib,n->name,tmp,sign);
+	}
+}
+
+static void hl_module_init_constant( hl_module *m, hl_constant *c ) {
+	hl_type *t = m->code->globals[c->global];
+	hl_runtime_obj *rt;
+	vdynamic **global = (vdynamic**)(m->globals_data + m->globals_indexes[c->global]);
+	vdynamic *v = NULL;
+	switch (t->kind) {
+	case HOBJ:
+	case HSTRUCT:
+		rt = hl_get_obj_rt(t);
+		v = (vdynamic*)hl_malloc(&m->ctx.alloc,rt->size);
+		v->t = t;
+		for(int i=0;i<c->nfields;i++) {
+			int idx = c->fields[i];
+			hl_type *ft = t->obj->fields[i].t;
+			void *addr = (char*)v + rt->fields_indexes[i];
+			switch (ft->kind) {
+			case HI32:
+				*(int*)addr = m->code->ints[idx];
+				break;
+			case HBOOL:
+				*(bool*)addr = idx != 0;
+				break;
+			case HF64:
+				*(double*)addr = m->code->floats[idx];
+				break;
+			case HBYTES:
+				*(const void**)addr = hl_get_ustring(m->code, idx);
+				break;
+			case HTYPE:
+				*(hl_type**)addr = m->code->types + idx;
+				break;
+			default:
+				*(void**)addr = *(void**)(m->globals_data + m->globals_indexes[idx]);
+				break;
+			}
+		}
+		break;
+	default:
+		hl_fatal("assert");
+	}
+	*global = v;
+	hl_remove_root(global);
+}
+
+static void hl_module_add( hl_module *m ) {
+	hl_module **old_modules = cur_modules;
+	hl_module **new_modules = (hl_module**)malloc(sizeof(void*)*(modules_count + 1));
+	memcpy(new_modules, old_modules, sizeof(void*)*modules_count);
+	new_modules[modules_count] = m;
+	cur_modules = new_modules;
+	modules_count++;
+	free(old_modules);
+}
+
+int hl_module_init( hl_module *m, h_bool hot_reload ) {
+	int i;
+	jit_ctx *ctx;
+	// expand globals
+	if( hot_reload ) {
+		int nsize = m->globals_size + HOT_RELOAD_EXTRA_GLOBALS * sizeof(void*);
+		int *nindexes = malloc(sizeof(int) * (m->code->nglobals + HOT_RELOAD_EXTRA_GLOBALS));
+		memcpy(nindexes,m->globals_indexes,sizeof(int)*m->code->nglobals);
+		memset(nindexes + m->code->nglobals,0xFF,HOT_RELOAD_EXTRA_GLOBALS * sizeof(int));
+		free(m->globals_indexes);
+		free(m->globals_data);
+		m->globals_indexes = nindexes;
+		m->globals_data = malloc(nsize);
+		memset(m->globals_data,0,m->globals_size);
+		memset(m->globals_data + m->globals_size,0xFF,HOT_RELOAD_EXTRA_GLOBALS * sizeof(void*));
+	}
+	// RESET globals
+	for(i=0;i<m->code->nglobals;i++) {
+		hl_type *t = m->code->globals[i];
+		if( t->kind == HFUN ) *(void**)(m->globals_data + m->globals_indexes[i]) = null_function;
+		if( hl_is_ptr(t) )
+			hl_add_root(m->globals_data+m->globals_indexes[i]);
+	}
+	// inits
+	if( hot_reload ) m->hash = hl_code_hash_alloc(m->code);
+	hl_module_init_natives(m);
+	hl_module_init_indexes(m);
+	// JIT
+	ctx = hl_jit_alloc();
+	if( ctx == NULL )
+		return 0;
+	hl_jit_init(ctx, m);
+	for(i=0;i<m->code->nfunctions;i++) {
+		hl_function *f = m->code->functions + i;
+		int fpos = hl_jit_function(ctx, m, f);
+		if( fpos < 0 ) {
+			hl_jit_free(ctx, false);
+			return 0;
+		}
+		m->functions_ptrs[f->findex] = (void*)(int_val)fpos;
+	}
+	m->jit_code = hl_jit_code(ctx, m, &m->codesize, &m->jit_debug, NULL);
+	for(i=0;i<m->code->nfunctions;i++) {
+		hl_function *f = m->code->functions + i;
+		m->functions_ptrs[f->findex] = ((unsigned char*)m->jit_code) + ((int_val)m->functions_ptrs[f->findex]);
+	}
+	// INIT constants
+	for(i=0;i<m->code->nconstants;i++) {
+		hl_constant *c = m->code->constants + i;
+		hl_module_init_constant(m, c);
+	}
+	hl_module_add(m);
+	hl_setup.resolve_symbol = module_resolve_symbol;
+	hl_setup.capture_stack = module_capture_stack;
+	hl_gc_set_dump_types(hl_module_types_dump);
+#	ifdef HL_VTUNE
+	hl_setup.vtune_init = modules_init_vtune;
+#	endif
+	hl_jit_free(ctx, hot_reload);
+	if( hot_reload ) {
+		hl_code_hash_finalize(m->hash);
+		m->jit_ctx = ctx;
+	}
+	return 1;
+}
+
+static bool check_same_type( hl_type *t1, hl_type *t2 ) {
+	if( hl_safe_cast(t1,t2) )
+		return true;
+	if( t1->kind != t2->kind )
+		return false;
+	int i;
+	switch( t1->kind ) {
+	case HOBJ:
+	case HSTRUCT:
+		return ucmp(t1->obj->name,t2->obj->name) == 0;
+	case HFUN:
+	case HMETHOD:
+		if( t1->fun->nargs != t2->fun->nargs )
+			return false;
+		for(i=0;i<t1->fun->nargs;i++)
+			if( !check_same_type(t1->fun->args[i],t2->fun->args[i]) )
+				return false;
+		return check_same_type(t1->fun->ret, t2->fun->ret);
+	case HVIRTUAL:
+		if( t1->virt == t2->virt )
+			return true;
+		if( t1->virt->nfields != t2->virt->nfields )
+			return false;
+		hl_type_virtual *vt2 = t2->virt;
+		t2->virt = t1->virt; // assume equals !
+		for(i=0;i<t1->virt->nfields;i++) {
+			hl_obj_field *f1 = t1->virt->fields + i;
+			hl_obj_field *f2 = t2->virt->fields + i;
+			if( f1->hashed_name != f2->hashed_name || !check_same_type(f1->t, f2->t) ) {
+				t2->virt = vt2;
+				return false;
+			}
+		}
+		t2->virt = vt2;
+		return true;
+	case HABSTRACT:
+		return ucmp(t1->abs_name, t2->abs_name) == 0;
+	case HENUM:
+		return ucmp(t1->tenum->name, t2->tenum->name) == 0;
+	case HPACKED:
+		return check_same_type(t1->tparam, t2->tparam);
+	default:
+		break;
+	}
+	return false;
+}
+
+static int check_same_obj( hl_type_obj *o1, hl_type_obj *o2 ) {
+	if( o1->nproto != o2->nproto || o1->nfields != o2->nfields || o1->nbindings != o2->nbindings )
+		return -1;
+	int i;
+	for(i=0;i<o1->nproto;i++)
+		if( o1->proto[i].hashed_name != o2->proto[i].hashed_name )
+			return -1;
+	for(i=0;i<o1->nfields;i++)
+		if( o1->fields[i].hashed_name != o2->fields[i].hashed_name || !check_same_type(o1->fields[i].t,o2->fields[i].t) )
+			return -1;
+	for(i=0;i<o1->nproto;i++)
+		if( o1->proto[i].pindex != o2->proto[i].pindex )
+			return -2;
+	return 0;
+}
+
+hl_type *hl_module_resolve_type( hl_module *m, hl_type *t, bool err ) {
+	int i;
+	if( t->kind != HOBJ && t->kind != HSTRUCT )
+		return NULL;
+	for(i=0;i<m->code->ntypes;i++) {
+		hl_type *t2 = m->code->types + i;
+		if( t2->kind == t->kind && ucmp(t->obj->name,t2->obj->name) == 0 ) {
+			int r = check_same_obj(t->obj,t2->obj);
+			if( r == 0 )
+				return t2;
+			if( err ) {
+				if( r == -2 )
+					hl_error("Class '%s' has different prototype than loader (missing @:virtual)",t->obj->name);
+				else
+					hl_error("Class '%s' has different definition than loader",t->obj->name);
+			}
+			return NULL;
+		}
+	}
+	return NULL;
+}
+
+h_bool hl_module_patch( hl_module *m1, hl_code *c ) {
+	int i,i1,i2;
+	bool has_changes = false;
+	int changes_count = 0;
+	jit_ctx *ctx = m1->jit_ctx;
+
+	hl_module *m2 = hl_module_alloc(c);
+	m2->hash = hl_code_hash_alloc(c);
+	hl_code_hash_remap_globals(m2->hash,m1->hash);
+
+	// share global data
+	free(m2->globals_data);
+	free(m2->globals_indexes);
+	m2->globals_data = m1->globals_data;
+	m2->globals_indexes = m1->globals_indexes;
+	int gsize = m1->globals_size;
+	for(i=m1->code->nglobals;i<m2->code->nglobals;i++) {
+		hl_type *t = c->globals[i];
+		gsize += hl_pad_size(gsize, t);
+		m2->globals_indexes[i] = gsize;
+		gsize += hl_type_size(t);
+		if( hl_is_ptr(t) )
+			hl_add_root(m2->globals_data+m2->globals_indexes[i]);
+	}
+	memset(m2->globals_data+m1->globals_size,0,gsize - m1->globals_size);
+	m2->globals_size = gsize;
+
+	hl_module_init_natives(m2);
+	hl_module_init_indexes(m2);
+	hl_jit_reset(ctx, m2);
+	hl_code_hash_finalize(m2->hash);
+
+	for(i=0;i<m2->code->nconstants;i++) {
+		hl_constant *c = m2->code->constants + i;
+		if( c->global >= m1->code->nglobals )
+			hl_module_init_constant(m2, c);
+	}
+
+	for(i2=0;i2<m2->code->nfunctions;i2++) {
+		hl_function *f2 = m2->code->functions + i2;
+		int sign2 = m2->hash->functions_signs[i2];
+		if( f2->field.name == NULL ) {
+			m2->hash->functions_hashes[i2] = -1;
+			continue;
+		}
+		for(i1=0;i1<m1->code->nfunctions;i1++) {
+			int sign1 = m1->hash->functions_signs[i1];
+			if( sign1 == sign2 ) {
+				hl_function *f1 = m1->code->functions + i1;
+				if( (f1->obj != NULL) != (f2->obj != NULL) || !f1->field.name || !f2->field.name ) {
+					printf("[HotReload] Signature conflict\n");
+					continue;
+				}
+				if( ucmp(fun_obj(f1)->name,fun_obj(f2)->name) != 0 || ucmp(fun_field_name(f1),fun_field_name(f2)) != 0 ) {
+					printf("[HotReload] Signature conflict\n");
+					continue;
+				}
+
+				int hash2 = m2->hash->functions_hashes[i2];
+				int hash1 = m1->hash->functions_hashes[i1];
+				m2->hash->functions_hashes[i2] = i1; // index reference
+				if( hash1 == hash2 )
+					break;
+#				ifdef HL_DEBUG
+				uprintf(USTR("%s."), fun_obj(f1)->name);
+				uprintf(USTR("%s"), fun_field_name(f1));
+				if( !f1->obj )
+					printf("~%d", f1->ref);
+				printf(" has been modified [%d]\n", f1->nops);
+#				endif
+				changes_count++;
+
+				m1->hash->functions_hashes[i1] = hash2; // update hash
+				int fpos = hl_jit_function(ctx, m2, f2);
+				if( fpos < 0 ) return false;
+				m2->functions_ptrs[f2->findex] = (void*)(int_val)fpos;
+				has_changes = true;
+				break;
+			}
+		}
+		if( i1 == m1->code->nfunctions ) {
+			// not found (signature changed or new method) : inject new method!
+			int fpos = hl_jit_function(ctx, m2, f2);
+			if( fpos < 0 ) return false;
+			m2->hash->functions_hashes[i2] = -1;
+			m2->functions_ptrs[f2->findex] = (void*)(int_val)fpos;
+#			ifdef HL_DEBUG
+			uprintf(USTR("%s."), fun_obj(f2)->name);
+			uprintf(USTR("%s"), fun_field_name(f2));
+			if( !f2->obj )
+				printf("~%d", f2->ref);
+			printf(" has been added\n");
+#			endif
+			changes_count++;
+			has_changes = true;
+			// should be added to m1 functions for later reload?
+		}
+	}
+	if( !has_changes ) {
+		printf("[HotReload] No changes found\n");
+		fflush(stdout);
+		hl_jit_free(ctx, true);
+		return false;
+	}
+
+	// patch same types
+	for(i1=0;i1<m1->code->ntypes;i1++) {
+		hl_type *p = m1->code->types + i1;
+		switch( p->kind ) {
+		case HOBJ:
+		case HSTRUCT:
+			break;
+		case HENUM:
+			if( !p->tenum->global_value ) continue;
+			break;
+		default:
+			continue;
+		}
+		for(i2=0;i2<c->ntypes;i2++) {
+			hl_type *t = c->types + i2;
+			if( p->kind != t->kind ) continue;
+			switch( p->kind ) {
+			case HOBJ:
+			case HSTRUCT:
+				if( ucmp(p->obj->name,t->obj->name) != 0 ) continue;
+				if( hl_code_hash_type(m1->hash,p) == hl_code_hash_type(m2->hash,t)  ) {
+					t->obj = p->obj; // alias the types ! they are different pointers but have the same layout
+					t->vobj_proto = p->vobj_proto;
+				} else {
+					uprintf(USTR("[HotReload] Type %s has changed\n"),t->obj->name);
+					changes_count++;
+				}
+				break;
+			case HENUM:
+				if( ucmp(p->tenum->name,t->tenum->name) != 0 ) continue;
+				if( hl_code_hash_type(m1->hash,p) == hl_code_hash_type(m2->hash,t)  ) {
+					t->tenum = p->tenum; // alias the types ! they are different pointers but have the same layout
+				} else {
+					uprintf(USTR("[HotReload] Type %s has changed\n"),t->tenum->name);
+					changes_count++;
+				}
+				break;
+			default:
+				break;
+			}
+			break;
+		}
+	}
+
+	m2->jit_code = hl_jit_code(ctx, m2, &m2->codesize, &m2->jit_debug, m1);
+
+	// patch missing debug info
+	int start = -1;
+	if( m2->jit_debug ) {
+		for(i=0;i<c->nfunctions;i++) {
+			if( m2->jit_debug[i].start < 0 ) {
+				m2->jit_debug[i].start = start;
+				m2->jit_debug[i].offsets = NULL;
+			} else {
+				start = m2->jit_debug[i].start;
+			}
+		}
+	}
+
+	hl_jit_free(ctx,true);
+
+	if( m2->jit_code == NULL ) {
+		printf("[HotReload] Couldn't JIT result\n");
+		fflush(stdout);
+		return false;
+	}
+
+	for(i=0;i<m2->code->nfunctions;i++) {
+		hl_function *f2 = m2->code->functions + i;
+		if( m2->hash->functions_hashes[i] < -1 ) continue;
+		if( m2->functions_ptrs[f2->findex] == NULL ) continue;
+		void *ptr = ((unsigned char*)m2->jit_code) + ((int_val)m2->functions_ptrs[f2->findex]);
+		m2->functions_ptrs[f2->findex] = ptr;
+		// update real function ptr
+		if( m2->hash->functions_hashes[i] < 0 ) continue;
+		hl_function *f1 = m1->code->functions + m2->hash->functions_hashes[i];
+		hl_jit_patch_method(m1->functions_ptrs[f1->findex], m1->functions_ptrs + f1->findex);
+		m1->functions_ptrs[f1->findex] = ptr;
+	}
+	for(i=0;i<m1->code->ntypes;i++) {
+		hl_type *t = m1->code->types + i;
+		if( t->kind == HOBJ || t->kind == HSTRUCT ) hl_flush_proto(t);
+	}
+
+	if( changes_count > 0 ) {
+		printf("[HotReload] %d changes\n", changes_count);
+		fflush(stdout);
+	}
+	hl_module_add(m2);
+
+	// call entry point (will only update types)
+	for(i=modules_count-1;i>=0;i--) {
+		hl_module *m = cur_modules[i];
+		if( m->functions_ptrs[m->code->entrypoint] ) {
+			vclosure cl;
+			cl.t = m->code->functions[m->functions_indexes[m->code->entrypoint]].type;
+			cl.fun = m->functions_ptrs[m->code->entrypoint];
+			cl.hasValue = 0;
+			hl_dyn_call(&cl,NULL,0);
+			break;
+		}
+	}
+
+	return true;
+}
+
+void hl_module_free( hl_module *m ) {
+	for(int i=0;i<m->code->nglobals;i++) {
+		if( hl_is_ptr(m->code->globals[i]) )
+			hl_remove_root(m->globals_data+m->globals_indexes[i]);
+	}
+	hl_free(&m->ctx.alloc);
+	hl_free_executable_memory(m->code, m->codesize);
+#ifdef WIN64_UNWIND_TABLES
+	RtlDeleteFunctionTable(m->unwind_table);
+	free(m->unwind_table);
+#endif
+	if( m->hash ) hl_code_hash_free(m->hash);
+	free(m->functions_indexes);
+	free(m->functions_ptrs);
+	free(m->ctx.functions_types);
+	free(m->globals_indexes);
+	free(m->globals_data);
+	if( m->jit_debug ) {
+		int i;
+		for(i=0;i<m->code->nfunctions;i++)
+			free(m->jit_debug[i].offsets);
+		free(m->jit_debug);
+	}
+	if( m->jit_ctx )
+		hl_jit_free(m->jit_ctx,false);
+	free(m);
+}
