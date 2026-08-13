@@ -1,0 +1,51 @@
+# The hxScript Sandbox for HashLink and Heaps, as an ordinary native binary.
+#
+#     cd apps/sandbox-heaps
+#     haxe sandbox.hxml
+#     sh ../../src/hxscript/hl/native/build.sh --hlc export/hlc --out export/hlc/Sandbox.exe
+#
+# `./build.sh` does both and checks the toolchain first. Run `setup/unix.sh` once before either: it
+# installs heaps and the rest into a haxelib repository belonging to this folder, so nothing here
+# disturbs what the rest of the machine builds against.
+#
+# **HL/C rather than bytecode, and that is the point of this app.** Haxe writes C, the C compiles to
+# a native executable, and there is no VM process and no `.hl` file beside it. It is what a game with
+# mod support on desktop or Android is most likely to be built as, and it is the harder half to get
+# right: on the VM the loader can be dropped in beside the program as a .hdll, and here there is
+# nothing to drop anything into. The loader, the jit and hxScript's runtime are compiled into the
+# executable, which is the only way they can be in the process at all.
+#
+# There is no lime under this one, so there is no Project.xml either: the build is a hxml and what
+# comes out is C.
+
+-lib heaps
+-lib hlsdl
+-lib hxscript
+
+-cp .
+
+# Names this app's own classes to hxScript, so `@:scriptable` on them means something and a script
+# can extend `host.Project`.
+-D hxscript_host=host
+
+# Compiles scripts to HashLink bytecode at runtime rather than only interpreting them. Without it
+# every script is interpreted and nothing else changes.
+-D hxscript_hl
+
+# The HashLink this is built for. It decides what the generated C expects of libhl, and the loader
+# compiled in beside it shares structure layouts with that same libhl, so the two being told
+# different things is the one mismatch that builds cleanly and then reads the wrong memory.
+-D hl-ver=1.16.0
+
+# Keeps the standard-library members a script reaches by reflection. `-lib hxscript` applies this
+# too; it is repeated here because it is the one flag whose absence looks like a bug in a script.
+-dce no
+
+# Haxe hands the native build off to the `hashlink` haxelib once the C is written, and this app
+# drives that step itself, because the step has to compile hxScript's module in. Without this the
+# build ends in `Library hashlink is not installed` and `Build failed` after having written correct
+# and complete C, which is a confusing way to succeed.
+-D no-compilation
+
+-main Main
+-hl export/hlc/main.c
