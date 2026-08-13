@@ -79,6 +79,16 @@ class Frontier {
 	static function refusals(probe:Probe):Void {
 		probe('inline type declaration', 'var v:{a:Int} = {a: 7}; return Std.string(v.a);');
 		probe('local property accessor', 'var x(get, never):Int; function get_x() return 7; return Std.string(x);');
+		probe('local property setter',
+			'var x(default, set):Int = 1; var seen = 0; function set_x(n:Int) { seen = n * 2; return x = n; } x = 5; return Std.string(seen);');
+		probe('local property both accessors',
+			'var held = 3; var x(get, set):Int; function get_x() return held; function set_x(n:Int) return held = n; x = 8; return Std.string(x);');
+		probe('local property compound assignment',
+			'var held = 3; var x(get, set):Int; function get_x() return held; function set_x(n:Int) return held = n; x += 4; return Std.string(x);');
+		probe('local property read is never', 'var x(never, default):Int; return Std.string(x);');
+		probe('local property write is never', 'var x(default, never):Int; x = 3; return Std.string(x);');
+		probe('local property accessor reads its own slot',
+			'var x(get, never):Int = 5; function get_x() return x + 1; return Std.string(x);');
 		probe('mixed array and map literal', 'var m = [1 => 2, 3]; return Std.string(m);');
 		probe('a property declared dynamic', 'return Std.string(v);', 'public static var v(dynamic, never):Int; static function get_v() return 7;');
 		probe('a property declared null', 'return Std.string(new T().v);', 'public var v(null, null):Int = 7; public function new() {}');
