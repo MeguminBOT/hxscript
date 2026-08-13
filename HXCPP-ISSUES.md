@@ -265,3 +265,54 @@ This is the same shape `TryExpr::runVoid` already uses on the interpreted path, 
 unwind with `if (ctx->exception) handleException(ctx, ctx->exception);`.
 
 ---
+
+## 8. A `Bool` handed to a host call through an erased type parameter arrives as an `Int`
+
+**`src/hx/cppia/Cppia.cpp`, the object branch of a host call's argument marshalling, around line 1779.**
+
+Anything a script puts in a `Map` comes back an `Int`:
+
+```haxe
+var flag:Bool = true;
+var m:Map<String, Bool> = new Map();
+m.set('k', flag);
+Type.typeof(m.get('k'));   // TInt, where every other target says TBool
+```
+
+`Std.string` of it prints `1`, and `false` prints `0`. A condition still reads correctly, because `1`
+is truthy, which is what keeps this quiet.
+
+It is not about constants and not about the JIT. A variable does it, `false` does it, a plain
+`haxe.ds.StringMap<Bool>` does it, an `Int` keyed map does it, and interpreted cppia does it as
+readily as jitted cppia.
+
+### Why
+
+A host call marshals its arguments from the callee's signature. `sigBool` and `sigInt` share a branch
+and push an int, which is right when the callee really does take a `bool`. But a type parameter is
+erased in the scriptable interface, so `StringMap<Bool>::set` is described as taking an object, and
+the argument goes through `pushObject(arg->runObject(ctx))` instead. A bool valued expression reports
+`etInt`, because that is how cppia carries a boolean, so `runObject` boxes an `Int` and the map stores
+an `Int`.
+
+`isBoolInt()` is exactly the question that distinguishes the two, and nothing on this path asks it.
+
+### The shape of a fix
+
+An expression that answers `isBoolInt()` should box a real `Bool` when it is asked for an object, on
+both the interpreted and the compiled path. `MemReference` already overrides `isBoolInt`, so it knows
+what it is holding; what it does not do is act on that in `runObject`.
+
+### Two more that are almost certainly the same fault
+
+Both wrong only with the JIT on, both fine interpreted, and neither fixed by issues 1, 2, 3 or 7:
+
+| construct | interpreted | jitted |
+| --- | --- | --- |
+| `Array<Dynamic>.push(true)` | `TBool` | `TInt` |
+| a `Dynamic` instance field assigned `true` | `TBool` | `TInt` |
+| a mixed `Array<Dynamic>` literal inside an anonymous object | `TBool` | `TInt` |
+
+Measured against the same code compiled natively, which answers `TBool` everywhere.
+
+---
