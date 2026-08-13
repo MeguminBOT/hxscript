@@ -47,29 +47,78 @@ class BoolProbe {
 	 * @param body The static body to run.
 	 */
 	static function one(label:String, members:String, body:String, statics:String = ''):Void {
-		var source:String = 'package p' + count + ';\nclass T {\n' + members + '\n' + statics + '\npublic function new() {}\n'
+		var source:String = 'package PACK;\nclass T {\n' + members + '\n' + statics + '\npublic function new() {}\n'
 			+ 'public static function run():Dynamic { ' + body + ' }\n}\n';
-		var path:String = 'p' + count + '.T';
+		/**
+		 * A package per path as well as per case. cppia registers class names process wide, so
+		 * compiling the same path twice in one run has the second load meet the first one's classes,
+		 * and the two paths would be compared against each other's leftovers rather than against the
+		 * same question.
+		 */
+		var one:String = 'd' + count;
+		var two:String = 'w' + count;
 		count++;
 
 		try {
-			var decls = new hxscript.syntax.Parser().parseModule(source, 'test', 0, [path.split('.')[0]]);
-			var result:Result = Backend.compile([{name: path, decls: decls}]);
-
-			if (result.bytes == null) {
-				Sys.println(pad(label) + 'refused: ' + result.skipped[0].reason);
-				return;
-			}
-
-			var module = cpp.cppia.Module.fromData(result.bytes.getData());
-			module.boot();
-			var cls:Class<Dynamic> = module.resolveClass(path);
-			var got:Dynamic = Reflect.callMethod(cls, Reflect.field(cls, 'run'), []);
-
-			Sys.println(pad(label) + 'value=' + Std.string(got) + '   typeof=' + Std.string(Type.typeof(got)));
+			Sys.println(pad(label) + 'direct=' + direct(StringTools.replace(source, 'PACK', one), one + '.T') + '   world='
+				+ world(StringTools.replace(source, 'PACK', two), two + '.T'));
 		} catch (e:Dynamic) {
 			Sys.println(pad(label) + 'threw ' + e);
 		}
+	}
+
+	/**
+	 * Compiles and loads the module on its own, which is the shorter of the two paths.
+	 *
+	 * @param source The module source.
+	 * @param path The class path.
+	 * @return What `run` answered, with its runtime type.
+	 */
+	static function direct(source:String, path:String):String {
+		var decls = new hxscript.syntax.Parser().parseModule(source, 'test', 0, [path.split('.')[0]]);
+		var result:Result = Backend.compile([{name: path, decls: decls}]);
+
+		if (result.bytes == null)
+			return 'refused';
+
+		var module = cpp.cppia.Module.fromData(result.bytes.getData());
+		module.boot();
+		var cls:Class<Dynamic> = module.resolveClass(path);
+		return described(Reflect.callMethod(cls, Reflect.field(cls, 'run'), []));
+	}
+
+	/**
+	 * Compiles it as a world and calls the substituted class, which is what a host does and what the
+	 * conformance harness does.
+	 *
+	 * @param source The module source.
+	 * @param path The class path.
+	 * @return What `run` answered, with its runtime type.
+	 */
+	static function world(source:String, path:String):String {
+		var env:hxscript.Environment = new hxscript.Environment();
+		var module:hxscript.Module = new hxscript.Module('', 'T', [path.split('.')[0]], 'boolprobe');
+		module.parse(source);
+		env.addModule(module);
+		module.init(env);
+		module.start(env);
+		module.startTypes(env);
+
+		hxscript.compile.Compiler.compile(env, [module]);
+
+		var native:Null<Class<Dynamic>> = env.compiled.get(path);
+		if (native == null)
+			return 'not substituted';
+
+		return described(Reflect.callMethod(null, Reflect.field(native, 'run'), []));
+	}
+
+	/**
+	 * @param got A value a case produced.
+	 * @return It, and what it turned out to be.
+	 */
+	static function described(got:Dynamic):String {
+		return Std.string(got) + ' (' + Std.string(Type.typeof(got)) + ')';
 	}
 
 	static var count:Int = 0;
