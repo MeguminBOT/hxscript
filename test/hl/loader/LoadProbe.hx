@@ -66,9 +66,25 @@ class LoadProbe {
 		return typed(50);
 	}
 
+	static function mixed(a:Int, b:Float, c:String, d:Bool):String {
+		return a + '/' + b + '/' + c + '/' + d;
+	}
+
+	/**
+	 * @return A dynamic call over a signature the two implementations do not pass alike.
+	 *
+	 * One argument each of the four kinds, because that is where an integer register, a floating
+	 * point register and a pointer are assigned differently. A call taking one Int says nothing about
+	 * whether the right machinery is being used.
+	 */
+	static function hostMixedCall():String {
+		var fn:Dynamic = mixed;
+		return Reflect.callMethod(null, fn, [7, 1.5, 'x', true]);
+	}
+
 	/** Everything the host does that a load could have taken out from under it. */
 	static function state():String {
-		return hostTrace() + '/' + hostCatches() + '/' + hostDynamicCall() + '/' + hostWrappedCall();
+		return hostTrace() + '/' + hostCatches() + '/' + hostDynamicCall() + '/' + hostWrappedCall() + '/' + hostMixedCall();
 	}
 
 	public static function main():Void {
@@ -79,8 +95,18 @@ class LoadProbe {
 			Sys.exit(1);
 		}
 
+		/*
+			The frame count is not asserted against a number. A release HL/C binary answers zero
+			frames before anything of ours has run, because it resolves them through dbghelp and has
+			nothing to resolve them from, while the VM answers five. What has to hold either way is
+			that loading does not change the answer, which is what `before` is for.
+		*/
 		var before:String = state();
-		check('the host can trace, throw, call dynamically and call through a wrapper', before == '5/true/42/100', before);
+		check('the host can throw, call dynamically and call through a wrapper', hostCatches()
+			&& hostDynamicCall() == 42
+			&& hostWrappedCall() == 100
+			&& hostMixedCall() == '7/1.5/x/true', before);
+		Sys.println('       this host answers ' + hostTrace() + ' frames for an exception of its own');
 
 		var raw:haxe.io.Bytes = sys.io.File.getBytes(path);
 		var module:Null<Loaded> = Loader.load(raw);
