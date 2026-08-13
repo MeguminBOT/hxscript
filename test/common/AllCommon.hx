@@ -21,6 +21,7 @@ class AllCommon {
 		{name: 'DiagnosticTest', run: DiagnosticTest.run},
 		{name: 'FieldBindTest', run: FieldBindTest.run},
 		{name: 'GapProbe', run: GapProbe.run},
+		{name: 'ImportTest', run: ImportTest.run},
 		{name: 'StdProbe', run: StdProbe.run},
 		{name: 'InterpStringTest', run: InterpStringTest.run},
 		{name: 'LoopTest', run: LoopTest.run},

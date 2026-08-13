@@ -1627,7 +1627,8 @@ class Interp {
 
 				entries = [];
 				for (type in types) {
-					if (type.module != type.name && type.name != 'Main')
+					var main:String = type.module.substr(type.module.lastIndexOf('.') + 1);
+					if (main != type.name && type.name != 'Main')
 						continue;
 					if (type.name.indexOf('_Impl_') > -1 || type.name.startsWith('AbstractValue_'))
 						continue;
