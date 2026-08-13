@@ -23,6 +23,13 @@ class Config {
 	public static var strictAccess:Bool = false;
 
 	/**
+	 * Whether cppia declares a `Bool` field with its real type, which needs the hxcpp fix in
+	 * `HXCPP-ISSUES.md`. `-D hxscript_cppia_bool_compat` turns it off for a stock hxcpp, where a
+	 * boolean is then right interpreted and wrong jitted.
+	 */
+	public static var nativeBoolSlots:Bool = #if hxscript_cppia_bool_compat false #else true #end;
+
+	/**
 	 * Runtime type enforcement. When on, declared types on variables, function parameters, function returns,
 	 * and `cast(x, T)` are checked against the value: assignable ones pass (with `Int`->`Float` widening),
 	 * and an incompatible value throws, the way typed Haxe would reject it. When off, type annotations are

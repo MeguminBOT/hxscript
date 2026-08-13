@@ -26,6 +26,7 @@ import hxscript.compile.Unsupported;
 
 #if hxscript_cppia
 import hxscript.compile.Capture;
+import hxscript.Config;
 import haxe.ds.StringMap;
 import haxe.io.Bytes;
 import hxscript.syntax.Expr;
@@ -839,7 +840,7 @@ class Emitter {
 				w.token(accessCode(v.set, false, pos));
 				w.bool(!physicalField(f, v));
 				w.str(f.name);
-				w.type(v.type == null || Backend.isBool(v.type) ? '' : typeName(v.type));
+				w.type(fieldType(v));
 
 				if (v.expr == null || !isStatic) {
 					w.int(0);
@@ -1083,6 +1084,24 @@ class Emitter {
 				emitBinop(op, e1, e2, e.pos);
 
 			case EUnop(op, prefix, inner):
+				if ((op == '++' || op == '--') && repeatableField(inner)) {
+					var step:String = op == '++' ? '+' : '-';
+					var back:String = op == '++' ? '-' : '+';
+					var one:Expr = {e: EConst(CInt(1)), pos: e.pos};
+
+					var changed:Expr = {
+						e: EBinop('=', inner, {e: EBinop(step, inner, one), pos: e.pos}),
+						pos: e.pos
+					};
+
+					if (prefix)
+						expr(changed);
+					else
+						expr({e: EBinop(back, {e: EParent(changed), pos: e.pos}, one), pos: e.pos});
+
+					return;
+				}
+
 				w.pos(line);
 				switch (op) {
 					case '-':
@@ -1092,24 +1111,6 @@ class Emitter {
 					case '~':
 						w.token('~');
 					case '++' | '--':
-						if (repeatableField(inner)) {
-							var step:String = op == '++' ? '+' : '-';
-							var back:String = op == '++' ? '-' : '+';
-							var one:Expr = {e: EConst(CInt(1)), pos: e.pos};
-
-							var changed:Expr = {
-								e: EBinop('=', inner, {e: EBinop(step, inner, one), pos: e.pos}),
-								pos: e.pos
-							};
-
-							if (prefix) {
-								expr(changed);
-							} else {
-								expr({e: EBinop(back, {e: EParent(changed), pos: e.pos}, one), pos: e.pos});
-							}
-							return;
-						}
-
 						w.token(op == '++' ? (prefix ? '++' : '+++') : (prefix ? '--' : '---'));
 					default:
 						throw new Unsupported('unary operator ' + op, e.pos);
@@ -2770,8 +2771,6 @@ class Emitter {
 	}
 
 	/**
-	 * Writes a value being assigned, marking it as a boolean when that is what it is.
-	 *
 	 * @param e The value.
 	 * @param line Where the assignment is.
 	 */
@@ -2925,28 +2924,32 @@ class Emitter {
 
 	/** Whether an accessor keyword leaves a field as ordinary storage. */
 	/**
-	 * Whether a declared field really has storage, by Haxe's own rule.
+	 * The type to declare a field with, inferred from a literal initialiser when none was written.
 	 *
-	 * `is_physical_var_field` in the compiler: a var is physical when its read is `default`, `null`
-	 * or `inline`, or its write is `default` or `null`, and otherwise only when `@:isVar` says so. A
-	 * property with accessors on both sides has no field behind it, and reading one that is not there
-	 * has to answer nothing rather than answer a slot.
+	 * @param v The variable declaration.
+	 * @return The type name, or empty for a slot that should hold anything.
+	 */
+	function fieldType(v:VarDecl):String {
+		if (v.type == null)
+			return Config.nativeBoolSlots ? literalType(v.expr) : '';
+
+		if (Backend.isBool(v.type) && !Config.nativeBoolSlots)
+			return '';
+
+		return typeName(v.type);
+	}
+
+	/**
+	 * Whether a declared field really has storage, following Haxe's `is_physical_var_field`.
 	 *
 	 * @param f The field.
 	 * @param v Its variable declaration.
 	 * @return Whether cppia should give it a slot.
 	 */
 	/**
-	 * Whether a member may be reached as a slot rather than by name.
-	 *
-	 * A property with a slot behind it is still a property: reading it has to run its getter, which
-	 * a by-name access does and a slot access does not. The exception is the accessor itself, where
-	 * the name means the field, and where going by name would call the accessor from inside itself
-	 * and never return.
-	 *
 	 * @param owner The class holding it.
 	 * @param name The member name.
-	 * @return Whether to emit a direct slot access.
+	 * @return Whether to emit a direct slot access rather than a by-name one.
 	 */
 	function directField(owner:String, name:String):Bool {
 		var key:String = owner + ' ' + name;
@@ -2960,11 +2963,8 @@ class Emitter {
 	}
 
 	/**
-	 * Rewrites a write to a property into the call it really is.
-	 *
-	 * The read side needs nothing: a by-name access runs the accessor, which is what the access code
-	 * declares. The write side does, because a by-name reference is not something the loader can
-	 * assign to, and it says so by refusing the whole module with `Bad Set expr`.
+	 * Rewrites a write to a property into the call it really is, because a by-name reference is not
+	 * something the loader will assign to.
 	 *
 	 * @param target What is being assigned to.
 	 * @param value What is being assigned.
@@ -3036,11 +3036,8 @@ class Emitter {
 	}
 
 	/**
-	 * Refuses a property with no field behind it being named inside its own accessor.
-	 *
-	 * Haxe rejects this outright, telling the author to add `@:isVar`. Compiled it would be a read by
-	 * name, which runs the accessor, from inside the accessor, and never returns. A refusal costs the
-	 * module its speedup; a hang costs the process.
+	 * Refuses a property with no field behind it being named inside its own accessor, which Haxe
+	 * rejects outright and which compiled would call the accessor from inside itself forever.
 	 *
 	 * @param owner The class holding it.
 	 * @param name The member being named.
@@ -3702,14 +3699,20 @@ class Emitter {
 		}
 	}
 
-	/** Whether a field target can be evaluated twice, which the long-hand rewrite needs. */
+	/** Whether an increment target can be evaluated twice, which the long-hand rewrite needs. */
 	function repeatableField(e:Expr):Bool {
 		switch (e.e) {
 			case EField(obj, _, maybe):
-				if (maybe == true || obj.e.match(EIdent('this'))) {
+				if (maybe == true)
 					return false;
-				}
-				return sideEffectFree(obj);
+
+				return obj.e.match(EIdent('this')) || sideEffectFree(obj);
+
+			case EIdent(name):
+				if (lookupVar(name) != null)
+					return false;
+
+				return members.exists(name) || statics.exists(name);
 
 			case _:
 				return false;

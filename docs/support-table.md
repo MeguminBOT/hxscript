@@ -12,12 +12,7 @@ None. Every case with a written answer produced it in every column that ran it.
 
 **cppia** against `cpp-interp`: 263 agree, **0 differ**, 8 refused, 0 fell back to the interpreter, 0 killed the process.
 
-**cppia-jit** against `cpp-interp`: 260 agree, **2 differ**, 8 refused, 0 fell back to the interpreter, 1 killed the process.
-
-| case | mode | interpreted | compiled |
-| --- | --- | --- | --- |
-| bool through Reflect on an instance | cppia-jit | true | 1 |
-| bool with no annotation | cppia-jit | true | 1 |
+**cppia-jit** against `cpp-interp`: 263 agree, **0 differ**, 8 refused, 0 fell back to the interpreter, 0 killed the process.
 
 ## Where the interpreter itself reads differently per target
 
@@ -239,9 +234,9 @@ None. Every case with a written answer produced it in every column that ran it.
 | 204 | modulo of negatives | -1 | -1 | -1 | -1 |
 | 205 | shift past the width | 2 | 2 | 2 | 2 |
 | 206 | bool through Reflect on a structure | true | true | true | true |
-| 207 | bool through Reflect on an instance | true | true | true | 1 |
+| 207 | bool through Reflect on an instance | true | true | true | true |
 | 208 | bool field read directly | true | true | true | true |
-| 209 | bool with no annotation | true | true | true | 1 |
+| 209 | bool with no annotation | true | true | true | true |
 | 210 | Type.getClassName of a scripted class | c210.T | c210.T | c210.T | c210.T |
 | 211 | Reflect.fields of a structure | a,b | a,b | a,b | a,b |
 | 212 | Reflect.hasField | true/false | true/false | true/false | true/false |
@@ -280,7 +275,7 @@ None. Every case with a written answer produced it in every column that ran it.
 | 245 | string split and join | a-b-c | a-b-c | a-b-c | a-b-c |
 | 246 | substring and indexOf | ell/2 | ell/2 | ell/2 | ell/2 |
 | 247 | an iterator by hand | 6 | 6 | 6 | 6 |
-| 248 | a custom iterator | 3 | 3 | 3 | **killed** |
+| 248 | a custom iterator | 3 | 3 | 3 | 3 |
 | 249 | haxe.ds.StringMap directly | 5 | 5 | 5 | 5 |
 | 250 | Std.parseInt and parseFloat | 42/1.5 | 42/1.5 | 42/1.5 | 42/1.5 |
 | 251 | a type parameter on a class | 7 | 7 | 7 | 7 |
