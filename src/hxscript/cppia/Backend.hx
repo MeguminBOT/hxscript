@@ -41,6 +41,9 @@ class Backend {
 	/** Names the helper compiled bodies call, so it is in the build. A name in bytecode is not a reference. */
 	@:keep static var indexing:Class<Dynamic> = hxscript.runtime.Indexing;
 
+	/** Names the static-extension helper for the same reason. */
+	@:keep static var extensions:Class<Dynamic> = hxscript.runtime.Using;
+
 	/** Whether this build can compile at all. */
 	public static var available(get, never):Bool;
 

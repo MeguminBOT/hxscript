@@ -10,9 +10,9 @@ None. Every case with a written answer produced it in every column that ran it.
 
 ## Compiled against interpreted, per target
 
-**cppia** against `cpp-interp`: 267 agree, **0 differ**, 4 refused, 0 fell back to the interpreter, 0 killed the process.
+**cppia** against `cpp-interp`: 268 agree, **0 differ**, 3 refused, 0 fell back to the interpreter, 0 killed the process.
 
-**cppia-jit** against `cpp-interp`: 267 agree, **0 differ**, 4 refused, 0 fell back to the interpreter, 0 killed the process.
+**cppia-jit** against `cpp-interp`: 268 agree, **0 differ**, 3 refused, 0 fell back to the interpreter, 0 killed the process.
 
 ## Where the interpreter itself reads differently per target
 
@@ -256,7 +256,7 @@ None. Every case with a written answer produced it in every column that ran it.
 | 226 | super as a value, not a call | base | base | base | base |
 | 227 | extends a host class | 15 | 15 | 15 | 15 |
 | 228 | rest arguments | 6 | 6 | 6 | 6 |
-| 229 | a static extension on an unknown receiver | abab | abab | refused: twice through a static extension on a receiver whose type is not kn... | refused: twice through a static extension on a receiver whose type is not kn... |
+| 229 | a static extension on an unknown receiver | abab | abab | abab | abab |
 | 230 | a typed catch on a scripted class | caught | caught | caught | caught |
 | 231 | a host static read | true | true | true | true |
 | 232 | a host static that changes | true | true | true | true |

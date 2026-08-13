@@ -152,6 +152,9 @@ class Emitter {
 	/** Statics a `using` in this module puts in scope, by member name, to the type declaring them. */
 	var usingStatics:StringMap<String> = new StringMap();
 
+	/** Every `using` type declaring a given member name, in declaration order. */
+	var usingOwners:StringMap<Array<String>> = new StringMap();
+
 	/** Every member of the current class's host base, or null when reflection could not list them. */
 	var inherited:StringMap<Bool> = null;
 
@@ -1687,8 +1690,23 @@ class Emitter {
 					return;
 				}
 
-				if (usingStatics.exists(name))
-					throw new Unsupported('$name through a static extension on a receiver whose type is not known here', pos);
+				if (usingStatics.exists(name)) {
+					var declaring:Array<String> = usingOwners.get(name);
+					var named:Array<Expr> = [for (path in declaring) {e: EConst(CString(path, false)), pos: pos}];
+
+					w.pos(line);
+					w.token('CALL');
+					w.int(4);
+					w.pos(line);
+					w.token('FSTATIC');
+					w.type('hxscript.runtime.Using');
+					w.str('call');
+					expr(obj);
+					expr({e: EArrayDecl(named), pos: pos});
+					expr({e: EConst(CString(name, false)), pos: pos});
+					expr({e: EArrayDecl(params), pos: pos});
+					return;
+				}
 
 				var receiver:Null<String> = instanceClassOf(obj);
 				var wantedMember:Int = padArgs(receiver, name, params.length);
@@ -3613,6 +3631,15 @@ class Emitter {
 		for (field in Type.getClassFields(owner)) {
 			if (!usingStatics.exists(field))
 				usingStatics.set(field, full);
+
+			var declaring:Array<String> = usingOwners.get(field);
+			if (declaring == null) {
+				declaring = [];
+				usingOwners.set(field, declaring);
+			}
+
+			if (declaring.indexOf(full) < 0)
+				declaring.push(full);
 		}
 	}
 
