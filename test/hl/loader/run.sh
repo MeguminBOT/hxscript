@@ -29,6 +29,7 @@ fi
 
 haxe -cp test/hl/loader -main Guest -hl "$OUT/guest.hl"
 haxe -cp src -cp test/hl/loader -D hxscript_hl -main LoadProbe -hl "$OUT/probe.hl"
+haxe -cp src -cp test/hl/loader -D hxscript_hl -main WriterProbe -hl "$OUT/writer.hl"
 
 cd "$OUT"
 
@@ -44,3 +45,4 @@ else
 fi
 
 "$VM" probe.hl guest.hl
+"$VM" writer.hl
