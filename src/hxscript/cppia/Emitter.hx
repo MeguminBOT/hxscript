@@ -1935,8 +1935,10 @@ class Emitter {
 
 		switch (obj.e) {
 			case EIdent('super'):
-				if (methodArity.exists(currentSuper + ' ' + name))
-					throw new Unsupported('super.' + name + ' as a value rather than a call', pos);
+				if (methodArity.exists(currentSuper + ' ' + name)) {
+					expr(superClosure(name, methodArity.get(currentSuper + ' ' + name), pos));
+					return;
+				}
 
 				emitField2({e: EIdent('this'), pos: pos}, name, pos);
 				return;
@@ -3782,6 +3784,26 @@ class Emitter {
 			case _:
 				return null;
 		}
+	}
+
+	/**
+	 * A closure that calls the base's method, which is what `super.m` means as a value.
+	 *
+	 * @param name The method.
+	 * @param arity How many arguments it takes.
+	 * @param pos Where it is named.
+	 * @return A function expression wrapping the super call.
+	 */
+	function superClosure(name:String, arity:Int, pos:Position):Expr {
+		var args:Array<Argument> = [for (i in 0...arity) {name: '__super' + i}];
+		var passed:Array<Expr> = [for (a in args) {e: EIdent(a.name), pos: pos}];
+
+		var call:Expr = {
+			e: ECall({e: EField({e: EIdent('super'), pos: pos}, name, false), pos: pos}, passed),
+			pos: pos
+		};
+
+		return {e: EFunction(args, {e: EReturn(call), pos: pos}, null, null), pos: pos};
 	}
 
 	/**

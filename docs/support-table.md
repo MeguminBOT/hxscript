@@ -10,9 +10,9 @@ None. Every case with a written answer produced it in every column that ran it.
 
 ## Compiled against interpreted, per target
 
-**cppia** against `cpp-interp`: 266 agree, **0 differ**, 5 refused, 0 fell back to the interpreter, 0 killed the process.
+**cppia** against `cpp-interp`: 267 agree, **0 differ**, 4 refused, 0 fell back to the interpreter, 0 killed the process.
 
-**cppia-jit** against `cpp-interp`: 266 agree, **0 differ**, 5 refused, 0 fell back to the interpreter, 0 killed the process.
+**cppia-jit** against `cpp-interp`: 267 agree, **0 differ**, 4 refused, 0 fell back to the interpreter, 0 killed the process.
 
 ## Where the interpreter itself reads differently per target
 
@@ -253,7 +253,7 @@ None. Every case with a written answer produced it in every column that ran it.
 | 223 | a default null property through Reflect.field | 7 | 7 | 7 | 7 |
 | 224 | an isVar property through Reflect.field | 7 | 7 | 7 | 7 |
 | 225 | a property read inside its own class | 14 | 14 | 14 | 14 |
-| 226 | super as a value, not a call | base | base | refused: super.speak as a value rather than a call | refused: super.speak as a value rather than a call |
+| 226 | super as a value, not a call | base | base | base | base |
 | 227 | extends a host class | 15 | 15 | 15 | 15 |
 | 228 | rest arguments | 6 | 6 | 6 | 6 |
 | 229 | a static extension on an unknown receiver | abab | abab | refused: twice through a static extension on a receiver whose type is not kn... | refused: twice through a static extension on a receiver whose type is not kn... |
