@@ -751,7 +751,21 @@ int hl_module_init( hl_module *m, h_bool hot_reload ) {
 	hl_module_add(m);
 	hl_setup.resolve_symbol = module_resolve_symbol;
 	hl_setup.capture_stack = module_capture_stack;
+#ifndef HXS_NATIVE_TABLE
 	hl_gc_set_dump_types(hl_module_types_dump);
+#else
+	/*
+		The second and last change made to hashlink's own source. Everything else this function takes
+		is in hl_setup, which the caller copies beforehand and puts back afterwards; this one is a
+		setter with no getter, so taking it cannot be undone. A host's memory dump would name the
+		types of modules loaded at runtime instead of its own, from the first script it ran onwards.
+
+		Not calling it leaves dumps exactly as they were. What it costs is the type names of script
+		modules in a dump, which is the side worth losing. gc.c checks the callback for NULL before
+		using it, so a host that never set one is unaffected either way.
+	*/
+	(void)hl_module_types_dump;
+#endif
 #	ifdef HL_VTUNE
 	hl_setup.vtune_init = modules_init_vtune;
 #	endif

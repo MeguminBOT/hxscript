@@ -40,22 +40,30 @@ is checked at build time and probed again at run time.
 A different HashLink can be built against instead by pointing `HL_SRC` at its source tree, which
 takes its `code.c`, `module.c` and `jit.c` over the ones here.
 
-## The one patch
+## The two patches
 
-`module.c` carries a single change, marked `HXS_NATIVE_TABLE` where it sits, in
-`hl_module_init_natives`. Hashlink resolves a module's natives by loading `<lib>.hdll` and looking up
-`hlp_<name>` in it. A script compiled at runtime needs to reach hxScript's own runtime, which is
+Both are in `module.c`, both marked `HXS_NATIVE_TABLE` where they sit.
+
+**`hl_module_init_natives`.** Hashlink resolves a module's natives by loading `<lib>.hdll` and looking
+up `hlp_<name>` in it. A script compiled at runtime needs to reach hxScript's own runtime, which is
 already in this process and is in no `.hdll` at all, and in an HL/C build there is no `.hdll` anywhere
 to look in. The patch gives that lookup a table to try first and leaves every other native to
 hashlink's own path.
 
+**`hl_gc_set_dump_types`, at the end of `hl_module_init`.** Everything else that function takes is a
+field of `hl_setup`, which `hxs.c` copies before the load and puts back afterwards. This one is a
+setter with no getter, so taking it cannot be undone, and a host's memory dump would name the types
+of modules loaded at run time instead of its own from the first script onwards. The call is left out
+instead. `gc.c` checks the callback for NULL before using it, so a host that never set one is
+unaffected either way.
+
 Nothing else is modified. The symbols are renamed at compile time by `hxs_vendor.h` rather than in
-the files, so `diff` against a fresh checkout of the 1.16 tag shows that hunk and nothing else.
+the files, so `diff` against a fresh checkout of the 1.16 tag shows those two hunks and nothing else.
 
 ## Updating
 
 1. Copy the four files out of the new tag into a new `hlNNN/` directory.
-2. Re-apply the `HXS_NATIVE_TABLE` hunk.
+2. Re-apply both `HXS_NATIVE_TABLE` hunks.
 3. Check `nm -g --defined-only` on the three objects against the list in `hxs_vendor.h`, and add
    whatever the new version defines.
 4. Leave the old directory alone until the build's floor moves off it.

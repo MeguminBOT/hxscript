@@ -196,6 +196,27 @@ class Loader {
 		setGlobal(module, index, value);
 	}
 
+	/** The bit `hooks` sets when a load took a field of `hl_setup` this build has never heard of. */
+	public static inline var HOOK_UNKNOWN:Int = 128;
+
+	/**
+	 * @return Which fields of libhl's `hl_setup` loading has taken from the host, as bits.
+	 *
+	 * Loading writes to the table the whole process uses to resolve symbols, walk stacks, make
+	 * dynamic calls and unwind out of a throw, because in hl.exe that happens once at startup for the
+	 * program's own module. Every field is given back or replaced by something that defers to the
+	 * host's, so this is not a fault report: it is how a build notices that the hashlink it is
+	 * running against takes a hook this one was not written for, while that hook still works because
+	 * it was restored. `HOOK_UNKNOWN` is the bit that says so.
+	 */
+	public static function hooks():Int {
+		try {
+			return hl.Api.isPrimLoaded(hookBits) ? hookBits() : 0;
+		} catch (e:Dynamic) {
+			return 0;
+		}
+	}
+
 	/** @return Why the last `load` failed, or null when it did not. */
 	public static function error():Null<String> {
 		var raw:hl.Bytes = lastError();
@@ -230,6 +251,10 @@ class Loader {
 
 	@:hlNative("?hxscript", "built_for") static function builtVersion():Int {
 		return -1;
+	}
+
+	@:hlNative("?hxscript", "hooks") static function hookBits():Int {
+		return 0;
 	}
 }
 #end

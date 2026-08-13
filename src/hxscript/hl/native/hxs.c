@@ -149,26 +149,74 @@ static void hxs_hold( hxs_module *h ) {
 }
 
 /*
-	Giving the host back the two hooks hl_module_init takes.
+	Giving the host back everything loading a module takes from it.
 
-	hl_module_init ends by pointing hl_setup.resolve_symbol and hl_setup.capture_stack at its own
-	module.c statics, which is correct for hl.exe, where that copy of module.c is the only one there
-	is. Here it is not: the host has its own walker, either hl.exe's copy over the host's own modules
-	or, in an HL/C binary, hlc_capture_stack over real native frames. Letting ours win would silently
-	empty the host's exception stack traces, which is the kind of breakage a host would find months
-	later and never attribute to having enabled scripting.
+	Loading writes to hl_setup, which is libhl's one table of how this process resolves symbols, walks
+	stacks, makes dynamic calls and unwinds out of a throw. module.c takes resolve_symbol and
+	capture_stack at the end of hl_module_init, and jit.c takes get_wrapper, static_call,
+	static_call_ref and throw_jump the first time it produces code. In hl.exe both of those happen at
+	startup for the program's own module and never again; here the same code runs against a host that
+	already had all of it set up, and every one of those fields is something the host's own code is
+	using.
 
-	The walker is handed straight back, because only the host's can see the host's frames. The
-	resolver is chained instead: ours knows the addresses inside jitted script code and answers NULL
-	for everything else, so asking it first and the host's second names both. On HL/C that gives a
-	trace with script frames in it, since there the host's walker captured every frame there was.
+	Naming the six and patching them would leave this one version behind whenever hashlink takes a
+	seventh, and the failure would be silent, which is the whole character of this class of bug. So
+	the whole struct is copied before the load and put back afterwards, and then only what we mean to
+	change is applied on top. A field nobody here has heard of goes back to what the host had, and
+	`hooks` reports it so a test fails rather than a user does.
 
-	hl_gc_set_dump_types is left as hl_module_init set it. There is no way to read the previous one
-	back, so it cannot be chained, and what it costs is bounded: a memory dump names the types of
-	modules loaded through here rather than the host's.
+	What is deliberately not put back:
+
+	`resolve_symbol` is chained. Ours knows the addresses inside jitted script code and answers NULL
+	for anything else, so asking ours and then the host's names frames from both.
+
+	`capture_stack` is handed straight back, because only the host's can see the host's frames. Ours
+	walks cur_modules in this copy, which holds script modules and nothing else.
+
+	`static_call` becomes a dispatcher. This is the one that matters most on HL/C, where the host's is
+	the generated hlc_static_call and is how every dynamic call in the program works. Ours looks at
+	the function being called, sends it to the jit's bridge when it is inside a module loaded here,
+	and to the host's otherwise. static_call_ref differs between the two, so this always advertises
+	the jit's convention and normalises before handing on.
+
+	`get_wrapper` asks the host's first and falls back to the jit's, so a signature the host already
+	had a wrapper for is wrapped exactly as it was before, and one it never generated can still be
+	built rather than failing.
+
+	`throw_jump` is where an exception lands after unwinding. The host's is put back when it had one,
+	since on the VM both copies are the same code from the same version. When the host had none, or
+	had the C library's longjmp, the jit's is kept: on 64-bit Windows a plain longjmp cannot return
+	into a frame that jitted code owns, which is why hashlink generates its own, and hl.exe installs
+	that one globally for C and jitted frames alike.
+
+	hl_gc_set_dump_types is not in hl_setup and cannot be read back, so the patched module.c does not
+	call it at all. A memory dump then names what it named before, and not the types of modules loaded
+	here.
 */
+static hl_setup_t hxs_setup_before;
+static int hxs_setup_taken = 0;
+
+/** Fields of hl_setup this expects a load to take, by bit. */
+#define HXS_HOOK_THROW_JUMP		1
+#define HXS_HOOK_RESOLVE		2
+#define HXS_HOOK_CAPTURE		4
+#define HXS_HOOK_STATIC_CALL	8
+#define HXS_HOOK_GET_WRAPPER	16
+#define HXS_HOOK_CALL_REF		32
+#define HXS_HOOK_VTUNE			64
+
+/** A field of hl_setup this has never heard of was taken, and was given back. */
+#define HXS_HOOK_OTHER			128
+
 static uchar *(*hxs_host_resolve)( void *, uchar *, int * ) = NULL;
 static uchar *(*hxs_module_resolve)( void *, uchar *, int * ) = NULL;
+
+static void *(*hxs_host_static_call)( void *, hl_type *, void **, vdynamic * ) = NULL;
+static void *(*hxs_jit_static_call)( void *, hl_type *, void **, vdynamic * ) = NULL;
+static bool hxs_host_static_call_ref = false;
+
+static void *(*hxs_host_get_wrapper)( hl_type * ) = NULL;
+static void *(*hxs_jit_get_wrapper)( hl_type * ) = NULL;
 
 static uchar *hxs_resolve_symbol( void *addr, uchar *out, int *outSize ) {
 	int size = *outSize;
@@ -178,6 +226,116 @@ static uchar *hxs_resolve_symbol( void *addr, uchar *out, int *outSize ) {
 		*outSize = size;
 	}
 	return hxs_host_resolve ? hxs_host_resolve(addr,out,outSize) : NULL;
+}
+
+/** Whether an address is machine code a module loaded here owns. */
+static bool hxs_owns_code( void *p ) {
+	hxs_held *b = hxs_held_blocks;
+	while( b ) {
+		int i;
+		for(i=0;i<b->used;i++) {
+			hxs_module *h = b->slots[i];
+			unsigned char *start;
+			if( h == NULL || h->m == NULL || h->m->jit_code == NULL ) continue;
+			start = (unsigned char*)h->m->jit_code;
+			if( (unsigned char*)p >= start && (unsigned char*)p < start + h->m->codesize )
+				return true;
+		}
+		b = b->next;
+	}
+	return false;
+}
+
+static void *hxs_static_call( void *f, hl_type *t, void **args, vdynamic *out ) {
+	void *target = *(void**)f;
+
+	if( hxs_jit_static_call && hxs_owns_code(target) )
+		return hxs_jit_static_call(f,t,args,out);
+
+	if( hxs_host_static_call )
+		return hxs_host_static_call(hxs_host_static_call_ref ? f : target,t,args,out);
+
+	return hxs_jit_static_call ? hxs_jit_static_call(f,t,args,out) : NULL;
+}
+
+static void *hxs_get_wrapper( hl_type *t ) {
+	if( hxs_host_get_wrapper ) {
+		void *w = hxs_host_get_wrapper(t);
+		if( w ) return w;
+	}
+	return hxs_jit_get_wrapper ? hxs_jit_get_wrapper(t) : NULL;
+}
+
+/** Copies hl_setup as the host had it, before anything of ours writes to it. */
+static void hxs_setup_snapshot( void ) {
+	hxs_setup_before = hl_setup;
+}
+
+/**
+	Puts the host's hl_setup back, then applies what this deliberately changes.
+
+	Restoring first rather than patching in place is the point: whatever a future hashlink starts
+	taking is given back without this file having heard of it, and shows up in `hooks` instead of in
+	somebody's crash.
+*/
+static void hxs_setup_reconcile( void ) {
+	hl_setup_t taken = hl_setup;
+	int changed = 0;
+
+	if( taken.throw_jump != hxs_setup_before.throw_jump ) changed |= HXS_HOOK_THROW_JUMP;
+	if( taken.resolve_symbol != hxs_setup_before.resolve_symbol ) changed |= HXS_HOOK_RESOLVE;
+	if( taken.capture_stack != hxs_setup_before.capture_stack ) changed |= HXS_HOOK_CAPTURE;
+	if( taken.static_call != hxs_setup_before.static_call ) changed |= HXS_HOOK_STATIC_CALL;
+	if( taken.get_wrapper != hxs_setup_before.get_wrapper ) changed |= HXS_HOOK_GET_WRAPPER;
+	if( taken.static_call_ref != hxs_setup_before.static_call_ref ) changed |= HXS_HOOK_CALL_REF;
+	if( taken.vtune_init != hxs_setup_before.vtune_init ) changed |= HXS_HOOK_VTUNE;
+
+	if( taken.file_path != hxs_setup_before.file_path
+		|| taken.sys_args != hxs_setup_before.sys_args
+		|| taken.sys_nargs != hxs_setup_before.sys_nargs
+		|| taken.reload_check != hxs_setup_before.reload_check
+		|| taken.profile_event != hxs_setup_before.profile_event
+		|| taken.before_exit != hxs_setup_before.before_exit
+		|| taken.load_plugin != hxs_setup_before.load_plugin
+		|| taken.resolve_type != hxs_setup_before.resolve_type
+		|| taken.closure_stack_capture != hxs_setup_before.closure_stack_capture
+		|| taken.is_debugger_enabled != hxs_setup_before.is_debugger_enabled
+		|| taken.is_debugger_attached != hxs_setup_before.is_debugger_attached )
+		changed |= HXS_HOOK_OTHER;
+
+	hl_setup = hxs_setup_before;
+
+	if( changed & HXS_HOOK_RESOLVE ) {
+		hxs_module_resolve = taken.resolve_symbol;
+		if( hxs_host_resolve == NULL && hxs_setup_before.resolve_symbol != hxs_resolve_symbol )
+			hxs_host_resolve = hxs_setup_before.resolve_symbol;
+		hl_setup.resolve_symbol = hxs_resolve_symbol;
+	}
+
+	if( changed & HXS_HOOK_STATIC_CALL ) {
+		hxs_jit_static_call = taken.static_call;
+		if( hxs_host_static_call == NULL && hxs_setup_before.static_call != hxs_static_call ) {
+			hxs_host_static_call = hxs_setup_before.static_call;
+			hxs_host_static_call_ref = hxs_setup_before.static_call_ref;
+		}
+		hl_setup.static_call = hxs_static_call;
+		hl_setup.static_call_ref = true;
+	}
+
+	if( changed & HXS_HOOK_GET_WRAPPER ) {
+		hxs_jit_get_wrapper = taken.get_wrapper;
+		if( hxs_host_get_wrapper == NULL && hxs_setup_before.get_wrapper != hxs_get_wrapper )
+			hxs_host_get_wrapper = hxs_setup_before.get_wrapper;
+		hl_setup.get_wrapper = hxs_get_wrapper;
+	}
+
+	if( changed & HXS_HOOK_THROW_JUMP ) {
+		void (*plain)( jmp_buf, int ) = (void (*)( jmp_buf, int ))longjmp;
+		if( hxs_setup_before.throw_jump == NULL || hxs_setup_before.throw_jump == plain )
+			hl_setup.throw_jump = taken.throw_jump;
+	}
+
+	hxs_setup_taken |= changed;
 }
 
 /*
@@ -270,8 +428,6 @@ HL_PRIM hxs_module *HL_NAME(load)( vbyte *data, int size ) {
 	hl_code *code;
 	hl_module *m;
 	hxs_module *h;
-	uchar *(*before_resolve)( void *, uchar *, int * );
-	int (*before_capture)( void **, int );
 
 	hxs_last_error = NULL;
 
@@ -286,29 +442,28 @@ HL_PRIM hxs_module *HL_NAME(load)( vbyte *data, int size ) {
 		return NULL;
 	}
 
-	before_resolve = hl_setup.resolve_symbol;
-	before_capture = hl_setup.capture_stack;
+	hxs_setup_snapshot();
 
 	if( !hl_module_init(m, false) ) {
-		hl_setup.resolve_symbol = before_resolve;
-		hl_setup.capture_stack = before_capture;
+		hl_setup = hxs_setup_before;
 		hl_module_free(m);
 		hl_code_free(code);
 		hxs_last_error = "could not link the module";
 		return NULL;
 	}
 
-	hxs_module_resolve = hl_setup.resolve_symbol;
-	if( hxs_host_resolve == NULL && before_resolve != hxs_resolve_symbol )
-		hxs_host_resolve = before_resolve;
-	hl_setup.resolve_symbol = hxs_resolve_symbol;
-	hl_setup.capture_stack = before_capture;
-
+	/*
+		Held before the hooks are reconciled, because the dispatcher decides what a function pointer
+		belongs to by looking through what is held, and the host may make a dynamic call at any point
+		after this returns.
+	*/
 	h = (hxs_module *)hl_gc_alloc_finalizer(sizeof(hxs_module));
 	h->finalize = (void (*)(void *))hxs_module_finalize;
 	h->m = m;
 	h->code = code;
 	hxs_hold(h);
+
+	hxs_setup_reconcile();
 	return h;
 }
 
@@ -369,6 +524,17 @@ HL_PRIM vbyte *HL_NAME(last_error)( void ) {
 	return (vbyte *)hxs_last_error;
 }
 
+/**
+	@return Which fields of hl_setup loading has taken from the host so far, as bits.
+
+	Every one of them has been given back or replaced by something that defers to the host's, so this
+	is not a fault report. It is how a test notices that a hashlink this was not written against
+	takes a hook nobody here has heard of, while that hook is still working because it was restored.
+*/
+HL_PRIM int HL_NAME(hooks)( void ) {
+	return hxs_setup_taken;
+}
+
 #else
 
 /*
@@ -402,6 +568,10 @@ HL_PRIM int HL_NAME(state)( void ) {
 	return HXS_STATE_NO_LOADER;
 }
 
+HL_PRIM int HL_NAME(hooks)( void ) {
+	return 0;
+}
+
 HL_PRIM vbyte *HL_NAME(last_error)( void ) {
 #ifdef HXS_WRONG_VERSION
 	return (vbyte *)"the carried loader is for a different hashlink than this build's hl.h";
@@ -426,6 +596,7 @@ DEFINE_PRIM(_BOOL, agrees, _NO_ARG);
 DEFINE_PRIM(_I32, state, _NO_ARG);
 DEFINE_PRIM(_I32, built_for, _NO_ARG);
 DEFINE_PRIM(_BYTES, last_error, _NO_ARG);
+DEFINE_PRIM(_I32, hooks, _NO_ARG);
 DEFINE_PRIM(_VOID, set_global, _ABSTRACT(hxs_module) _I32 _DYN);
 DEFINE_PRIM(_ABSTRACT(hxs_module), load, _BYTES _I32);
 DEFINE_PRIM(_I32, entry_index, _ABSTRACT(hxs_module));
