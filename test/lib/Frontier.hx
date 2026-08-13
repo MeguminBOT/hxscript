@@ -98,6 +98,8 @@ class Frontier {
 		probe('mixed array and map literal', 'var m = [1 => 2, 3]; return Std.string(m);');
 		probe('a property declared dynamic', 'return Std.string(v);', 'public static var v(dynamic, never):Int; static function get_v() return 7;');
 		probe('a property declared null', 'return Std.string(new T().v);', 'public var v(null, null):Int = 7; public function new() {}');
+		probe('a property declared null read through this', 'return Std.string(new T().mine());',
+			'public var v(null, null):Int = 7; public function new() {} public function mine():Int return v;');
 		probe('a property through Reflect.field', 'return Std.string(Reflect.field(new T(), "v"));',
 			'public var v(get, never):Int; function get_v() return 7; public function new() {}');
 		probe('a get set property through Reflect.field', 'return Std.string(Reflect.field(new T(), "v"));',

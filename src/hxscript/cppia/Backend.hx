@@ -44,6 +44,9 @@ class Backend {
 	/** Names the static-extension helper for the same reason. */
 	@:keep static var extensions:Class<Dynamic> = hxscript.runtime.Using;
 
+	/** Names the runtime raiser for the same reason. */
+	@:keep static var raiser:Class<Dynamic> = hxscript.runtime.Raise;
+
 	/** Whether this build can compile at all. */
 	public static var available(get, never):Bool;
 

@@ -211,6 +211,12 @@ class Emitter {
 	/** `class field` of each member property whose writes go through a setter method. */
 	var propSetters:StringMap<Bool> = new StringMap();
 
+	/** `class field` of each member written `var x(null, ...)`, which only its own instance may read. */
+	var restrictedFields:StringMap<Bool> = new StringMap();
+
+	/** The bare names of those members, for a read whose receiver this cannot name. */
+	var restrictedNames:StringMap<Bool> = new StringMap();
+
 	/** Whether the member initialisers are being emitted, which assign the field rather than call the setter. */
 	var emittingInits:Bool = false;
 
@@ -378,6 +384,13 @@ class Emitter {
 					for (f in c.fields) {
 						if (hasAccess(f, AStatic))
 							continue;
+						switch (f.kind) {
+							case KVar(v) if (v.get == 'null'):
+								restrictedFields.set(full + ' ' + f.name, true);
+								restrictedNames.set(f.name, true);
+							case _:
+						}
+
 						switch (f.kind) {
 							case KVar(v) if (plainAccess(v.get) && plainAccess(v.set)):
 								vars.set(f.name, v.type == null ? '' : typeName(v.type));
@@ -1158,6 +1171,11 @@ class Emitter {
 
 			case EArrayDecl(items):
 				if (items.length > 0 && items[0].e.match(EBinop('=>', _, _))) {
+					if (!allPairs(items)) {
+						raising('Invalid map key=>value expression', line);
+						return;
+					}
+
 					expr(mapLiteral(items, e.pos));
 					return;
 				}
@@ -2009,6 +2027,14 @@ class Emitter {
 		if (holder != null)
 			checkAccessorSelf(holder, name, pos);
 
+		if (!writing && readRestricted(holder, name)) {
+			expr({
+				e: EThrow({e: EConst(CString('This expression cannot be accessed for reading', false)), pos: pos}),
+				pos: pos
+			});
+			return;
+		}
+
 		if (holder != null && instanceVar(holder, name) != null && directField(holder, name)) {
 			// An instance field declared `Bool` is laid out as cppia's integer type, so reading one
 			// hands back 0 or 1: a condition and a comparison are still right, but `Std.string`,
@@ -2104,6 +2130,14 @@ class Emitter {
 		}
 
 		if (members.exists(v)) {
+			if (!writingTo && restrictedFields.exists(currentClass + ' ' + v)) {
+				expr({
+					e: EThrow({e: EConst(CString('This expression cannot be accessed for reading', false)), pos: pos}),
+					pos: pos
+				});
+				return;
+			}
+
 			checkAccessorSelf(currentClass, v, pos);
 			w.pos(line);
 			w.token(instanceVar(currentClass, v) != null && directField(currentClass, v) ? 'FTHISINST' : 'FTHISNAME');
@@ -2712,6 +2746,53 @@ class Emitter {
 	}
 
 	/**
+	 * Whether reading a member here is what the interpreter throws over.
+	 *
+	 * A field written `var x(null, ...)` is readable only by the instance holding it: the interpreter
+	 * compares the interpreter doing the reading against the one owning the slot, and every instance
+	 * has its own. `this` is the one case that passes, and the caller has already excluded it.
+	 *
+	 * @param holder The class holding it, or null when the receiver could not be named.
+	 * @param name The member being read.
+	 * @return Whether to raise rather than read.
+	 */
+	function readRestricted(holder:Null<String>, name:String):Bool {
+		return holder != null ? restrictedFields.exists(holder + ' ' + name) : restrictedNames.exists(name);
+	}
+
+	/** @return Whether every entry of a literal is a `key => value` pair, which a map wants. */
+	function allPairs(items:Array<Expr>):Bool {
+		for (item in items) {
+			if (!item.e.match(EBinop('=>', _, _)))
+				return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Calls the runtime raiser, for a construct that fails when it runs rather than when it compiles.
+	 *
+	 * Written as a static against the helper's path rather than built as a field chain, because a
+	 * chain is resolved by the generic path and the type it names has to be one a script may reach.
+	 *
+	 * @param message The text the interpreter carries.
+	 * @param line Where the construct appears.
+	 */
+	function raising(message:String, line:Int):Void {
+		w.pos(line);
+		w.token('CALL');
+		w.int(1);
+		w.pos(line);
+		w.token('FSTATIC');
+		w.type('hxscript.runtime.Raise');
+		w.str('custom');
+		w.pos(line);
+		w.token('s');
+		w.str(message);
+	}
+
+	/**
 	 * Lowers a map literal into a block that builds the map and yields it.
 	 *
 	 * The concrete map is chosen from the key literals, falling back to `AnyMap`, which decides from
@@ -2722,11 +2803,6 @@ class Emitter {
 	 * @return A block expression evaluating to the map.
 	 */
 	function mapLiteral(items:Array<Expr>, pos:Position):Expr {
-		for (item in items) {
-			if (!item.e.match(EBinop('=>', _, _)))
-				throw new Unsupported('mixed array and map literal', pos);
-		}
-
 		var mapClass:String = mapClassOf(items);
 
 		var name:String = tempName('map');
@@ -2817,7 +2893,6 @@ class Emitter {
 	 */
 	function accessCode(mode:Null<String>, reading:Bool, pos:Position):String {
 		return switch (mode) {
-			case 'null' if (reading): throw new Unsupported('a field only its own class may read', pos);
 			case null | 'default' | 'null': 'N';
 			case 'get' | 'set' | 'dynamic': 'V';
 			case 'never': 'n';
