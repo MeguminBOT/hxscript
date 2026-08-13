@@ -68,15 +68,29 @@ class Interp {
 		parentFields = new Map();
 
 		if (val != null) {
-			var cls:Dynamic = Type.getClass(val);
+			var names:Array<String> = null;
+			var scripted:Dynamic = Type.getClass(val);
 
-			if (cls != null) { // A normal class
-				for (field in Type.getInstanceFields(cls)) {
+			if (scripted != null) {
+				names = Type.getInstanceFields(scripted);
+			} else {
+				var native:Class<Dynamic> = HaxeType.getClass(val);
+				if (native != null)
+					names = HaxeType.getInstanceFields(native);
+			}
+
+			if (names == null) { // An anonymous structure
+				for (field in Reflect.fields(val))
 					parentFields.set(field, true);
-				}
-			} else { // An anonymous structure
-				for (field in Reflect.fields(val)) {
+			} else {
+				for (field in names) {
 					parentFields.set(field, true);
+
+					if (field.length > 4) {
+						var head:String = field.substr(0, 4);
+						if (head == 'get_' || head == 'set_')
+							parentFields.set(field.substr(4), true);
+					}
 				}
 			}
 		}

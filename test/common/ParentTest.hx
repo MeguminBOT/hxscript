@@ -33,10 +33,11 @@ private class Host {
  * Precedence is the part worth pinning down, because getting it wrong is silent. A local that shares
  * a name with a host field has to win, or a script quietly writes to the host instead of to itself.
  *
- * The three `gap` cases are the limits of what the feature reaches, not failures. `parent` is indexed
- * from `Type.getInstanceFields`, which lists a property's accessors rather than the property, so a
- * `(get, never)` field is not there to be found; and a name that resolves to a method is not reached
- * at all, whether it is called or taken as a value.
+ * Methods and properties are part of the surface, not just variables. Both used to be missing: the
+ * index was built through the type proxy, which answers null for a host class nothing registered a
+ * proxy for, so the lookup fell back to `Reflect.fields` and saw only what the instance physically
+ * holds. Properties are listed by their accessors rather than by themselves, so the name a script
+ * writes is taken from those.
  */
 class ParentTest {
 	static function on(body:String):Host {
@@ -109,9 +110,11 @@ class ParentTest {
 		missing.start();
 		ok('an unknown name still fails with one', alsoThrew);
 
-		gap('a parent method can be called', result('res = greet();'), 'hello from host');
-		gap('a parent method as a value', result('res = greet == null ? "no" : "yes";'), 'yes');
-		gap('a getter-only property is read', result('res = doubled;'), '20');
+		eq('a parent method can be called', result('res = greet();'), 'hello from host');
+		eq('a parent method as a value', result('res = greet == null ? "no" : "yes";'), 'yes');
+		eq('a getter-only property is read', result('res = doubled;'), '20');
+		eq('a setter-only property is written', on('clamped = 3;').clamped, 3);
+		eq('an unknown name is still unknown', result('res = notAFieldOfHost;'), 'null');
 	}
 
 	static function main():Void {

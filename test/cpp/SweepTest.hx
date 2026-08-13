@@ -141,7 +141,11 @@ class SweepTest {
 	}
 
 	/**
-	 * Reports a construct the two modes answer differently on purpose.
+	 * Watches a construct the two modes have answered differently, and says so if they still do.
+	 *
+	 * Nothing is written down as the right answer, because what is being checked is that the two
+	 * agree rather than what they agree on. A gap here carries both answers so the difference can be
+	 * read without running anything.
 	 *
 	 * @param name The construct.
 	 * @param body The script body.
@@ -157,7 +161,10 @@ class C {
 ' + extra + '}
 ';
 
-		TestCase.gap(name, 'interp=' + viaInterp(src) + ' cppia=' + viaCppia(src), 'the two to agree');
+		var interp:String = viaInterp(src);
+		var compiled:String = viaCppia(src);
+
+		TestCase.gap(name, interp == compiled ? 'the two to agree' : 'interp=$interp cppia=$compiled', 'the two to agree');
 	}
 
 	static function sweep(name:String, body:String, want:String, extra:String):Void {
