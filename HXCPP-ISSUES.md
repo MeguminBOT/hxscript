@@ -266,11 +266,9 @@ unwind with `if (ctx->exception) handleException(ctx, ctx->exception);`.
 
 ---
 
-## 8. A `Bool` handed to a host call through an erased type parameter arrives as an `Int`
+## 8. A `Bool` put in a `Map` from a script comes back an `Int`, and the cause is in Haxe's std
 
-**`src/hx/cppia/Cppia.cpp`, the object branch of a host call's argument marshalling, around line 1779.**
-
-Anything a script puts in a `Map` comes back an `Int`:
+**`std/cpp/_std/haxe/ds/StringMap.hx`, the `#if (scriptable)` block, `setBool`. Not an hxcpp file.**
 
 ```haxe
 var flag:Bool = true;
@@ -280,35 +278,63 @@ Type.typeof(m.get('k'));   // TInt, where every other target says TBool
 ```
 
 `Std.string` of it prints `1`, and `false` prints `0`. A condition still reads correctly, because `1`
-is truthy, which is what keeps this quiet.
-
-It is not about constants and not about the JIT. A variable does it, `false` does it, a plain
-`haxe.ds.StringMap<Bool>` does it, an `Int` keyed map does it, and interpreted cppia does it as
-readily as jitted cppia.
+is truthy, which is what keeps this quiet. It happens interpreted and jitted alike, for a variable
+and for a constant, for `Map<String,Bool>` and `Map<String,Dynamic>` and a bare
+`haxe.ds.StringMap<Bool>`.
 
 ### Why
 
-A host call marshals its arguments from the callee's signature. `sigBool` and `sigInt` share a branch
-and push an int, which is right when the callee really does take a `bool`. But a type parameter is
-erased in the scriptable interface, so `StringMap<Bool>::set` is described as taking an object, and
-the argument goes through `pushObject(arg->runObject(ctx))` instead. A bool valued expression reports
-`etInt`, because that is how cppia carries a boolean, so `runObject` boxes an `Int` and the map stores
-an `Int`.
+`StringMap` carries a set of specialised setters that exist only under `-D scriptable`, which is to
+say only for cppia hosts. `setBool` is one of them, and it stores through the integer setter:
 
-`isBoolInt()` is exactly the question that distinguishes the two, and nothing on this path asks it.
+```haxe
+#if (scriptable)
+private function setBool(key:String, val:Bool):Void {
+   untyped __string_hash_set_int(__cpp__("HX_MAP_THIS"), key, val);
+}
+```
 
-### The shape of a fix
+A native build never sees these, uses `set`, and stores a value that keeps its type. A cppia host
+dispatches to `setBool`, the boolean is stored as an integer, and `get` is typed `Null<T>` with `T`
+erased, so nothing converts it back on the way out. Natively the typed `get` is what restores the
+boolean, and cppia has no type left to do that with.
 
-An expression that answers `isBoolInt()` should box a real `Bool` when it is asked for an object, on
-both the interpreted and the compiled path. `MemReference` already overrides `isBoolInt`, so it knows
-what it is holding; what it does not do is act on that in `runObject`.
+This is why pre-boxing avoids it. Handing `set` a value already typed `Dynamic` picks the generic
+setter rather than `setBool`:
 
-### Two more that are almost certainly the same fault
+```haxe
+var boxed:Dynamic = flag;
+b.set('k', boxed);         // TBool
+```
 
-Both wrong only with the JIT on, both fine interpreted, and neither fixed by issues 1, 2, 3 or 7:
+### What it is not
+
+Every hxcpp boxing site reached for this was already correct, and three were ruled out by building
+the change and measuring no difference: `MemReference::runObject` and `CppiaBoolExpr::runObject` both
+ask `isBoolInt()`, `DataVal<bool>::runObject` holds a real `bool`, and teaching the `sigObject`
+argument case at `Cppia.cpp:1779` to ask changes no answer. Nothing in hxcpp boxes a boolean wrongly.
+
+### The fix
+
+`setBool` should store the value the way `set` does, so it keeps its type rather than being flattened
+to an integer no one can widen again. That belongs in a pull request against Haxe rather than hxcpp.
+
+`IntMap` and `ObjectMap` want checking for the same shape, and an `Int` keyed map shows the same
+symptom here.
+
+### Still open, and separate from this
+
+Two constructs are wrong only with the JIT on, are fine interpreted, and are not explained by the
+above:
 
 | construct | interpreted | jitted |
 | --- | --- | --- |
+| `Array<Dynamic>.push(true)` | `TBool` | `TInt` |
+| a `Dynamic` instance field assigned `true` | `TBool` | `TInt` |
+
+Measured against the same code compiled natively, which answers `TBool` everywhere.
+
+--- | --- | --- |
 | `Array<Dynamic>.push(true)` | `TBool` | `TInt` |
 | a `Dynamic` instance field assigned `true` | `TBool` | `TInt` |
 | a mixed `Array<Dynamic>` literal inside an anonymous object | `TBool` | `TInt` |
