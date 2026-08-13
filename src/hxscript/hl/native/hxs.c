@@ -358,7 +358,205 @@ typedef struct {
 	void *fn;
 } hxs_native;
 
+/*
+	Reading and writing a field of something the script does not know the type of.
+
+	This is the operation a real script spends its time on, and the one the previous attempt at this
+	backend was slowest at: it emitted a call into a Haxe function taking Dynamic arguments, so every
+	access boxed its arguments, called through a closure, and resolved the name by reflection with no
+	memory of having done it before. A host field read came out at 2.2x interpreted where a typed
+	local came out at 582x.
+
+	HashLink already does better than that unaided. ODynGet compiles to a direct call to hl_dyn_getp
+	with the name hashed at jit time, so the old backend was slower than the instruction it declined
+	to use. What it still does per access is walk the object's field table, and its parent's, and its
+	parent's, comparing hashes.
+
+	The way past that is to remember. Every access the emitter writes gets a site of its own, and a
+	site remembers the last receiver type it saw and where the field sat in it. A second access to the
+	same shape is a pointer compare and a load at a constant offset, which is what cppia gets for free
+	from compiling field access to a slot, and what this has to earn.
+
+	A site that sees something other than a plain field of an object remembers that too, as an offset
+	of -1, so an anonymous object or a virtual costs one compare before falling back to hashlink's own
+	path rather than being resolved twice.
+*/
+typedef struct {
+	hl_type *t;
+	hl_type *ft;
+	int offset;
+} hxs_site;
+
+static hxs_site *hxs_sites = NULL;
+static int hxs_site_count = 0;
+static int hxs_site_cap = 0;
+
+/**
+	@return A site index for the emitter to write into an access, or -1 when there is no memory.
+
+	Handed out while a module is being written rather than after it loads, so the index is a constant
+	in the bytecode and an access costs no indirection to find its own cache.
+*/
+HL_PRIM int HL_NAME(site)( void ) {
+	if( hxs_site_count == hxs_site_cap ) {
+		int cap = hxs_site_cap ? hxs_site_cap * 2 : 256;
+		hxs_site *grown = (hxs_site*)realloc(hxs_sites,sizeof(hxs_site) * cap);
+		if( grown == NULL ) return -1;
+		hxs_sites = grown;
+		hxs_site_cap = cap;
+	}
+	memset(hxs_sites + hxs_site_count,0,sizeof(hxs_site));
+	return hxs_site_count++;
+}
+
+/**
+	Where a field lives in a receiver, or NULL when this is not a plain field of an object.
+
+	The resolution on a miss is hashlink's own, from obj_resolve_field: the lookup table of the type,
+	then of its parent, until one of them has the hash. A negative field_index is a method rather than
+	a field and is left to the slow path, which knows how to make a closure of it.
+*/
+static void *hxs_field( vdynamic *obj, int hash, int site, hl_type **ft ) {
+	hxs_site *s;
+	hl_runtime_obj *rt;
+
+	if( obj == NULL || site < 0 || site >= hxs_site_count )
+		return NULL;
+
+	s = hxs_sites + site;
+
+	if( s->t == obj->t ) {
+		if( s->offset < 0 )
+			return NULL;
+		*ft = s->ft;
+		return (char*)obj + s->offset;
+	}
+
+	if( obj->t->kind != HOBJ ) {
+		s->t = obj->t;
+		s->offset = -1;
+		return NULL;
+	}
+
+	rt = hl_get_obj_rt(obj->t);
+	while( rt ) {
+		hl_field_lookup *f = hl_lookup_find(rt->lookup,rt->nlookup,hash);
+		if( f ) {
+			if( f->field_index < 0 )
+				break;
+			s->t = obj->t;
+			s->ft = f->t;
+			s->offset = f->field_index;
+			*ft = f->t;
+			return (char*)obj + f->field_index;
+		}
+		rt = rt->parent;
+	}
+
+	s->t = obj->t;
+	s->offset = -1;
+	return NULL;
+}
+
+HL_PRIM vdynamic *HL_NAME(getp)( vdynamic *obj, int hash, int site ) {
+	hl_type *ft;
+	void *addr = hxs_field(obj,hash,site,&ft);
+	if( addr == NULL )
+		return (vdynamic*)hl_dyn_getp(obj,hash,&hlt_dyn);
+	return hl_is_ptr(ft) ? *(vdynamic**)addr : hl_make_dyn(addr,ft);
+}
+
+HL_PRIM int HL_NAME(geti)( vdynamic *obj, int hash, int site ) {
+	hl_type *ft;
+	void *addr = hxs_field(obj,hash,site,&ft);
+	if( addr == NULL )
+		return hl_dyn_geti(obj,hash,&hlt_i32);
+	switch( ft->kind ) {
+	case HI32:
+		return *(int*)addr;
+	case HBOOL:
+	case HUI8:
+		return *(unsigned char*)addr;
+	case HUI16:
+		return *(unsigned short*)addr;
+	default:
+		return hl_dyn_casti(addr,ft,&hlt_i32);
+	}
+}
+
+HL_PRIM double HL_NAME(getd)( vdynamic *obj, int hash, int site ) {
+	hl_type *ft;
+	void *addr = hxs_field(obj,hash,site,&ft);
+	if( addr == NULL )
+		return hl_dyn_getd(obj,hash);
+	return ft->kind == HF64 ? *(double*)addr : hl_dyn_castd(addr,ft);
+}
+
+HL_PRIM void HL_NAME(setp)( vdynamic *obj, int hash, int site, vdynamic *value ) {
+	hl_type *ft;
+	void *addr = hxs_field(obj,hash,site,&ft);
+	if( addr == NULL ) {
+		hl_dyn_setp(obj,hash,&hlt_dyn,value);
+		return;
+	}
+	if( hl_is_ptr(ft) && (value == NULL || hl_same_type(value->t,ft)) )
+		*(void**)addr = value;
+	else
+		hl_write_dyn(addr,ft,value,false);
+}
+
+HL_PRIM void HL_NAME(seti)( vdynamic *obj, int hash, int site, int value ) {
+	hl_type *ft;
+	void *addr = hxs_field(obj,hash,site,&ft);
+	if( addr == NULL ) {
+		hl_dyn_seti(obj,hash,&hlt_i32,value);
+		return;
+	}
+	switch( ft->kind ) {
+	case HI32:
+		*(int*)addr = value;
+		break;
+	case HBOOL:
+	case HUI8:
+		*(unsigned char*)addr = (unsigned char)value;
+		break;
+	case HUI16:
+		*(unsigned short*)addr = (unsigned short)value;
+		break;
+	default:
+		hl_dyn_seti(obj,hash,&hlt_i32,value);
+		break;
+	}
+}
+
+HL_PRIM void HL_NAME(setd)( vdynamic *obj, int hash, int site, double value ) {
+	hl_type *ft;
+	void *addr = hxs_field(obj,hash,site,&ft);
+	if( addr == NULL || ft->kind != HF64 ) {
+		hl_dyn_setd(obj,hash,value);
+		return;
+	}
+	*(double*)addr = value;
+}
+
+/**
+	@param name The field name, as HashLink holds a string.
+	@return What the VM hashes it to.
+
+	Asked for rather than worked out again. The emitter has to write the same number the jit would
+	have written for ODynGet, and a second implementation of a hash is a second thing to be wrong.
+*/
+HL_PRIM int HL_NAME(hash)( vbyte *name ) {
+	return hl_hash_gen((uchar*)name,true);
+}
+
 static hxs_native hxs_native_table[] = {
+	{ "getp", (void*)HL_NAME(getp) },
+	{ "geti", (void*)HL_NAME(geti) },
+	{ "getd", (void*)HL_NAME(getd) },
+	{ "setp", (void*)HL_NAME(setp) },
+	{ "seti", (void*)HL_NAME(seti) },
+	{ "setd", (void*)HL_NAME(setd) },
 	{ NULL, NULL }
 };
 
@@ -553,6 +751,19 @@ HL_PRIM hxs_module *HL_NAME(load)( vbyte *data, int size ) {
 	return NULL;
 }
 
+/*
+	No bytecode can be loaded here, so nothing will ever call a site's cache. The number is still
+	handed out, because whatever asked for it is on the interpreted path and should not have to know
+	which build it is in.
+*/
+HL_PRIM int HL_NAME(site)( void ) {
+	return -1;
+}
+
+HL_PRIM int HL_NAME(hash)( vbyte *name ) {
+	return hl_hash_gen((uchar*)name,true);
+}
+
 HL_PRIM int HL_NAME(entry_index)( hxs_module *h ) {
 	return -1;
 }
@@ -597,6 +808,8 @@ DEFINE_PRIM(_I32, state, _NO_ARG);
 DEFINE_PRIM(_I32, built_for, _NO_ARG);
 DEFINE_PRIM(_BYTES, last_error, _NO_ARG);
 DEFINE_PRIM(_I32, hooks, _NO_ARG);
+DEFINE_PRIM(_I32, site, _NO_ARG);
+DEFINE_PRIM(_I32, hash, _BYTES);
 DEFINE_PRIM(_VOID, set_global, _ABSTRACT(hxs_module) _I32 _DYN);
 DEFINE_PRIM(_ABSTRACT(hxs_module), load, _BYTES _I32);
 DEFINE_PRIM(_I32, entry_index, _ABSTRACT(hxs_module));

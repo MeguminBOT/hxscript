@@ -4,6 +4,7 @@
 #   sh test/hl/loader/run.sh              on the VM, then again as a native binary
 #   sh test/hl/loader/run.sh --hl DIR     the HashLink installation to build against
 #   sh test/hl/loader/run.sh --vm-only    skip the native binary, which is the slow half
+#   sh test/hl/loader/run.sh --bench      also run the field benchmark, which gates nothing
 #
 # Run from the repository root. The VM half lands in bin_test/hl/loader, including the .hdll, which
 # has to be beside what is running for HashLink to find it. The native half lands in bin_test/hlc.
@@ -21,11 +22,13 @@ OUT="$ROOT/bin_test/hl/loader"
 HLC="$ROOT/bin_test/hlc/probe"
 HL=${HLPATH:-}
 NATIVE=1
+BENCH=0
 
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--hl) HL=$2; shift 2 ;;
 		--vm-only) NATIVE=0; shift ;;
+		--bench) BENCH=1; shift ;;
 		*) echo "unknown argument: $1" >&2; exit 2 ;;
 	esac
 done
@@ -41,6 +44,7 @@ fi
 haxe -cp test/hl/loader -main Guest -hl "$OUT/guest.hl"
 haxe -cp src -cp test/hl/loader -D hxscript_hl -main LoadProbe -hl "$OUT/probe.hl"
 haxe -cp src -cp test/hl/loader -D hxscript_hl -main WriterProbe -hl "$OUT/writer.hl"
+[ "$BENCH" = "1" ] && haxe -cp src -cp test/hl/loader -D hxscript_hl -main FieldBench -hl "$OUT/bench.hl"
 
 cd "$OUT"
 
@@ -58,6 +62,11 @@ fi
 echo "-- on the VM, with the module beside it --"
 "$VM" probe.hl guest.hl
 "$VM" writer.hl
+
+if [ "$BENCH" = "1" ]; then
+	echo
+	"$VM" bench.hl
+fi
 
 [ "$NATIVE" = "1" ] || exit 0
 

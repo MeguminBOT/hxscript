@@ -217,6 +217,31 @@ class Loader {
 		}
 	}
 
+	/**
+	 * Reserves an inline cache for one field access.
+	 *
+	 * Asked for while a module is being written rather than after it loads, so the number is a
+	 * constant in the bytecode and an access does not pay an indirection to find its own cache. A
+	 * site remembers the last receiver type it saw and where the field sat in it, which turns the
+	 * second and every later access on the same shape into a pointer compare and a load.
+	 *
+	 * @return The site, or -1 when this build has no runtime to hold one.
+	 */
+	public static function site():Int {
+		return nextSite();
+	}
+
+	/**
+	 * @param name A field name.
+	 * @return What HashLink hashes it to, which is what an access has to carry.
+	 *
+	 * Asked for rather than worked out here, because the emitter has to write the same number the jit
+	 * writes for `ODynGet` and a second implementation of a hash is a second thing to be wrong.
+	 */
+	public static function hash(name:String):Int {
+		return hashOf(@:privateAccess name.bytes);
+	}
+
 	/** @return Why the last `load` failed, or null when it did not. */
 	public static function error():Null<String> {
 		var raw:hl.Bytes = lastError();
@@ -254,6 +279,14 @@ class Loader {
 	}
 
 	@:hlNative("?hxscript", "hooks") static function hookBits():Int {
+		return 0;
+	}
+
+	@:hlNative("?hxscript", "site") static function nextSite():Int {
+		return -1;
+	}
+
+	@:hlNative("?hxscript", "hash") static function hashOf(name:hl.Bytes):Int {
 		return 0;
 	}
 }

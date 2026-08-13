@@ -36,6 +36,29 @@ class Instruction {
 	public var args:Array<Int>;
 }
 
+/**
+ * One native: a function the module calls and does not carry.
+ *
+ * It takes a function index like any other, out of the same run, because a call does not know or care
+ * which of the two it is reaching. What differs is that the loader fills the pointer in rather than
+ * jitting a body for it, and where it looks is decided by the library name: `hxs` is hxScript's own
+ * runtime, in the same binary, and anything else is an hdll beside the program.
+ */
+@:structInit
+class Native {
+	/** The library, as an index into the string pool. */
+	public var lib:Int;
+
+	/** The name within it, as an index into the string pool. */
+	public var name:Int;
+
+	/** Index into the type table of its signature, which the loader checks against what it finds. */
+	public var type:Int;
+
+	/** The index calls reach it by. */
+	public var findex:Int;
+}
+
 /** One function: what it looks like, where it lives, and what it runs. */
 @:structInit
 class Function {
@@ -78,6 +101,7 @@ class Bytecode {
 	var typeIds:StringMap<Int>;
 
 	var globals:Array<Int>;
+	var natives:Array<Native>;
 	var functions:Array<Function>;
 
 	/** The function index the loader starts at. */
@@ -97,6 +121,7 @@ class Bytecode {
 		types = [];
 		typeIds = new StringMap();
 		globals = [];
+		natives = [];
 		functions = [];
 	}
 
@@ -211,6 +236,21 @@ class Bytecode {
 		return nextFindex++;
 	}
 
+	/**
+	 * Declares a function the module calls and does not carry.
+	 *
+	 * @param lib The library it comes from. `hxs` is hxScript's own runtime, which is in the same
+	 *            binary and is resolved from a table rather than from a file.
+	 * @param name Its name there.
+	 * @param type Index into the type table of its signature.
+	 * @return The index calls reach it by.
+	 */
+	public function native(lib:String, name:String, type:Int):Int {
+		var findex:Int = nextFindex++;
+		natives.push({lib: stringId(lib), name: stringId(name), type: type, findex: findex});
+		return findex;
+	}
+
 	/** Adds a finished function. */
 	public function add(f:Function):Void {
 		functions.push(f);
@@ -235,7 +275,7 @@ class Bytecode {
 		w.uindex(strings.length);
 		w.uindex(types.length);
 		w.uindex(globals.length);
-		w.uindex(0);
+		w.uindex(natives.length);
 		w.uindex(functions.length);
 		w.uindex(0);
 		w.uindex(entry);
@@ -252,6 +292,13 @@ class Bytecode {
 
 		for (g in globals)
 			w.index(g);
+
+		for (n in natives) {
+			w.index(n.lib);
+			w.index(n.name);
+			w.index(n.type);
+			w.uindex(n.findex);
+		}
 
 		for (f in functions)
 			writeFunction(w, f);
