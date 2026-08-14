@@ -183,7 +183,7 @@ something that runs in it before you have written anything.
 | --- | --- |
 | `heaps` | a scripted `h2d.Object` with forty drifting squares, plus a scripted enum and a scripted abstract with an operator |
 | `plain` | a `static main()`: no framework at all, printing what a script can reach |
-| `puzzle` | a whole game: seven-bag randomiser, wall kicks, ghost piece, hold, lock delay and levels, in two modules |
+| `puzzle` | a whole game in 27 modules: SRS kicks, four modes, menus, records and generated sound. The heaps port of the flixel sandbox's |
 
 ### If a project behaves differently once it is compiled
 
