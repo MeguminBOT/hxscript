@@ -166,7 +166,7 @@ class Loader {
 		if (!wired) {
 			wired = true;
 			try {
-				var through:hl.NativeArray<Dynamic> = new hl.NativeArray<Dynamic>(8);
+				var through:hl.NativeArray<Dynamic> = new hl.NativeArray<Dynamic>(10);
 				through[0] = Runtime.fetch;
 				through[1] = Runtime.store;
 				through[2] = Runtime.fetchInt;
@@ -175,6 +175,8 @@ class Loader {
 				through[5] = Runtime.dispatch1;
 				through[6] = Runtime.dispatch2;
 				through[7] = Runtime.dispatch3;
+				through[8] = Runtime.readSlot;
+				through[9] = Runtime.writeSlot;
 				setFallback(through);
 			} catch (e:Dynamic) {}
 		}

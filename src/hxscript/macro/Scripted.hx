@@ -1139,6 +1139,10 @@ class Scripted {
 			setSuperFields(base.extending);
 			setFields(base);
 
+			/** Built before the constructor runs, so a compiled constructor body can reach a slot too. */
+			if (hxscript.types.ScriptedTools.wantsSlots)
+				__slots = hxscript.types.ScriptedTools.slotsFor(base, __vars);
+
 			var entry:Dynamic = (constructor ?? __constructSuper);
 
 			if (__safe) {
@@ -1208,6 +1212,11 @@ class Scripted {
 				pos: pos,
 				name: '__vars',
 				kind: FVar(macro :Map<String, hxscript.runtime.Variable>),
+			},
+			{
+				pos: pos,
+				name: '__slots',
+				kind: FVar(macro :haxe.ds.Vector<hxscript.runtime.Variable>),
 			},
 			{
 				pos: pos,

@@ -30,6 +30,7 @@ import hxscript.types.AbstractTools;
 import hxscript.types.AbstractValue;
 import hxscript.types.IScriptedInstance;
 import hxscript.types.ScriptedAbstractValue;
+import hxscript.types.ScriptedClass;
 
 /**
  * What compiled code calls for the things it cannot say in instructions.
@@ -587,6 +588,68 @@ class Runtime {
 	 * @param site This access's own memory.
 	 * @return The value.
 	 */
+	/**
+	 * @return Which slot a plain read may take, or -1 when the access has to go the long way.
+	 *
+	 * A property is refused, since reading one runs its accessor, and so is a name the class has no
+	 * slot for. What is allowed is what `fetch` would have answered with the stored value.
+	 */
+	public static function readSlot(o:Dynamic, name:Dynamic):Int {
+		var at:Int = slotOf(o, name);
+		if (at < 0)
+			return -1;
+
+		var held:Variable = @:privateAccess (cast o : IScriptedInstance).__slots[at];
+		return (held == null || held.get != null || held.set != null) ? -1 : at;
+	}
+
+	/**
+	 * @return Which slot a plain write may take, or -1.
+	 *
+	 * Everything the interpreter would have checked on the way in has to be absent: an accessor, a
+	 * declared type to check the value against, and finality.
+	 */
+	public static function writeSlot(o:Dynamic, name:Dynamic):Int {
+		var at:Int = slotOf(o, name);
+		if (at < 0)
+			return -1;
+
+		var held:Variable = @:privateAccess (cast o : IScriptedInstance).__slots[at];
+		if (held == null || held.get != null || held.set != null || held.isFinal)
+			return -1;
+
+		/**
+		 * The slot and what a value has to be to go in it, in one answer. A declared type is checked
+		 * on the way in, so what the runtime is told is which check to make rather than that it may
+		 * skip one.
+		 */
+		var wants:Int = switch (wanted(held.t)) {
+			case WAnything: 0;
+			case WInt: 1;
+			case WFloat: 2;
+			case WBool: 3;
+			case _: -1;
+		}
+
+		return wants < 0 ? -1 : (at << 2) | wants;
+	}
+
+	/** @return Where this instance keeps that name, or -1 when it does not keep it by position. */
+	static function slotOf(o:Dynamic, name:Dynamic):Int {
+		if (!(o is IScriptedInstance))
+			return -1;
+
+		var inst:IScriptedInstance = cast o;
+		var base:ScriptedClass = @:privateAccess inst.__base;
+		var slots:haxe.ds.Vector<Variable> = @:privateAccess inst.__slots;
+
+		if (base == null || base.slotIndex == null || slots == null)
+			return -1;
+
+		var at:Null<Int> = base.slotIndex.get(name);
+		return (at == null || at >= slots.length) ? -1 : at;
+	}
+
 	/** `dispatch`, for a receiver the native runtime could not resolve a method on. */
 	public static function dispatch0(o:Dynamic, name:Dynamic, site:Dynamic):Dynamic {
 		return dispatch(o, name, [], site);

@@ -45,6 +45,18 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 	public var compiledMembers:Null<Map<String, Dynamic>> = null;
 
 	/**
+	 * Which position each of an instance's slots holds, shared by every instance of this class.
+	 *
+	 * Null until a backend that wants indexed storage asks for it. The order is whatever the first
+	 * instance bound, which is the order the bridge binds fields in and is therefore the same for
+	 * every instance of the class.
+	 */
+	public var slotIndex:Null<Map<String, Int>> = null;
+
+	/** The names, in slot order. */
+	public var slotNames:Null<Array<String>> = null;
+
+	/**
 	 * Binds one of this class's compiled instance methods to an instance.
 	 *
 	 * @param name The method.
