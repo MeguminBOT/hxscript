@@ -123,6 +123,18 @@ class Compiler {
 	}
 
 	/**
+	 * @param path A scripted class path.
+	 * @return The class that stands in for it, or null when the scripted one is what runs.
+	 *
+	 * cppia replaces a class outright, so what a host must reach afterwards is the replacement.
+	 * HashLink replaces the functions inside the class it was given, so there is nothing to hand
+	 * back and the world's own answer stays the right one.
+	 */
+	public static function substitute(path:String):Dynamic {
+		return Backend.substitute(path);
+	}
+
+	/**
 	 * Compiles what it can of a world and binds the results into it.
 	 *
 	 * @param env The world. Its `compiled` map and `substituting` flag are set by the backend.

@@ -109,7 +109,18 @@ class Fields {
 		return env;
 	}
 
+	/**
+	 * Calls a case on whichever class is the one running.
+	 *
+	 * cppia replaces a scripted class outright and HashLink replaces the functions inside it, so
+	 * asking the world for the class is right on one target and stale on the other.
+	 */
 	static function call(env:Environment, field:String, rounds:Int):Dynamic {
+		var stood:Dynamic = Compiler.substitute('game.Fields');
+
+		if (stood != null)
+			return Reflect.callMethod(null, Reflect.field(stood, field), [rounds]);
+
 		var cls:ScriptedClass = cast env.resolve('game.Fields');
 		return Reflect.callMethod(null, cls.reflectGetField(field), [rounds]);
 	}
@@ -167,6 +178,9 @@ class Fields {
 		}
 
 		var fast:Environment = world();
+		/** Named so cppia can resolve the host type a case reaches; HashLink needs nothing said. */
+		Compiler.ambient = ['HostBase'];
+
 		var report:Report = Compiler.compile(fast);
 
 		for (skip in report.skipped)

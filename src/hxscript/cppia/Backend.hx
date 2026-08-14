@@ -649,6 +649,11 @@ class Backend {
 	 * @param path A scripted class path.
 	 * @return Its compiled class, or null when it is interpreted.
 	 */
+	/** @return The class standing in for a scripted one, which on cppia is the compiled class. */
+	public static function substitute(path:String):Dynamic {
+		return isCompiled(path) ? resolve(path) : null;
+	}
+
 	public static function resolve(path:String):Class<Dynamic> {
 		return built.get(path);
 	}

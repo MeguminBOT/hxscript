@@ -141,6 +141,11 @@ class Backend {
 		return holders.exists(path);
 	}
 
+	/** @return Nothing: a compiled function replaces the interpreted one inside the class it was in. */
+	public static function substitute(path:String):Dynamic {
+		return null;
+	}
+
 	/** Which classes have at least one compiled function in them. */
 	static var holders:Map<String, Bool> = new Map();
 
