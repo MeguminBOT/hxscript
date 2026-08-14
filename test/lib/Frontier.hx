@@ -190,6 +190,15 @@ public function go():Dynamic { return function() { bump(); }; }');
 			'var held:Int = 7;
 public function new() {}
 public function read():Dynamic { return function() { return held; }; }');
+		/*
+			A host enum abstract's constructor, named three ways. The sandbox reads one of these as
+			null on HashLink and the same constant written out in full as the constant, so what these
+			separate is the naming rather than the type: bare after an import, through the type after
+			an import, and through the type without one.
+		*/
+		probe('an enum abstract constructor, bare', 'return Std.string(Add);', null, 'import HostFlag;');
+		probe('an enum abstract constructor, through an import', 'return Std.string(HostFlag.Add);', null, 'import HostFlag;');
+		probe('an enum abstract constructor, unimported', 'return Std.string(HostFlag.Add);');
 		probe('a host static read', 'return Std.string(Math.PI > 3);');
 		probe('a host static that changes', 'var a = Std.string(Date.now().getTime() > 0); return a;');
 		probe('a host method on a value', 'return "ab".toUpperCase();');
