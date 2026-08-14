@@ -31,6 +31,30 @@ script.variables.get("greeted");   // 1
 That is a working embed. If the build also has lime, openfl, flixel, flixel-addons, flixel-ui or
 heaps in it, that same line wires the library for scripting as well.
 
+The build says so, once, in one block:
+
+```
+      _                             _         _
+     | |__  __  __ ___   ___  _ __ (_) _ __  | |_
+     | '_ \ \ \/ // __| / __|| '__|| || '_ \ | __|
+     | | | | >  < \__ \| (__ | |   | || |_) || |_
+     |_| |_|/_/\_\|___/ \___||_|   |_|| .__/  \__|
+                                      |_|
+     hxscript 2.0.0   hashlink   HashLink bytecode compiler
+     wired    heaps
+     reach    52 type(s), 4 abstract(s), 14 global(s), 3 bridge(s)
+     native   built export/hlc/Sandbox.exe
+```
+
+The line that matters most is the third one. **A compiled backend is opt-in on both targets that
+have one**, and a build meaning to have one and not having it is a program running scripts at a
+fraction of the speed it was measured at, with nothing anywhere saying so. That line says which of
+the two you got.
+
+`-D hxscript_no_banner`, or `HXSCRIPT_NO_BANNER=1` in the environment, prints nothing. `NO_COLOR`
+keeps the block and drops the escapes. `-D hxscript_verbose` is separate and still prints the
+per-item detail underneath.
+
 ## Giving scripts your own code
 
 Two defines and two pieces of metadata cover most of it.
@@ -103,7 +127,8 @@ Everything the library reads. Only the first group is likely to concern you.
 | --- | --- |
 | `-lib hxscript` | the whole of the setup, including for a game library already in the build |
 | `-D hxscript_host=<packages>` | comma-separated packages to scan for `@:scriptable` and `@:scriptAmbient` |
-| `-D hxscript_verbose` | print what the setup wired |
+| `-D hxscript_verbose` | print every type, bridge and abstract the setup touched, under the block it already prints |
+| `-D hxscript_no_banner` | print nothing at all. `HXSCRIPT_NO_BANNER=1` does the same from the environment |
 | `-dce no` | keep the standard-library members scripts reach by reflection. See [dead code elimination](#dead-code-elimination) |
 
 ### Behaviour
@@ -613,6 +638,8 @@ load failure as "recompile from source", which is cheap and always correct.
 | `Type not found: X` thrown out of `new Script(...)`, uncaught | a global import that cannot resolve | guard the registration; check the type is in the build and not blacklisted |
 | `Unknown identifier: X` | the type was never compiled in | name its package in `hxscript_host`, or force it in |
 | `Class X can't be extended for scripting` | no bridge | `@:scriptable` on it, or a hand-written bridge kept in the build |
+| `X cannot be extended for scripting, because it inlines an abstract's constructor` | a bridge re-emits the constructor it extends, and an abstract's assigns to `this` | it cannot be a base. Scripts still import and construct it, so reach it by holding one rather than by being one |
+| `bridge name ScriptedX already taken` | two bases share a simple name | nothing to do since 2.0.1; the second takes its path flattened. Older versions dropped it |
 | `Cannot call null` | dead code elimination removed the member | `-dce no`, or `@:keep` |
 | `Cannot call null` on an `inline extern` | it has no runtime form at all | register a closure in `Config.callShims` |
 | A native abstract's members do nothing | no runtime form | `@:build(hxscript.macro.Abstract.build())` on it |
