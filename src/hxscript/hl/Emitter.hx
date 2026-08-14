@@ -1540,6 +1540,11 @@ class Emitter {
 	/** This module's index for the runtime's writer. */
 	var storeNative:Int = -1;
 
+	/** This module's indices for the readers that answer a primitive rather than a boxed value. */
+	var fetchIntNative:Int = -1;
+
+	var fetchFloatNative:Int = -1;
+
 	/**
 	 * A register holding this access site's own cache cell.
 	 *
@@ -1820,6 +1825,20 @@ class Emitter {
 		return fetchNative;
 	}
 
+	function fetchIntIndex():Int {
+		if (fetchIntNative < 0)
+			fetchIntNative = module.native('hxs', 'fetchi', module.typeId(TFun([tDyn, tDyn, tDyn, tI32], tI32)));
+
+		return fetchIntNative;
+	}
+
+	function fetchFloatIndex():Int {
+		if (fetchFloatNative < 0)
+			fetchFloatNative = module.native('hxs', 'fetchd', module.typeId(TFun([tDyn, tDyn, tDyn, tI32], tF64)));
+
+		return fetchFloatNative;
+	}
+
 	function storeIndex():Int {
 		if (storeNative < 0)
 			storeNative = module.native('hxs', 'store', module.typeId(TFun([tDyn, tDyn, tDyn, tDyn, tI32], tVoid)));
@@ -1850,8 +1869,23 @@ class Emitter {
 		var named:Int = named(name);
 		var cell:Int = siteSlot();
 		var site:Int = siteIndex(name);
-		var returned:Int = reg(tDyn);
 
+		/**
+		 * A reader that answers what the destination already is, when it is a number. `fetch` answers
+		 * Dynamic, so an Int field would be boxed here and opened again by the next instruction, which
+		 * measured as most of what the call cost.
+		 */
+		if (regs[slot] == tI32) {
+			ops.push({op: OCall4, args: [slot, fetchIntIndex(), target, named, cell, site]});
+			return;
+		}
+
+		if (regs[slot] == tF64) {
+			ops.push({op: OCall4, args: [slot, fetchFloatIndex(), target, named, cell, site]});
+			return;
+		}
+
+		var returned:Int = reg(tDyn);
 		ops.push({op: OCall4, args: [returned, fetchIndex(), target, named, cell, site]});
 		unbox(returned, slot);
 	}

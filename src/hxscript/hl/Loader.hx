@@ -166,7 +166,7 @@ class Loader {
 		if (!wired) {
 			wired = true;
 			try {
-				setFallback(Runtime.fetch, Runtime.store);
+				setFallback(Runtime.fetch, Runtime.store, Runtime.fetchInt, Runtime.fetchFloat);
 			} catch (e:Dynamic) {}
 		}
 
@@ -284,7 +284,8 @@ class Loader {
 		return -1;
 	}
 
-	@:hlNative("?hxscript", "fallback") static function setFallback(read:Dynamic, write:Dynamic):Void {}
+	@:hlNative("?hxscript", "fallback")
+	static function setFallback(read:Dynamic, write:Dynamic, readInt:Dynamic, readFloat:Dynamic):Void {}
 
 	@:hlNative("?hxscript", "hash") static function hashOf(name:hl.Bytes):Int {
 		return 0;

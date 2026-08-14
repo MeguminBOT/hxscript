@@ -587,6 +587,16 @@ class Runtime {
 	 * @param site This access's own memory.
 	 * @return The value.
 	 */
+	/** @return `fetch`, opened as an Int the way the interpreter opens one. */
+	public static function fetchInt(o:Dynamic, name:Dynamic, site:Dynamic):Int {
+		return toInt(fetch(o, name, site));
+	}
+
+	/** @return `fetch`, opened as a Float the way the interpreter opens one. */
+	public static function fetchFloat(o:Dynamic, name:Dynamic, site:Dynamic):Float {
+		return toFloat(fetch(o, name, site));
+	}
+
 	public static function fetch(o:Dynamic, name:Dynamic, site:Dynamic):Dynamic {
 		if (o is IScriptedInstance) {
 			var inst:IScriptedInstance = cast o;

@@ -158,6 +158,21 @@ class FieldBench {
 			time('hxs.fetch', byFetch, entry);
 		}
 
+		var byTyped:Bytecode = new Bytecode();
+		{
+			var i32:Int = byTyped.prim(HI32);
+			var dyn:Int = byTyped.prim(HDyn);
+			var fetchi:Int = byTyped.native('hxs', 'fetchi', byTyped.typeId(TFun([dyn, dyn, dyn, i32], i32)));
+
+			var entry:Int = loop(byTyped, [dyn, i32, i32, i32, i32, dyn, i32, dyn], [
+				{op: OInt, args: [6, byTyped.intId(Loader.site(Loader.hash('v')))]},
+				{op: ONull, args: [7]}
+			], [
+				{op: OCall4, args: [4, fetchi, 0, 7, 7, 6]}
+			]);
+			time('hxs.fetchi', byTyped, entry);
+		}
+
 		var byClosure:Bytecode = new Bytecode();
 		{
 			var i32:Int = byClosure.prim(HI32);

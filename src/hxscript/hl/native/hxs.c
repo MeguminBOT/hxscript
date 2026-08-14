@@ -290,12 +290,19 @@ static vclosure *hxs_read_through = NULL;
 static vclosure *hxs_write_through = NULL;
 static bool hxs_through_rooted = false;
 
-HL_PRIM void HL_NAME(fallback)( vclosure *read, vclosure *write ) {
+static vclosure *hxs_read_int_through = NULL;
+static vclosure *hxs_read_float_through = NULL;
+
+HL_PRIM void HL_NAME(fallback)( vclosure *read, vclosure *write, vclosure *readInt, vclosure *readFloat ) {
 	hxs_read_through = read;
 	hxs_write_through = write;
+	hxs_read_int_through = readInt;
+	hxs_read_float_through = readFloat;
 	if( !hxs_through_rooted ) {
 		hl_add_root((void**)&hxs_read_through);
 		hl_add_root((void**)&hxs_write_through);
+		hl_add_root((void**)&hxs_read_int_through);
+		hl_add_root((void**)&hxs_read_float_through);
 		hxs_through_rooted = true;
 	}
 }
@@ -483,7 +490,67 @@ HL_PRIM void HL_NAME(store)( vdynamic *obj, vdynamic *name, vdynamic *value, vdy
 	hl_dyn_call(hxs_write_through,args,4);
 }
 
+/**
+	Reads a field a compiled function wants as an Int, without boxing what it found.
+
+	The slow path goes through the world's reader and then its own Int conversion, because a value a
+	script holds may be a boxed abstract, which a cast cannot open and the conversion can.
+*/
+HL_PRIM int HL_NAME(fetchi)( vdynamic *obj, vdynamic *name, vdynamic *slot, int site ) {
+	hl_type *ft;
+	void *addr;
+	vdynamic *args[3];
+	vdynamic *answer;
+
+	addr = hxs_field(obj,site < 0 || site >= hxs_site_count ? 0 : hxs_sites[site].hash,site,&ft);
+	if( addr ) {
+		switch( ft->kind ) {
+		case HI32:
+			return *(int*)addr;
+		case HBOOL:
+		case HUI8:
+			return *(unsigned char*)addr;
+		case HUI16:
+			return *(unsigned short*)addr;
+		default:
+			return hl_dyn_casti(addr,ft,&hlt_i32);
+		}
+	}
+
+	if( hxs_read_int_through == NULL )
+		return 0;
+
+	args[0] = obj;
+	args[1] = name;
+	args[2] = slot;
+	answer = hl_dyn_call(hxs_read_int_through,args,3);
+	return answer == NULL ? 0 : hl_dyn_casti(&answer,&hlt_dyn,&hlt_i32);
+}
+
+/** Reads a field a compiled function wants as a Float, without boxing what it found. */
+HL_PRIM double HL_NAME(fetchd)( vdynamic *obj, vdynamic *name, vdynamic *slot, int site ) {
+	hl_type *ft;
+	void *addr;
+	vdynamic *args[3];
+	vdynamic *answer;
+
+	addr = hxs_field(obj,site < 0 || site >= hxs_site_count ? 0 : hxs_sites[site].hash,site,&ft);
+	if( addr )
+		return ft->kind == HF64 ? *(double*)addr : hl_dyn_castd(addr,ft);
+
+	if( hxs_read_float_through == NULL )
+		return 0.;
+
+	args[0] = obj;
+	args[1] = name;
+	args[2] = slot;
+	answer = hl_dyn_call(hxs_read_float_through,args,3);
+	return answer == NULL ? 0. : hl_dyn_castd(&answer,&hlt_dyn);
+}
+
 static hxs_native hxs_native_table[] = {
+	{ "fetchi", (void*)HL_NAME(fetchi) },
+	{ "fetchd", (void*)HL_NAME(fetchd) },
 	{ "fetch", (void*)HL_NAME(fetch) },
 	{ "store", (void*)HL_NAME(store) },
 	{ "getp", (void*)HL_NAME(getp) },
@@ -646,7 +713,7 @@ HL_PRIM int HL_NAME(site)( int hash ) {
 	return -1;
 }
 
-HL_PRIM void HL_NAME(fallback)( vclosure *read, vclosure *write ) {
+HL_PRIM void HL_NAME(fallback)( vclosure *read, vclosure *write, vclosure *readInt, vclosure *readFloat ) {
 }
 
 HL_PRIM int HL_NAME(hash)( vbyte *name ) {
@@ -698,7 +765,7 @@ DEFINE_PRIM(_I32, built_for, _NO_ARG);
 DEFINE_PRIM(_BYTES, last_error, _NO_ARG);
 DEFINE_PRIM(_I32, hooks, _NO_ARG);
 DEFINE_PRIM(_I32, site, _I32);
-DEFINE_PRIM(_VOID, fallback, _DYN _DYN);
+DEFINE_PRIM(_VOID, fallback, _DYN _DYN _DYN _DYN);
 DEFINE_PRIM(_I32, hash, _BYTES);
 DEFINE_PRIM(_VOID, set_global, _ABSTRACT(hxs_module) _I32 _DYN);
 DEFINE_PRIM(_ABSTRACT(hxs_module), load, _BYTES _I32);
