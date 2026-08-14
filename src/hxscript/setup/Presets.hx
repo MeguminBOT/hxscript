@@ -226,7 +226,12 @@ class Presets {
 			'hxd.Timer',
 			'hxd.Math',
 			'hxd.Event',
-			'hxd.res.DefaultFont'
+			'hxd.res.Any',
+			'hxd.res.Sound',
+			'hxd.res.DefaultFont',
+			'hxd.snd.Channel',
+			'hxd.snd.effect.Pitch',
+			'hxscript.heaps.SoundTools'
 		],
 		bases: ['h2d.Object'],
 		abstractPackages: [],
@@ -239,6 +244,7 @@ class Presets {
 		abstracts: ['h2d.BlendMode', 'h2d.col.Point'],
 		abstractExclude: [],
 		globals: [
+			'hxscript.heaps.SoundTools',
 			'h2d.Object',
 			'h2d.Bitmap',
 			'h2d.Graphics',

@@ -51,6 +51,13 @@ class Corpus {
 		');
 		check('static field', 'count = 9; return count;', '9', 'static var count:Int = 0;');
 		check('bitwise', 'return (12 & 10) | (1 << 3);', '8');
+
+		// An integral operator answers with an integer whatever it is being asked for, so a
+		// destination of another width has to be converted into rather than written straight to.
+		// Every case above lands one in an `Int`, which is the one destination needing no conversion.
+		check('bitwise into a float', 'var f:Float = (255 >> 4) & 0xF; return f;', '15');
+		check('bitwise into a dynamic', 'var d:Dynamic = 12 & 10; return d;', '8');
+		check('a masked byte as a fraction', 'var a:Float = ((0xC0FFEE >> 16) & 0xFF) / 255; return Math.round(a * 100);', '75');
 		check('modulo and division', 'return Std.string(17 % 5) + Std.string(Std.int(17 / 5));', '23');
 		check('string compare', 'return "abc" == "abc" ? "eq" : "ne";', 'eq');
 

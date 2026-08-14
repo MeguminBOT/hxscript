@@ -2335,7 +2335,14 @@ class Emitter {
 				if (code == null)
 					throw new Unsupported('the operator ' + op, e.pos);
 
-				var shared:Int = INTEGRAL.indexOf(op) >= 0 ? tI32 : want;
+				/**
+				 * An integral operator works on integers whatever it is being asked for, so its
+				 * answer is an integer and has to be converted rather than written where a number of
+				 * another width was expected. `var a:Float = (n >> 24) & 0xFF` put the result of an
+				 * `and` straight into a float register, which is not a value the jit will store.
+				 */
+				var integral:Bool = INTEGRAL.indexOf(op) >= 0;
+				var shared:Int = integral ? tI32 : want;
 
 				var left:Int = reg(shared);
 				into(a, left);
@@ -2343,7 +2350,11 @@ class Emitter {
 				var right:Int = reg(op == '<<' || op == '>>' || op == '>>>' ? tI32 : shared);
 				into(b, right);
 
-				ops.push({op: code, args: [slot, left, right]});
+				var landed:Int = (integral && want != tI32) ? reg(tI32) : slot;
+				ops.push({op: code, args: [landed, left, right]});
+
+				if (landed != slot)
+					move(landed, slot);
 
 			case ECall(callee, params):
 				emitCall(callee, params, slot, e.pos);
