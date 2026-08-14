@@ -126,9 +126,9 @@ class Compiler {
 	 * @param path A scripted class path.
 	 * @return The class that stands in for it, or null when the scripted one is what runs.
 	 *
-	 * cppia replaces a class outright, so what a host must reach afterwards is the replacement.
-	 * HashLink replaces the functions inside the class it was given, so there is nothing to hand
-	 * back and the world's own answer stays the right one.
+	 * Both backends replace a class outright, so what a host must reach afterwards is the
+	 * replacement. Asking is still what a host should do rather than assuming: a class the emitter
+	 * refused is one the interpreter still runs, and that answers null.
 	 */
 	public static function substitute(path:String):Dynamic {
 		return Backend.substitute(path);

@@ -39,10 +39,10 @@ import hxscript.types.ScriptedClass;
 /**
  * Compiles hxscript modules to HashLink bytecode, which the VM loads and JIT-compiles at runtime.
  *
- * The counterpart of `Cppia` for the other target that can run a script as its own bytecode. What a
- * compiled function becomes is simpler here: a plain function value, which replaces the interpreted
- * one in the class that declared it. Nothing in the interpreter has to know, and nothing in its hot
- * path changes.
+ * The counterpart of `Cppia` for the other target that can run a script as its own bytecode, and it
+ * does the same thing with a class: the module holds the type, so a scripted class is replaced
+ * outright rather than having its bodies swapped out. Its fields are offsets, its methods are
+ * entries in the table a virtual call goes through, and its statics live in its own class value.
  */
 class Backend {
 	/**

@@ -112,8 +112,8 @@ class Fields {
 	/**
 	 * Calls a case on whichever class is the one running.
 	 *
-	 * cppia replaces a scripted class outright and HashLink replaces the functions inside it, so
-	 * asking the world for the class is right on one target and stale on the other.
+	 * Both backends replace a scripted class outright, so asking the world for the class is stale
+	 * wherever one compiled and right wherever none did.
 	 */
 	static function call(env:Environment, field:String, rounds:Int):Dynamic {
 		var stood:Dynamic = Compiler.substitute('game.Fields');
