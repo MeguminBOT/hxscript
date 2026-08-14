@@ -272,7 +272,72 @@ class Scripted {
 				}
 
 				/**
-				 * Repairs the three things `Context.getTypedExpr` cannot round-trip.
+				 * Puts the concrete type in place of a base's parameter, which a rebuilt body still names.
+				 *
+				 * `new FlxTypedGroup<T>(size)` in a constructor being re-emitted keeps its `T`, and the
+				 * bridge is not generic, so the name means nothing there.
+				 *
+				 * @param t A type the rebuilt body mentions.
+				 * @return It, with any parameter of the base replaced by what was bound for it.
+				 */
+				function boundFor(name:String):Null<ComplexType> {
+					if (generics.exists(name))
+						return generics.get(name);
+
+					var short:String = name.substr(name.lastIndexOf('.') + 1);
+					if (generics.exists(short))
+						return generics.get(short);
+
+					/** A parameter is keyed by whatever declared it, so `T` and `Owner.T` are one name. */
+					for (key => bound in generics)
+						if (key.substr(key.lastIndexOf('.') + 1) == short)
+							return bound;
+
+					return null;
+				}
+
+				function bindType(t:ComplexType):ComplexType {
+					return switch (t) {
+						case TPath(p):
+							var bound:Null<ComplexType> = (p.pack.length == 0 && p.sub == null && p.params.length == 0) ? boundFor(p.name) : null;
+
+							if (bound != null)
+								bound;
+							else
+								TPath({
+									pack: p.pack,
+									name: p.name,
+									sub: p.sub,
+									params: [
+										for (q in p.params)
+											switch (q) {
+												case TPType(inner): TPType(bindType(inner));
+												default: q;
+											}
+									]
+								});
+
+						case TOptional(inner): TOptional(bindType(inner));
+						case TNamed(n, inner): TNamed(n, bindType(inner));
+						case TFunction(from, to): TFunction([for (a in from) bindType(a)], bindType(to));
+						case TParent(inner): TParent(bindType(inner));
+						default: t;
+					}
+				}
+
+				/** @param params A type path's parameters. @return Them, with the base's bound. */
+				function bindParams(params:Array<TypeParam>):Array<TypeParam> {
+					return [
+						for (q in params)
+							switch (q) {
+								case TPType(inner): TPType(bindType(inner));
+								default: q;
+							}
+					];
+				}
+
+				/**
+				 * Repairs the things `Context.getTypedExpr` cannot round-trip.
 				 *
 				 * @param typed The expression as the typer left it.
 				 * @param e The same expression re-emitted as syntax.
@@ -332,12 +397,36 @@ class Scripted {
 
 					function fix(x:Expr):Expr {
 						return switch (x.expr) {
-							case ENew(t, params) if (t.pack.length == 0 && t.sub == null && qualified.exists(t.name)):
-								var q:TypePath = qualified.get(t.name);
-								{pos: x.pos, expr: ENew({pack: q.pack, name: q.name, sub: q.sub, params: t.params}, [for (p in params) fix(p)])};
+							case ENew(t, params):
+								var q:TypePath = (t.pack.length == 0 && t.sub == null && qualified.exists(t.name)) ? qualified.get(t.name) : t;
+								{
+									pos: x.pos,
+									expr: ENew({pack: q.pack, name: q.name, sub: q.sub, params: bindParams(t.params)}, [for (p in params) fix(p)])
+								};
+
+							case ECheckType(inner, t):
+								{pos: x.pos, expr: ECheckType(fix(inner), bindType(t))};
+
+							case ECast(inner, t) if (t != null):
+								{pos: x.pos, expr: ECast(fix(inner), bindType(t))};
 
 							case EField(owner, member, kind) if (implName(owner) != null && abstractOf.exists(implName(owner))):
 								{pos: x.pos, expr: EField(macro $p{abstractOf.get(implName(owner))}, member, kind)};
+
+							/**
+							 * Puts back the `untyped` that typing took off a target's own magic.
+							 *
+							 * HashLink's `Std.int` is `untyped $int(x)`, and once inlined into a rebuilt
+							 * constructor `$int` is a name no source outside `untyped` may write.
+							 */
+							case ECall({expr: EConst(CIdent(name))}, params) if (name.startsWith('$')):
+								{
+									pos: x.pos,
+									expr: EUntyped({
+										pos: x.pos,
+										expr: ECall({pos: x.pos, expr: EConst(CIdent(name))}, [for (p in params) fix(p)])
+									})
+								};
 
 							case EConst(CIdent(name)) if (name.indexOf('`') >= 0):
 								{pos: x.pos, expr: EConst(CIdent(name.replace('`', '_')))};
@@ -349,7 +438,7 @@ class Scripted {
 										for (v in vars)
 											{
 												name: v.name.replace('`', '_'),
-												type: v.type,
+												type: v.type == null ? null : bindType(v.type),
 												expr: v.expr == null ? null : fix(v.expr),
 												isFinal: v.isFinal,
 												isStatic: v.isStatic,
@@ -512,12 +601,24 @@ class Scripted {
 				 * @param type The class whose constructor is rebuilt.
 				 * @return The constructor as a function expression.
 				 */
-				function mapConstructor(type:ClassType):Expr {
+				function mapConstructor(type:ClassType, ?types:Array<Type>):Expr {
+					/**
+					 * The `extends` clause's arguments, bound before this class's body is rebuilt.
+					 *
+					 * A chain is walked up one class at a time and only the class was carried, so a
+					 * parameter bound two levels down was not in scope by the time the body naming it was
+					 * reached: `new FlxTypedGroup<T>(size)` came back out as `T`.
+					 */
+					if (types != null)
+						for (i => given in types)
+							if (i < type.params.length)
+								generics.set(type.params[i].name, bindType(toCT(given)));
+
 					if (type.constructor == null) {
 						var inits:Array<Expr> = fieldInits(type);
 
 						if (type.superClass != null) {
-							switch (mapConstructor(type.superClass.t.get()).expr) {
+							switch (mapConstructor(type.superClass.t.get(), type.superClass.params).expr) {
 								case EFunction(_, fun):
 									inits.push(fun.expr);
 									return {pos: pos, expr: EFunction(FAnonymous, {args: fun.args, expr: macro $b{inits}, ret: fun.ret})};
@@ -599,14 +700,14 @@ class Scripted {
 									pos: pos,
 									expr: ECall(switch (e.expr) {
 										case EConst(CIdent('super')):
-											mapConstructor(type.superClass.t.get());
+											mapConstructor(type.superClass.t.get(), type.superClass.params);
 										default:
 											e.map(mapSuper);
 									}, [for (param in newParams) param.map(mapSuper)])
 								}
 
 							case EConst(CIdent('super')):
-								mapConstructor(type.superClass.t.get());
+								mapConstructor(type.superClass.t.get(), type.superClass.params);
 
 							default:
 								e.map(mapSuper);
@@ -656,7 +757,7 @@ class Scripted {
 					};
 				}
 
-				switch (mapConstructor(type).expr) {
+				switch (mapConstructor(type, types).expr) {
 					default:
 					case EFunction(_, fun):
 						hasConstructor = true;
