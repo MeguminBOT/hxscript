@@ -11,6 +11,8 @@
 #   cpp-interp   the tree-walking interpreter on hxcpp, which is what cppia is compared against
 #   cppia        hxcpp bytecode, the JIT off
 #   cppia-jit    the same bytecode with the JIT on
+#   hlc-interp   the tree-walking interpreter inside an HL/C binary, with no loader linked
+#   hlc-jit      HashLink bytecode inside an HL/C binary, loaded and jitted
 #
 # A column is a file of tab-separated rows under bin_test/conformance. Nothing here compares them:
 # `Table` does that, because a runner that decided what agreement meant would have to be built into
@@ -25,6 +27,7 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 OUT=${OUT:-$ROOT/bin_test/conformance}
 LIMIT=${LIMIT:-1000}
 NOBUILD=${NOBUILD:-0}
+HL=${HLPATH:-/c/hashlink/hashlink-1.16.0-win}
 
 CP="-cp $ROOT/src -cp $ROOT/test/common -cp $ROOT/test/common/fixtures -cp $ROOT/test/lib"
 
@@ -43,7 +46,7 @@ mkdir -p "$OUT"
 # Whether this run has already built the binary cppia and cppia-jit share.
 CPPIA_BUILT=0
 
-ALL="eval-interp cpp-interp cppia cppia-jit"
+ALL="eval-interp cpp-interp cppia cppia-jit hlc-interp hlc-jit"
 MODES=${*:-$ALL}
 
 # Builds a mode, unless it shares a binary with one already built.
@@ -72,11 +75,37 @@ build() {
 			haxe $CP $KEEP -D scriptable -D hxscript_cppia -dce no -main ConformanceProbe -cpp "$OUT/cppia"
 			CPPIA_BUILT=1
 			;;
+		hlc-interp)
+			hlc "$1" --no-jit
+			;;
+		hlc-jit)
+			hlc "$1"
+			;;
 		*)
 			echo "conformance.sh: no mode called '$1'" >&2
 			exit 2
 			;;
 	esac
+}
+
+# Generates C for the probe and links it natively, through the library's own tooling, so that what is
+# tested is what ships.
+hlc() {
+	dir="$OUT/$1"
+	rm -rf "$dir"
+
+	haxe $CP $KEEP -D hxscript_hl -D hl-ver=1.16.0 -D no-compilation -main ConformanceProbe -hl "$dir/main.c"
+
+	[ -f "$dir/main.c" ] || { echo "no C was generated for $1" >&2; exit 1; }
+
+	sh src/hxscript/hl/native/build.sh --hlc "$dir" --hl "$HL" --out "$dir/probe.exe" ${2:-} >/dev/null
+
+	# The binary links libhl by path and then has to find it again when it runs. The `|| true` is not
+	# decoration: the last name in the list is absent on every platform but one, so without it the
+	# loop leaves a failure behind and `set -e` ends the run after a successful build.
+	for lib in libhl.dll libhl.so libhl.dylib; do
+		[ -f "$HL/$lib" ] && cp "$HL/$lib" "$dir/" || true
+	done
 }
 
 # The command that runs a mode, and the directory to run it from. Run from beside the binary,
@@ -86,6 +115,7 @@ where() {
 		eval-interp) echo "$ROOT" ;;
 		cpp-interp) echo "$OUT/cpp-interp" ;;
 		cppia|cppia-jit) echo "$OUT/cppia" ;;
+		hlc-interp|hlc-jit) echo "$OUT/$1" ;;
 	esac
 }
 
@@ -95,6 +125,7 @@ runner() {
 		cpp-interp) echo "./ConformanceProbe.exe" ;;
 		cppia) echo "./ConformanceProbe.exe --nojit" ;;
 		cppia-jit) echo "./ConformanceProbe.exe" ;;
+		hlc-interp|hlc-jit) echo "./probe.exe" ;;
 	esac
 }
 

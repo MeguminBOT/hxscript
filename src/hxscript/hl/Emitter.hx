@@ -28,6 +28,7 @@ import hxscript.hl.TypeKind;
 import hxscript.hl.Binding;
 import hxscript.hl.Binding.BindingKind;
 import hxscript.hl.Bytecode.Instruction;
+import hxscript.compile.Accessors;
 import hxscript.compile.Capture;
 import hxscript.compile.Unsupported;
 import hxscript.hl.TypeEntry.Field;
@@ -597,7 +598,11 @@ class Emitter {
 			land([over]);
 		}
 
-		var boxing = Capture.transform(fn.args, fn.expr);
+		/**
+		 * The accessor rewrite runs before the capture pass and not inside the emitter, because an
+		 * accessor that names its own property captures it, which leaves no identifier to rewrite.
+		 */
+		var boxing = Capture.transform(fn.args, Accessors.apply(fn.expr));
 		for (name in boxing.boxedArgs) {
 			var cell:Int = lookup(name);
 			var raw:Int = reg(regs[cell]);
@@ -1233,6 +1238,29 @@ class Emitter {
 					ops.push({op: step, args: [local]});
 				}
 
+			/**
+			 * An assignment used as a value yields what was assigned, not what reading the target
+			 * back would give, since reading a property would run its getter a second time.
+			 */
+			case EBinop('=', target, value):
+				switch (target.e) {
+					case EIdent(name) if (lookup(name) != null):
+						var local:Int = lookup(name);
+						into(value, local);
+						move(local, slot);
+
+					case _:
+						var held:Int = reg(tDyn);
+						into(value, held);
+
+						var temp:String = '`v' + (temps++);
+						scopes[scopes.length - 1].set(temp, held);
+						statement({e: EBinop('=', target, {e: EIdent(temp), pos: e.pos}), pos: e.pos});
+						scopes[scopes.length - 1].remove(temp);
+
+						move(held, slot);
+				}
+
 			case EBinop('??', a, b):
 				into(a, slot);
 
@@ -1273,6 +1301,18 @@ class Emitter {
 			 * is nothing left to emit, and it still has to leave a value behind because it sits in a
 			 * block like anything else.
 			 */
+			/**
+			 * A throw in value position, which is what the accessor rewrite leaves where a property
+			 * that can never be read was read. Nothing follows it, and the slot still has to hold
+			 * something for whatever was going to consume it.
+			 */
+			case EThrow(thrown):
+				ops.push({op: OThrow, args: [dynOf(thrown)]});
+				var empty:Int = landing(slot);
+				ops.push({op: ONull, args: [empty]});
+				if (empty != slot)
+					move(empty, slot);
+
 			case EImport(_, _) | EUsing(_):
 				var empty:Int = landing(slot);
 				ops.push({op: ONull, args: [empty]});
@@ -1326,8 +1366,13 @@ class Emitter {
 				switch (item.e) {
 					case EBinop('=>', k, v):
 						callSupport('put', [held, dynOf(k), dynOf(v)], held);
+					/**
+					 * The interpreter raises this when it runs rather than refusing the module, so
+					 * compiled code raises it too. Refusing here would cost a whole module its
+					 * bytecode over a line that was never going to run.
+					 */
 					case _:
-						throw new Unsupported('a literal mixing pairs with plain values', pos);
+						callSupport('raise', [named('Invalid map key=>value expression')], reg(tDyn));
 				}
 			}
 		} else {
@@ -1533,6 +1578,9 @@ class Emitter {
 
 	/** How many field-access sites have been given a memory, so each one's key is its own. */
 	var sites:Int = 0;
+
+	/** Names an evaluated register can be given, so a written form can refer to one. */
+	var temps:Int = 0;
 
 	/** This module's index for the runtime's reader, declared the first time a field is read. */
 	var fetchNative:Int = -1;
@@ -2281,7 +2329,7 @@ class Emitter {
 		'add' => 'ddd', 'sub' => 'ddd', 'mul' => 'ddd', 'div' => 'ddd', 'mod' => 'ddd',
 		'eq' => 'ddb', 'lt' => 'ddb', 'lte' => 'ddb', 'gt' => 'ddb', 'gte' => 'ddb',
 		'neg' => 'dd', 'truthy' => 'db', 'toInt' => 'di', 'toFloat' => 'df', 'toBool' => 'db',
-		'fetch' => 'dddd', 'store' => 'ddddv', 'get' => 'ddd', 'set' => 'dddv',
+		'fetch' => 'dddd', 'store' => 'ddddv', 'get' => 'ddd', 'set' => 'dddv', 'raise' => 'dd',
 		'invoke' => 'dddd', 'send' => 'ddddd', 'make' => 'ddd', 'anyMap' => 'd',
 		'index' => 'ddd', 'setIndex' => 'dddd', 'array' => 'd', 'push' => 'ddv',
 		'object' => 'd', 'setField' => 'dddv', 'put' => 'dddd', 'range' => 'ddd',

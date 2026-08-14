@@ -122,6 +122,28 @@ class Backend {
 		return report.compiled.length > 0;
 	}
 
+	/** HashLink jits everything it loads, so this reads true and setting it changes nothing. */
+	public static var jit(get, set):Bool;
+
+	static function get_jit():Bool {
+		return true;
+	}
+
+	static function set_jit(v:Bool):Bool {
+		return true;
+	}
+
+	/**
+	 * @param path A scripted class path.
+	 * @return Whether anything of it compiled.
+	 */
+	public static function isCompiled(path:String):Bool {
+		return holders.exists(path);
+	}
+
+	/** Which classes have at least one compiled function in them. */
+	static var holders:Map<String, Bool> = new Map();
+
 	#if (hl && hxscript_hl)
 	/**
 	 * Compiles one module and binds whatever came out of it.
@@ -244,6 +266,7 @@ class Backend {
 				cls.reflectSetField(entry.field, fn);
 			}
 
+			holders.set(entry.path, true);
 			report.compiled.push(entry.path + '.' + entry.field);
 		}
 

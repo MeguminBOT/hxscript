@@ -587,6 +587,16 @@ class Runtime {
 	 * @param site This access's own memory.
 	 * @return The value.
 	 */
+	/**
+	 * Raises what the interpreter raises, for a construct that fails when it runs rather than when it
+	 * is compiled.
+	 *
+	 * @param message The text the interpreter carries.
+	 */
+	public static function raise(message:Dynamic):Dynamic {
+		return hxscript.runtime.Raise.custom(Std.string(message));
+	}
+
 	/** @return `fetch`, opened as an Int the way the interpreter opens one. */
 	public static function fetchInt(o:Dynamic, name:Dynamic, site:Dynamic):Int {
 		return toInt(fetch(o, name, site));

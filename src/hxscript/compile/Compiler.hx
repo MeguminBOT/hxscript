@@ -99,8 +99,11 @@ class Compiler {
 		return Backend.statics = v;
 	}
 
-	#if hxscript_cppia
-	/** Whether to turn the target's JIT on before the first module loads. Cppia only: HashLink always jits. */
+	/**
+	 * Whether to turn the target's JIT on before the first module loads.
+	 *
+	 * HashLink jits everything it loads, so this reads true there and setting it changes nothing.
+	 */
 	public static var jit(get, set):Bool;
 
 	static function get_jit():Bool {
@@ -118,7 +121,6 @@ class Compiler {
 	public static function isCompiled(path:String):Bool {
 		return Backend.isCompiled(path);
 	}
-	#end
 
 	/**
 	 * Compiles what it can of a world and binds the results into it.
