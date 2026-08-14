@@ -116,12 +116,43 @@ Everything the library reads. Only the first group is likely to concern you.
 
 ### Compiling at runtime
 
+Two targets can run a script as their own bytecode, and each takes one flag.
+
 | Flag | Effect |
 | --- | --- |
-| `-D hxscript_cppia` | compile the emitter into the build. Without it every module reports as skipped |
+| `-D hxscript_cppia` | on hxcpp, compile the emitter into the build. Without it every module reports as skipped |
 | `-D scriptable` | hxcpp's own flag, which makes your types reachable from bytecode |
+| `-D hxscript_hl` | on HashLink, the same, and build the native module the loader needs |
 
-Both are hxcpp-only. On any other target the compiler does not exist and every script is interpreted.
+On any other target the compiler does not exist and every script is interpreted.
+
+HashLink needs one thing hxcpp does not: a native module, because the VM's bytecode loader is
+compiled into `hl.exe` rather than into `libhl` and a program has no way to reach it. **`-lib
+hxscript -D hxscript_hl` builds it for you**, from the sources the library carries, against whatever
+HashLink your `HLPATH` or your path points at. Where it goes depends on which HashLink output you
+write:
+
+| Output | What happens |
+| --- | --- |
+| `-hl game.hl` | `hxscript.hdll` is built beside it, which is where the VM looks. Nothing else to do |
+| `-hl out/main.c` | the module is compiled into your binary, if you say where with `-D hxscript_native_out=<binary>` |
+
+It is skipped when it is already there and was built for the same HashLink, which is recorded beside
+it rather than guessed from timestamps: an upgraded VM leaves a module whose struct offsets are
+silently wrong, and that is the one failure this is all arranged to avoid.
+
+**Nothing here can fail your build.** No HashLink, no compiler, or a version the carried loader does
+not match, and you get one warning naming the thing to install. The natives are declared optional to
+HashLink, so the program starts exactly as it would have and interprets every script.
+
+| Flag | Effect |
+| --- | --- |
+| `-D hxscript_native_out=<path>` | link an HL/C program there with the module compiled in |
+| `-D hxscript_no_native` | never build it; you are producing it yourself |
+| `-D hxscript_no_jit` | build the runtime without the loader, so every script is interpreted |
+
+`src/hxscript/hl/native/build.sh` does the same by hand, and takes `--src <hashlink tree>` for
+building against a HashLink the carried loader does not match.
 
 ### Turning parts of the setup off
 
@@ -134,6 +165,7 @@ Each disables one step, for a host that would rather do it itself or is minimisi
 | `-D hxscript_no_bridges` | generating a bridge per scriptable base. The expensive step |
 | `-D hxscript_no_abstracts` | giving native abstracts a runtime form |
 | `-D hxscript_no_shims` | registering emulations for members with no runtime form |
+| `-D hxscript_no_native` | building HashLink's native module, which only a `-D hxscript_hl` build does |
 
 ## Metadata
 

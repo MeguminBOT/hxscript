@@ -76,7 +76,9 @@ build() {
 			CPPIA_BUILT=1
 			;;
 		hlc-interp)
-			hlc "$1" --no-jit
+			# One argument, split on the way in. Passed as two it arrives as `-D` alone, the define
+			# is dropped, and what builds is a program with no main that prints nothing.
+			hlc "$1" "-D hxscript_no_jit"
 			;;
 		hlc-jit)
 			hlc "$1"
@@ -88,17 +90,19 @@ build() {
 	esac
 }
 
-# Generates C for the probe and links it natively, through the library's own tooling, so that what is
-# tested is what ships.
+# Generates C for the probe and links it natively.
+#
+# Through the setup a host gets from `-lib hxscript` rather than through the build script beside the
+# sources, so that what is tested is the route a host actually takes: one haxe command, and the
+# native module compiled into the binary by the same macro that wired everything else in.
 hlc() {
 	dir="$OUT/$1"
 	rm -rf "$dir"
 
-	haxe $CP $KEEP -D hxscript_hl -D hl-ver=1.16.0 -D no-compilation -main ConformanceProbe -hl "$dir/main.c"
+	HLPATH="$HL" haxe $CP $KEEP -D hxscript_hl -D hl-ver=1.16.0 -D no-compilation \
+		-D hxscript_native_out="$dir/probe.exe" ${2:-} -main ConformanceProbe -hl "$dir/main.c"
 
-	[ -f "$dir/main.c" ] || { echo "no C was generated for $1" >&2; exit 1; }
-
-	sh src/hxscript/hl/native/build.sh --hlc "$dir" --hl "$HL" --out "$dir/probe.exe" ${2:-} >/dev/null
+	[ -f "$dir/probe.exe" ] || { echo "no binary was linked for $1" >&2; exit 1; }
 
 	# The binary links libhl by path and then has to find it again when it runs. The `|| true` is not
 	# decoration: the last name in the list is absent on every platform but one, so without it the
