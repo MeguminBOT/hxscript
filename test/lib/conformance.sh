@@ -100,9 +100,11 @@ hlc() {
 	rm -rf "$dir"
 
 	HLPATH="$HL" haxe $CP $KEEP -D hxscript_hl -D hl-ver=1.16.0 -D no-compilation \
-		-D hxscript_native_out="$dir/probe.exe" ${2:-} -main ConformanceProbe -hl "$dir/main.c"
+		${2:-} -main ConformanceProbe -hl "$dir/main.c"
 
-	[ -f "$dir/probe.exe" ] || { echo "no binary was linked for $1" >&2; exit 1; }
+	# Nothing here names the binary. `-D hxscript_hl` is the whole of what a host writes, and what it
+	# leaves is the C file's own name, so this checks for that rather than for a name it asked for.
+	[ -f "$dir/main.exe" ] || { echo "no binary was linked for $1" >&2; exit 1; }
 
 	# The binary links libhl by path and then has to find it again when it runs. The `|| true` is not
 	# decoration: the last name in the list is absent on every platform but one, so without it the
@@ -129,7 +131,7 @@ runner() {
 		cpp-interp) echo "./ConformanceProbe.exe" ;;
 		cppia) echo "./ConformanceProbe.exe --nojit" ;;
 		cppia-jit) echo "./ConformanceProbe.exe" ;;
-		hlc-interp|hlc-jit) echo "./probe.exe" ;;
+		hlc-interp|hlc-jit) echo "./main.exe" ;;
 	esac
 }
 

@@ -134,8 +134,10 @@ write:
 
 | Output | What happens |
 | --- | --- |
-| `-hl game.hl` | `hxscript.hdll` is built beside it, which is where the VM looks. Nothing else to do |
-| `-hl out/main.c` | the module is compiled into your binary, if you say where with `-D hxscript_native_out=<binary>` |
+| `-hl game.hl` | `hxscript.hdll` is built beside it, which is where the VM looks |
+| `-hl out/game.c` | the module is compiled in and `out/game` is linked, since HL/C has nowhere to put a library |
+
+Either way the flag is the whole of it, the way `-D hxscript_cppia` is on hxcpp.
 
 It is skipped when it is already there and was built for the same HashLink, which is recorded beside
 it rather than guessed from timestamps: an upgraded VM leaves a module whose struct offsets are
@@ -147,7 +149,7 @@ HashLink, so the program starts exactly as it would have and interprets every sc
 
 | Flag | Effect |
 | --- | --- |
-| `-D hxscript_native_out=<path>` | link an HL/C program there with the module compiled in |
+| `-D hxscript_native_out=<path>` | link the HL/C binary somewhere other than beside its C |
 | `-D hxscript_no_native` | never build it; you are producing it yourself |
 | `-D hxscript_no_jit` | build the runtime without the loader, so every script is interpreted |
 

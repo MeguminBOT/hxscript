@@ -195,19 +195,18 @@ class Native {
 	/**
 	 * Links an HL/C program with the module compiled into it.
 	 *
-	 * Only when asked, and the reason is that nothing else produces this binary either: Haxe writes
-	 * the C and the hashlink haxelib says native compilation is not implemented, so a host that has
-	 * its own build has one for a reason and should not find a second binary appearing beside it.
+	 * There is nowhere to put a library in an HL/C build, so the module is the program or it is
+	 * nothing. Nothing else produces this binary either: Haxe writes the C and the hashlink haxelib
+	 * says native compilation is not implemented, so the choice is between a binary here and a
+	 * directory of C nobody asked the host to compile.
+	 *
+	 * It takes the name of the C Haxe was told to write, so `-hl out/game.c` leaves `out/game`.
 	 *
 	 * @return What happened.
 	 */
 	static function program(out:String, carried:String, hl:String, headers:String, cc:String, version:Int):Outcome {
-		var target:Null<String> = Context.definedValue('hxscript_native_out');
-
-		if (target == null)
-			return Missing('this build writes HL/C, where the module is compiled in rather than placed beside',
-				'add -D hxscript_native_out=<binary> to have it linked here, or do it yourself:\n'
-				+ '  sh ' + Path.join([carried, 'build.sh']) + ' --hlc ' + Path.directory(out) + ' --out <binary>');
+		var told:Null<String> = Context.definedValue('hxscript_native_out');
+		var target:String = told != null ? told : Path.withoutExtension(out) + (windows() ? '.exe' : '');
 
 		var where:String = Path.directory(out);
 		var entry:Null<String> = written(where);
