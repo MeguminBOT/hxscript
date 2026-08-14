@@ -242,24 +242,40 @@ typedef struct {
 	void *fn;
 } hxs_native;
 
-/** One field access site: the name it reads, the last receiver type it saw, and where the field sat. */
+/**
+	One field access site: the name it reads, the last receiver type it saw, and where the field sat.
+
+	`accessor` is what makes a property a property. A Haxe property still has storage of its own name,
+	so a site that only looked for a field would find it and write past the accessor, which is how a
+	write to `x` on an object of a framework that recalculates on `set_x` left the framework never
+	told. The hash of the accessor the side wants is decided where the site is made: `get_` for a
+	read, `set_` for a write, nothing at all for a call.
+*/
 typedef struct {
 	hl_type *t;
 	hl_type *ft;
 	int offset;
 	int hash;
+	int accessor;
 	void *fptr;
 } hxs_site;
 
 /** What a site's offset says when it holds a method rather than a field. */
 #define HXS_SITE_METHOD (-2)
 
+/** What it says when the name is a property, and `ft` and `fptr` are its accessor. */
+#define HXS_SITE_ACCESSOR (-3)
+
 static hxs_site *hxs_sites = NULL;
 static int hxs_site_count = 0;
 static int hxs_site_cap = 0;
 
-/** @return A cache index for one access, baked into the bytecode as a constant, or -1. */
-HL_PRIM int HL_NAME(site)( int hash ) {
+/**
+	@param hash What the name hashes to.
+	@param accessor What the accessor this side would go through hashes to, or 0 when there is none.
+	@return A cache index for one access, baked into the bytecode as a constant, or -1.
+*/
+HL_PRIM int HL_NAME(site)( int hash, int accessor ) {
 	if( hxs_site_count == hxs_site_cap ) {
 		int cap = hxs_site_cap ? hxs_site_cap * 2 : 256;
 		hxs_site *grown = (hxs_site*)realloc(hxs_sites,sizeof(hxs_site) * cap);
@@ -269,6 +285,7 @@ HL_PRIM int HL_NAME(site)( int hash ) {
 	}
 	memset(hxs_sites + hxs_site_count,0,sizeof(hxs_site));
 	hxs_sites[hxs_site_count].hash = hash;
+	hxs_sites[hxs_site_count].accessor = accessor;
 	return hxs_site_count++;
 }
 
@@ -364,6 +381,31 @@ static void *hxs_field( vdynamic *obj, int hash, int site, hl_type **ft ) {
 		return NULL;
 	}
 
+	/*
+		The accessor before the storage, because a property has both and only one of them is the
+		field. Once per type met here rather than once per access: what it settles is cached in the
+		site the same way an offset is.
+	*/
+	if( s->accessor ) {
+		rt = hl_get_obj_rt(obj->t);
+		{
+			hl_runtime_obj *at = rt;
+			while( at ) {
+				hl_field_lookup *f = hl_lookup_find(at->lookup,at->nlookup,s->accessor);
+				if( f ) {
+					if( f->field_index >= 0 || f->t->kind != HFUN )
+						break;
+					s->t = obj->t;
+					s->ft = f->t;
+					s->fptr = rt->methods[-f->field_index - 1];
+					s->offset = HXS_SITE_ACCESSOR;
+					return NULL;
+				}
+				at = at->parent;
+			}
+		}
+	}
+
 	rt = hl_get_obj_rt(obj->t);
 	while( rt ) {
 		hl_field_lookup *f = hl_lookup_find(rt->lookup,rt->nlookup,hash);
@@ -382,6 +424,109 @@ static void *hxs_field( vdynamic *obj, int hash, int site, hl_type **ft ) {
 	s->t = obj->t;
 	s->offset = -1;
 	return NULL;
+}
+
+/** The shapes an accessor can be called in without boxing what it takes or answers. */
+typedef double (*hxs_prop_d)( void * );
+typedef int (*hxs_prop_i)( void * );
+typedef double (*hxs_prop_dd)( void *, double );
+typedef void (*hxs_prop_vd)( void *, double );
+typedef int (*hxs_prop_ii)( void *, int );
+typedef void (*hxs_prop_vi)( void *, int );
+
+/**
+	@param obj The receiver.
+	@param site The access.
+	@param out Filled with the accessor when there is one.
+	@return Whether the site's name is a property of this receiver rather than a field.
+
+	Only when the site was resolved against this very type, since what it remembers is about the last
+	receiver it saw and says nothing about another.
+*/
+static bool hxs_property( vdynamic *obj, int site, vclosure *out ) {
+	hxs_site *s;
+
+	if( obj == NULL || site < 0 || site >= hxs_site_count )
+		return false;
+
+	s = hxs_sites + site;
+
+	if( s->t != obj->t || s->offset != HXS_SITE_ACCESSOR )
+		return false;
+
+	out->t = s->ft;
+	out->fun = s->fptr;
+	out->hasValue = 0;
+#	ifdef HL_64
+	out->stackCount = 0;
+#	endif
+	return true;
+}
+
+/**
+	Reads through a getter that answers a number, leaving it as one.
+
+	@param integral Whether the caller wants an Int, which decides which returns can be taken.
+	@return Whether it was called, with its answer in `out`.
+*/
+static bool hxs_read_number( vclosure *cl, vdynamic *obj, bool integral, double *out ) {
+	hl_type_fun *ft = cl->t->fun;
+
+	if( ft->nargs != 1 )
+		return false;
+
+	if( !integral ) {
+		if( ft->ret->kind != HF64 )
+			return false;
+
+		*out = ((hxs_prop_d)cl->fun)(obj);
+		return true;
+	}
+
+	if( ft->ret->kind != HI32 )
+		return false;
+
+	*out = (double)((hxs_prop_i)cl->fun)(obj);
+	return true;
+}
+
+/**
+	Writes through a setter that takes a number, without boxing it.
+
+	A setter answers the value it was given, so the return is the property's own type rather than
+	nothing; both are taken, and any other shape goes the long way.
+
+	@param integral Whether the value on hand is an Int.
+	@return Whether it was called.
+*/
+static bool hxs_write_number( vclosure *cl, vdynamic *obj, double value, bool integral ) {
+	hl_type_fun *ft = cl->t->fun;
+
+	if( ft->nargs != 2 )
+		return false;
+
+	if( ft->args[1]->kind == HF64 ) {
+		if( ft->ret->kind == HF64 )
+			((hxs_prop_dd)cl->fun)(obj,value);
+		else if( ft->ret->kind == HVOID )
+			((hxs_prop_vd)cl->fun)(obj,value);
+		else
+			return false;
+
+		return true;
+	}
+
+	if( !integral || ft->args[1]->kind != HI32 )
+		return false;
+
+	if( ft->ret->kind == HI32 )
+		((hxs_prop_ii)cl->fun)(obj,(int)value);
+	else if( ft->ret->kind == HVOID )
+		((hxs_prop_vi)cl->fun)(obj,(int)value);
+	else
+		return false;
+
+	return true;
 }
 
 HL_PRIM vdynamic *HL_NAME(getp)( vdynamic *obj, int hash, int site ) {
@@ -538,6 +683,8 @@ HL_PRIM int HL_NAME(fetchi)( vdynamic *obj, vdynamic *name, vdynamic *slot, int 
 	void *addr;
 	vdynamic *args[3];
 	vdynamic *answer;
+	vclosure cl;
+	double through;
 
 	addr = hxs_field(obj,site < 0 || site >= hxs_site_count ? 0 : hxs_sites[site].hash,site,&ft);
 	if( addr ) {
@@ -553,6 +700,9 @@ HL_PRIM int HL_NAME(fetchi)( vdynamic *obj, vdynamic *name, vdynamic *slot, int 
 			return hl_dyn_casti(addr,ft,&hlt_i32);
 		}
 	}
+
+	if( hxs_property(obj,site,&cl) && hxs_read_number(&cl,obj,true,&through) )
+		return (int)through;
 
 	if( hxs_through[HXS_THROUGH_READ_INT] == NULL )
 		return 0;
@@ -573,10 +723,15 @@ HL_PRIM double HL_NAME(fetchd)( vdynamic *obj, vdynamic *name, vdynamic *slot, i
 	void *addr;
 	vdynamic *args[3];
 	vdynamic *answer;
+	vclosure cl;
+	double through;
 
 	addr = hxs_field(obj,site < 0 || site >= hxs_site_count ? 0 : hxs_sites[site].hash,site,&ft);
 	if( addr )
 		return ft->kind == HF64 ? *(double*)addr : hl_dyn_castd(addr,ft);
+
+	if( hxs_property(obj,site,&cl) && hxs_read_number(&cl,obj,false,&through) )
+		return through;
 
 	if( hxs_through[HXS_THROUGH_READ_FLOAT] == NULL )
 		return 0.;
@@ -943,6 +1098,7 @@ HL_PRIM void HL_NAME(storei)( vdynamic *obj, vdynamic *name, int value, vdynamic
 	hl_type *ft;
 	void *addr = hxs_field(obj,site < 0 || site >= hxs_site_count ? 0 : hxs_sites[site].hash,site,&ft);
 	vclosure *c;
+	vclosure cl;
 
 	if( addr ) {
 		switch( ft->kind ) {
@@ -965,6 +1121,9 @@ HL_PRIM void HL_NAME(storei)( vdynamic *obj, vdynamic *name, int value, vdynamic
 		}
 	}
 
+	if( hxs_property(obj,site,&cl) && hxs_write_number(&cl,obj,(double)value,true) )
+		return;
+
 	c = hxs_through[HXS_THROUGH_WRITE_INT];
 	if( c == NULL || c->hasValue )
 		return;
@@ -976,6 +1135,7 @@ HL_PRIM void HL_NAME(stored)( vdynamic *obj, vdynamic *name, double value, vdyna
 	hl_type *ft;
 	void *addr = hxs_field(obj,site < 0 || site >= hxs_site_count ? 0 : hxs_sites[site].hash,site,&ft);
 	vclosure *c;
+	vclosure cl;
 
 	if( addr ) {
 		if( ft->kind == HF64 ) {
@@ -985,6 +1145,9 @@ HL_PRIM void HL_NAME(stored)( vdynamic *obj, vdynamic *name, double value, vdyna
 		hl_dyn_setd(obj,hxs_sites[site].hash,value);
 		return;
 	}
+
+	if( hxs_property(obj,site,&cl) && hxs_write_number(&cl,obj,value,false) )
+		return;
 
 	c = hxs_through[HXS_THROUGH_WRITE_FLOAT];
 	if( c == NULL || c->hasValue )
@@ -1438,7 +1601,7 @@ DEFINE_PRIM(_I32, state, _NO_ARG);
 DEFINE_PRIM(_I32, built_for, _NO_ARG);
 DEFINE_PRIM(_BYTES, last_error, _NO_ARG);
 DEFINE_PRIM(_I32, hooks, _NO_ARG);
-DEFINE_PRIM(_I32, site, _I32);
+DEFINE_PRIM(_I32, site, _I32 _I32);
 DEFINE_PRIM(_VOID, fallback, _ARR);
 DEFINE_PRIM(_I32, hash, _BYTES);
 DEFINE_PRIM(_VOID, set_global, _ABSTRACT(hxs_module) _I32 _DYN);

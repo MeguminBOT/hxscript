@@ -3105,10 +3105,16 @@ class Emitter {
 		return storeNative;
 	}
 
-	/** @return A register holding this access's cache index, which the runtime resolves against. */
-	function siteIndex(name:String):Int {
+	/**
+	 * @param name The field this access names.
+	 * @param accessor What a property of that name would be reached through here, or null when this
+	 *        access is a call, which no accessor stands in front of.
+	 * @return A register holding this access's cache index, which the runtime resolves against.
+	 */
+	function siteIndex(name:String, ?accessor:String):Int {
+		var through:Int = accessor == null ? 0 : Loader.hash(accessor + name);
 		var held:Int = reg(tI32);
-		ops.push({op: OInt, args: [held, module.intId(Loader.site(Loader.hash(name)))]});
+		ops.push({op: OInt, args: [held, module.intId(Loader.site(Loader.hash(name), through))]});
 		return held;
 	}
 
@@ -3158,7 +3164,7 @@ class Emitter {
 		var target:Int = dynOf(obj);
 		var named:Int = named(name);
 		var cell:Int = siteSlot();
-		var site:Int = siteIndex(name);
+		var site:Int = siteIndex(name, 'get_');
 
 		/**
 		 * A reader that answers what the destination already is, when it is a number. `fetch` answers
@@ -3223,7 +3229,7 @@ class Emitter {
 			into(value, raw);
 
 			var cell:Int = siteSlot();
-			var site:Int = siteIndex(name);
+			var site:Int = siteIndex(name, 'set_');
 			var writer:Int = wanted == tI32 ? storeIntIndex() : storeFloatIndex();
 
 			ops.push({op: OCallN, args: [reg(tVoid), writer, target, held, raw, cell, site]});
@@ -3232,7 +3238,7 @@ class Emitter {
 
 		var written:Int = dynOf(value);
 		var cell:Int = siteSlot();
-		var site:Int = siteIndex(name);
+		var site:Int = siteIndex(name, 'set_');
 
 		ops.push({op: OCallN, args: [reg(tVoid), storeIndex(), target, held, written, cell, site]});
 	}

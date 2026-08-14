@@ -321,11 +321,19 @@ class Loader {
 	/**
 	 * Reserves an inline cache for one field access, as a constant the bytecode carries.
 	 *
+	 * A property is the reason the accessor is asked for here rather than found there. A property has
+	 * storage of its own name, so a cache that only looked for a field would find it and write past
+	 * the accessor: `o.x = 3` on a framework object would store the three and never tell the framework
+	 * it moved. Which accessor matters is decided by the side, and only the compiler knows the side,
+	 * so it says so when it reserves the cache.
+	 *
 	 * @param hash What the field name hashes to, which the cache resolves against.
+	 * @param accessor What the accessor this side would go through hashes to, or 0 when this access
+	 *        cannot go through one.
 	 * @return The site, or -1 when this build has no runtime to hold one.
 	 */
-	public static function site(hash:Int):Int {
-		return nextSite(hash);
+	public static function site(hash:Int, accessor:Int = 0):Int {
+		return nextSite(hash, accessor);
 	}
 
 	/**
@@ -409,7 +417,7 @@ class Loader {
 		return 0;
 	}
 
-	@:hlNative("?hxscript", "site") static function nextSite(hash:Int):Int {
+	@:hlNative("?hxscript", "site") static function nextSite(hash:Int, accessor:Int):Int {
 		return -1;
 	}
 

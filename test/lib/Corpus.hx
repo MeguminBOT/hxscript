@@ -198,6 +198,24 @@ class Corpus {
 			public function new() {}
 		');
 
+		// A property of a class the HOST compiled, which is a different mechanism from a property of a
+		// scripted one: the storage is a real field at a real offset and nothing on the receiver says
+		// an accessor stands in front of it. A backend reaching that offset writes the right number
+		// past the setter, so the field reads back correctly and the object is never told it changed.
+		// That is not hypothetical: it is what left every sprite of a heaps project sitting still.
+		// The import is not decoration. A host class a script names has to be placeable by every
+		// backend, and one of them places a `new` through what the module imported rather than through
+		// what the world can resolve, so a case naming a host type without importing it is refused
+		// there and the row says nothing about properties.
+		var host:String = 'import HostBase;';
+
+		check('host property setter', 'var h = new HostBase(); h.scaled = 5; return h.scaled;', '10', null, host);
+		check('host property setter ran', 'var h = new HostBase(); h.scaled = 5; return h.writes;', '1', null, host);
+		check('host property setter twice', 'var h = new HostBase(); h.scaled = 1; h.scaled = 3; return h.writes;', '2', null, host);
+		check('host property getter', 'var h = new HostBase(); h.shown = 4; return h.shown;', '5', null, host);
+		check('host plain field beside a property', 'var h = new HostBase(); h.kept = 2; h.scaled = 3; return h.kept + h.scaled;', '8',
+			null, host);
+
 		// An array literal has nothing in it to say what it holds, so it used to be built loose while an
 		// annotation promised a specific kind. Reading it back through that annotation reinterprets the
 		// memory, which crashes rather than misbehaves, so these index one after the round trip.
