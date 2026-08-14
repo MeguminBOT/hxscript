@@ -144,6 +144,36 @@ class Frontier {
 
 	/** Reaching the host, which is where the two compilers differ most in mechanism. */
 	static function hostReach(probe:Probe):Void {
+		/*
+			A host abstract with an `inline function new`, which is what every geometry type in a game
+			framework is: `h3d.Vector`, `h3d.Matrix` and `h2d.col.Point` are all this shape, and between
+			them they are what every position, transform and bounds test is written in.
+
+			None of these passes. The constructor assigns to `this`, so it has nowhere to live as a
+			method, and Haxe emits it as a static `_new` on the implementation class; the generated
+			wrapper's own constructor boxes one value instead, and a script is told it cannot make a
+			`HostVec` out of a `3`.
+
+			Reaching `_new` is what the fix looks like and it is written down here rather than done,
+			because doing it took cppia's process down and answered wrong on HashLink while passing
+			every one of these interpreted. The fixture is the test bed for whoever finishes it.
+		*/
+		probe('a host abstract constructed', 'var v = new HostVec(3, 4); return Std.string(v);', null, 'import HostVec;');
+		probe('a host abstract property', 'var v = new HostVec(3, 4); return Std.string(v.length);', null, 'import HostVec;');
+		probe('a host abstract field', 'var v = new HostVec(3, 4); return Std.string(v.x + v.y);', null, 'import HostVec;');
+		probe('a host abstract operator', 'var v = new HostVec(2, 3); return Std.string(v * 2);', null, 'import HostVec;');
+		probe('a host abstract in an array', 'var all = [new HostVec(1, 1), new HostVec(2, 2)]; return Std.string(all[1]);', null,
+			'import HostVec;');
+
+		// An operator on a value bound as a parameter rather than declared as a local, which is a
+		// second gap behind the first: it fails the same way once construction is made to work.
+		probe('an abstract operator on a parameter', 'return Std.string(twice(new HostVec(1, 2)));',
+			'static function twice(v:HostVec):HostVec { return v * 2; }', 'import HostVec;');
+		probe('an abstract method taking its own abstract', 'var a = new HostVec(1, 2); return Std.string(a.plus(a));', null, 'import HostVec;');
+		probe('a field of an abstract bound as a parameter', 'return Std.string(first(new HostVec(3, 4)));',
+			'static function first(v:HostVec):Float { return v.x; }', 'import HostVec;');
+		probe('an abstract returned through a declared return type', 'return Std.string(make(2, 5));',
+			'static function make(x:Float, y:Float):HostVec { return new HostVec(x, y); }', 'import HostVec;');
 		probe('a host static read', 'return Std.string(Math.PI > 3);');
 		probe('a host static that changes', 'var a = Std.string(Date.now().getTime() > 0); return a;');
 		probe('a host method on a value', 'return "ab".toUpperCase();');

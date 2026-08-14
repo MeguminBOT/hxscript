@@ -38,7 +38,7 @@ CP="-cp $ROOT/src -cp $ROOT/test/common -cp $ROOT/test/common/fixtures -cp $ROOT
 # ships. The base is a fixture rather than a standard-library class because a bridge has to be
 # generatable at all and most of the library is not: `StringBuf` and `haxe.io.BytesBuffer` inline an
 # abstract's constructor, and `haxe.Timer` starts a real timer and ended the run.
-KEEP="--macro hxscript.macro.Keep.run() --macro hxscript.setup.Autowire.run() -D hxscript_bridge_types=HostBase -D hxscript_keep=haxe.Json,haxe.ds.Option"
+KEEP="--macro hxscript.macro.Keep.run() --macro hxscript.setup.Autowire.run() -D hxscript_bridge_types=HostBase -D hxscript_keep=haxe.Json,haxe.ds.Option,HostVec,HostVecImpl"
 
 cd "$ROOT"
 mkdir -p "$OUT"
