@@ -28,7 +28,14 @@ class TypeProxy {
 			if (t == null)
 				return null;
 
-			return (ConfigUtil.assertBlacklisted(Config.typeProxy.get(Type.getClassName(t))));
+			/**
+			 * The class itself when nothing stands in for it, the way `getSuperClass` and
+			 * `resolveClass` already answer. Handing back null instead lost every class with no proxy
+			 * entry, which is most of them, and a backend that replaces a scripted class outright
+			 * makes that reachable: its instances are not the bridge's, so this is the branch they
+			 * take.
+			 */
+			return (ConfigUtil.assertBlacklisted(Config.typeProxy.get(Type.getClassName(t)) ?? t));
 		}
 	}
 

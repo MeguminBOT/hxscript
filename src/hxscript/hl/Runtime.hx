@@ -50,6 +50,53 @@ import hxscript.types.ScriptedClass;
  */
 @:keep
 class Runtime {
+	/** Every scripted class a compiled module replaced, by path. */
+	static var replacements:Map<String, Replacement> = new Map();
+
+	/**
+	 * Records what a compiled class replaced.
+	 *
+	 * `super` is the only thing a compiled body cannot answer for itself: the base's own version of a
+	 * method is not what the instance's method table points at, since the override is, and a base the
+	 * world owns is in a module this one cannot link to. So the chain is written down here once and
+	 * walked when a `super` is reached, which is nowhere near a hot path.
+	 *
+	 * @param path The class's path.
+	 * @param what Its base, its constructor and its own methods.
+	 */
+	public static function replaces(path:String, what:Replacement):Void {
+		replacements.set(path, what);
+	}
+
+	/** @return What a compiled class replaced, or null when that path is still the interpreter's. */
+	public static function replacing(path:String):Null<Replacement> {
+		return replacements.get(path);
+	}
+
+	/** Forgets every replacement, for a host that compiles a world again from source. */
+	public static function forget():Void {
+		replacements = new Map();
+	}
+
+	/**
+	 * The class the world already had at the end of a replaced class's chain.
+	 *
+	 * @param from Where to start.
+	 * @return Its type, or null when the chain is scripted all the way down.
+	 */
+	static function rootHost(from:Replacement):Null<hl.Type> {
+		var at:Null<Replacement> = from;
+
+		while (at != null) {
+			if (at.host != null)
+				return at.host;
+
+			at = at.base == null ? null : replacements.get(at.base);
+		}
+
+		return null;
+	}
+
 	/**
 	 * Adds, which is also how strings are joined.
 	 *
@@ -489,6 +536,31 @@ class Runtime {
 	 * @return What it answered.
 	 */
 	public static function superCall(self:Dynamic, owner:Dynamic, name:Dynamic, args:Dynamic):Dynamic {
+		var stood:Null<Replacement> = replacements.get(owner);
+
+		if (stood != null) {
+			/**
+			 * A base of the batch answers with the function itself rather than through the instance,
+			 * because the instance's method table holds the override and going through it would
+			 * reach the caller again.
+			 */
+			var at:Null<Replacement> = stood.base == null ? null : replacements.get(stood.base);
+
+			while (at != null) {
+				var own:Null<Dynamic> = at.methods.get(name);
+
+				if (own != null)
+					return Reflect.callMethod(null, own, [self].concat((args : Array<Dynamic>)));
+
+				at = at.base == null ? null : replacements.get(at.base);
+			}
+
+			var above:Null<hl.Type> = rootHost(stood);
+			var base:Dynamic = above == null ? null : Loader.superMethod(above, self, name);
+
+			return base == null ? null : Reflect.callMethod(self, base, args);
+		}
+
 		var found:Dynamic = superSlot(self, owner, name);
 
 		/**
@@ -531,6 +603,32 @@ class Runtime {
 	 * @param args The arguments.
 	 */
 	public static function superNew(self:Dynamic, owner:Dynamic, args:Dynamic):Void {
+		var stood:Null<Replacement> = replacements.get(owner);
+
+		if (stood != null) {
+			var given:Array<Dynamic> = args == null ? [] : (args : Array<Dynamic>);
+			var above:Null<Replacement> = stood.base == null ? null : replacements.get(stood.base);
+
+			if (above != null) {
+				if (above.construct != null)
+					Reflect.callMethod(null, above.construct, [self].concat(given));
+
+				return;
+			}
+
+			/**
+			 * Unbound first. A host class keeps its constructor as a closure the world bound to the
+			 * class value itself, so calling it as it stands passes that class where the instance
+			 * belongs; the world's own `Type.createInstance` unbinds it for the same reason.
+			 */
+			var builds:Dynamic = stood.hostClass == null ? null : (cast stood.hostClass : hl.BaseType.Class).__constructor__;
+
+			if (builds != null)
+				Reflect.callMethod(null, hl.Api.noClosure(builds), [self].concat(given));
+
+			return;
+		}
+
 		var found:Dynamic = mirror(self, owner);
 
 		if (found != null && found is Reference) {
@@ -965,7 +1063,22 @@ class Runtime {
 	 * script declared and refuses to be handed one.
 	 */
 	public static function isOfType(v:Dynamic, type:Dynamic):Bool {
-		return type != null && hxscript.proxy.StdProxy.isOfType(v, type);
+		if (type == null)
+			return false;
+
+		/**
+		 * A class a compiled module replaced is asked about as itself. The library's own test walks
+		 * the scripted chain of a bridge instance, and an instance of a replaced class is not one:
+		 * it is an ordinary object of the class that stands in, so the ordinary test is the answer.
+		 */
+		if (type is ScriptedClass) {
+			var stood:Null<Replacement> = replacements.get(cast(type, ScriptedClass).path);
+
+			if (stood != null && stood.value != null)
+				return Std.isOfType(v, stood.value);
+		}
+
+		return hxscript.proxy.StdProxy.isOfType(v, type);
 	}
 
 	/**

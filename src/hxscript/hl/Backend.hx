@@ -114,11 +114,20 @@ class Backend {
 	}
 
 	/**
-	 * @param env Unused: nothing about a HashLink world is substituted, only the functions in it.
+	 * @param env The world. Its `substituting` flag is set here.
 	 * @param report What this run produced.
-	 * @return Whether anything now runs compiled.
+	 * @return Whether the world now reaches its scripted classes through their compiled form.
 	 */
 	public static function substituting(env:Environment, report:Report):Bool {
+		#if (hl && hxscript_hl)
+		for (path in built.keys()) {
+			if (env.compiled.exists(path)) {
+				env.substituting = true;
+				return true;
+			}
+		}
+		#end
+
 		return report.compiled.length > 0;
 	}
 
@@ -164,6 +173,9 @@ class Backend {
 		var emitter:Emitter = new Emitter();
 		emitter.pack = module.pack == null ? '' : module.pack.join('.');
 		emitter.ambientStatics(statics);
+		emitter.world = function(name:String):Dynamic {
+			return hostOwner(name, module, env);
+		};
 
 		try {
 			emitter.declare(module.decls, module.name);
@@ -173,7 +185,12 @@ class Backend {
 			return;
 		}
 
-		var exposed:Array<{path:String, field:String, findex:Int, member:Bool}> = [];
+		/**
+		 * Statics only. An instance method belongs to the class this module now holds, reached
+		 * through its own method table, so there is nothing to hand the world for one; a static
+		 * belongs to the class the world already has, which is where its storage still is.
+		 */
+		var exposed:Array<{path:String, field:String, findex:Int}> = [];
 
 		for (decl in module.decls) {
 			switch (decl.d) {
@@ -181,41 +198,14 @@ class Backend {
 					for (f in c.fields) {
 						var findex:Null<Int> = emitter.expose(c.name + '.' + f.name);
 
-						if (findex != null) {
-							exposed.push({
-								path: pathOf(module, c.name),
-								field: f.name,
-								findex: findex,
-								member: false
-							});
-							continue;
-						}
-
-						/**
-						 * An instance method is exposed the same way and then wrapped again, because
-						 * what the interpreter holds per instance is a closure that already knows its
-						 * receiver. The binder is what turns one into the other.
-						 */
-						var own:Null<Int> = emitter.expose(c.name + '#' + f.name);
-						if (own == null)
-							continue;
-
-						var bound:Null<Int> = emitter.binder(c.name + '#' + f.name, own);
-						if (bound == null)
-							continue;
-
-						exposed.push({
-							path: pathOf(module, c.name),
-							field: f.name,
-							findex: bound,
-							member: true
-						});
+						if (findex != null)
+							exposed.push({path: pathOf(module, c.name), field: f.name, findex: findex});
 					}
 				case _:
 			}
 		}
 
-		if (exposed.length == 0)
+		if (exposed.length == 0 && emitter.emitted.length == 0)
 			return;
 
 		/**
@@ -242,7 +232,28 @@ class Backend {
 		var bytes:haxe.io.Bytes = built.pack();
 		report.bytes += bytes.length;
 
-		var loaded:Null<Loaded> = Loader.load(bytes);
+		/**
+		 * The bases are resolved before the load and not after. Where a class's own first field sits
+		 * and which entry of the method table an override takes are both read out of the whole chain
+		 * while the module is being jitted, so a base that arrives afterwards is one that was never
+		 * counted.
+		 */
+		var at:Array<Int> = [];
+		var bases:Array<hl.Type> = [];
+
+		for (link in emitter.links) {
+			var found:Dynamic = hostOwner(link.host, module, env);
+
+			if (found == null || !(found is Class)) {
+				report.skipped.push({name: module.name, reason: 'extends ' + link.host + ', which nothing at runtime answers to'});
+				return;
+			}
+
+			at.push(link.at);
+			bases.push((cast found : hl.BaseType).__type__);
+		}
+
+		var loaded:Null<Loaded> = Loader.load(bytes, at, bases);
 		if (loaded == null) {
 			report.failed.push({name: module.name, reason: Loader.error() ?? 'the loader gave no reason'});
 			return;
@@ -260,23 +271,82 @@ class Backend {
 			if (fn == null)
 				continue;
 
-			var cls:ScriptedClass = cast owner;
-
-			if (entry.member) {
-				if (cls.compiledMembers == null)
-					cls.compiledMembers = new Map<String, Dynamic>();
-
-				cls.compiledMembers.set(entry.field, fn);
-			} else {
-				cls.reflectSetField(entry.field, fn);
-			}
+			cast(owner, ScriptedClass).reflectSetField(entry.field, fn);
 
 			holders.set(entry.path, true);
 			report.compiled.push(entry.path + '.' + entry.field);
 		}
 
+		for (made in emitter.emitted)
+			install(made, loaded, module, env, report);
+
 		retained.push(loaded);
 	}
+
+	/**
+	 * Makes a loaded class real: gives it a class value, tells the world where to find it, and
+	 * writes down what it replaced so a `super` in one of its bodies can be answered.
+	 *
+	 * @param made What the emitter wrote for it.
+	 * @param loaded The module it came out of.
+	 * @param module The scripted module that declared it.
+	 * @param env The world to bind it into.
+	 * @param report Filled with what happened.
+	 */
+	static function install(made:Emitted, loaded:Loaded, module:Module, env:Environment, report:Report):Void {
+		var shape:Null<hl.Type> = Loader.typeAt(loaded, made.type);
+		if (shape == null)
+			return;
+
+		var cls:hl.BaseType.Class = classValue(shape, made.path);
+		if (cls == null)
+			return;
+
+		cls.__constructor__ = Loader.bind(loaded, made.construct);
+
+		var methods:Map<String, Dynamic> = new Map();
+		for (name => findex in made.methods) {
+			var fn:Dynamic = Loader.bind(loaded, findex);
+			if (fn != null)
+				methods.set(name, fn);
+		}
+
+		var above:Dynamic = made.host == null ? null : hostOwner(made.host, module, env);
+
+		Runtime.replaces(made.path, {
+			path: made.path,
+			value: cls,
+			base: made.base == null ? null : (module.pack == null || module.pack.length == 0 ? made.base : module.pack.join('.') + '.' + made.base),
+			host: above == null ? null : (cast above : hl.BaseType).__type__,
+			hostClass: above,
+			construct: cls.__constructor__,
+			methods: methods
+		});
+
+		built.set(made.path, cls);
+		env.compiled.set(made.path, cast cls);
+		holders.set(made.path, true);
+		report.compiled.push(made.path);
+	}
+
+	/**
+	 * Makes the world's own class value for a type this module holds.
+	 *
+	 * `Type.initClass` is the world's, and using it rather than building one here is what makes
+	 * `Type.getClass`, `Type.resolveClass` and `Std.isOfType` answer about a compiled class the same
+	 * way they answer about any other.
+	 *
+	 * @param shape The loaded type.
+	 * @param path What to call it.
+	 * @return Its class value.
+	 */
+	@:access(Type)
+	static function classValue(shape:hl.Type, path:String):hl.BaseType.Class {
+		return Type.initClass(hl.Type.get((null : hl.BaseType.Class)), shape, @:privateAccess path.bytes);
+	}
+
+	/** Every class compiled so far, by scripted path, across every world. */
+	static var built:Map<String, Dynamic> = new Map();
 
 	/**
 	 * Every module loaded so far, held so none of them is ever collected.

@@ -3879,7 +3879,7 @@ class Interp {
 	 * @return Whether the value is that type's compiled form.
 	 */
 	function isCompiledAs(t:Dynamic, e:Dynamic):Bool {
-		#if hxscript_cppia
+		#if (hxscript_cppia || hxscript_hl)
 		if (environment == null || !environment.substituting || !(t is ScriptedClass))
 			return false;
 
@@ -3910,7 +3910,7 @@ class Interp {
 		if (canDefer && c is IScriptedType && !c.initialized)
 			throw DDefer;
 
-		#if hxscript_cppia
+		#if (hxscript_cppia || hxscript_hl)
 		if (c is ScriptedClass && environment != null && environment.substituting) {
 			var native:Class<Dynamic> = environment.compiled.get((cast c : ScriptedClass).path);
 			if (native != null)
