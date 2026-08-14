@@ -36,14 +36,7 @@ class Instruction {
 	public var args:Array<Int>;
 }
 
-/**
- * One native: a function the module calls and does not carry.
- *
- * It takes a function index like any other, out of the same run, because a call does not know or care
- * which of the two it is reaching. What differs is that the loader fills the pointer in rather than
- * jitting a body for it, and where it looks is decided by the library name: `hxs` is hxScript's own
- * runtime, in the same binary, and anything else is an hdll beside the program.
- */
+/** One native: a function the module calls and does not carry. */
 @:structInit
 class Native {
 	/** The library, as an index into the string pool. */
@@ -239,8 +232,7 @@ class Bytecode {
 	/**
 	 * Declares a function the module calls and does not carry.
 	 *
-	 * @param lib The library it comes from. `hxs` is hxScript's own runtime, which is in the same
-	 *            binary and is resolved from a table rather than from a file.
+	 * @param lib Where it comes from. `hxs` is hxScript's own runtime, in this same binary.
 	 * @param name Its name there.
 	 * @param type Index into the type table of its signature.
 	 * @return The index calls reach it by.

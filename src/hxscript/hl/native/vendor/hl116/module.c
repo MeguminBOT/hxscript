@@ -595,15 +595,7 @@ static void hl_module_init_natives( hl_module *m ) {
 		void *f;
 		if( is_opt ) lib++;
 #ifdef HXS_NATIVE_TABLE
-		/*
-			The only change made to hashlink's own source, and it is here because a module loaded at
-			runtime has no hdll to be found in. hxScript's runtime is compiled into the same binary
-			as this loader, so its natives are resolved from a table rather than from the filesystem,
-			which is also the only way they can be reached at all in an HL/C build.
-
-			Anything this does not claim falls through to hashlink's normal resolution, so a script
-			module may still name a real hdll.
-		*/
+		/* Patched: lib hxs is in this binary and in no hdll. Anything else falls through. */
 		{
 			extern void *hxs_resolve_native( const char *lib, const char *name );
 			f = hxs_resolve_native(lib, n->name);
@@ -754,16 +746,7 @@ int hl_module_init( hl_module *m, h_bool hot_reload ) {
 #ifndef HXS_NATIVE_TABLE
 	hl_gc_set_dump_types(hl_module_types_dump);
 #else
-	/*
-		The second and last change made to hashlink's own source. Everything else this function takes
-		is in hl_setup, which the caller copies beforehand and puts back afterwards; this one is a
-		setter with no getter, so taking it cannot be undone. A host's memory dump would name the
-		types of modules loaded at runtime instead of its own, from the first script it ran onwards.
-
-		Not calling it leaves dumps exactly as they were. What it costs is the type names of script
-		modules in a dump, which is the side worth losing. gc.c checks the callback for NULL before
-		using it, so a host that never set one is unaffected either way.
-	*/
+	/* Patched: a setter with no getter, so taking it from the host cannot be undone. */
 	(void)hl_module_types_dump;
 #endif
 #	ifdef HL_VTUNE

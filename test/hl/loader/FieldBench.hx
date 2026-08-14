@@ -15,20 +15,8 @@ class Target {
 }
 
 /**
- * What reading a host object's field costs, by each of the ways bytecode can do it.
- *
- * This is the measurement the HashLink backend was restarted over. The archived attempt reached 582x
- * interpreted on typed locals and 2.2x on a host field, and a host field is what a real script
- * touches on every line, so the average script saw almost none of the 582. The cause was the route:
- * every access called a Haxe function taking Dynamic arguments.
- *
- * Four rows, and the emitter is not written yet, so each loop is bytecode built here by hand. They
- * differ only in how the field is read:
- *
- *   native      Haxe's own compiled field access, the ceiling
- *   ODynGet     what HashLink offers unaided, a direct call to hl_dyn_geti with the hash baked in
- *   hxs.geti    a native call with an inline cache, which is what this backend will emit
- *   a closure   a call out to a Haxe function, which is what the archived backend emitted
+ * What reading a host object's field costs, by each of the four routes bytecode can take. The loops
+ * are built here by hand and differ in nothing but the read.
  */
 class FieldBench {
 	static inline var LOOPS:Int = 3000000;
@@ -49,16 +37,13 @@ class FieldBench {
 	}
 
 	/**
-	 * Builds a module whose entry point loops over one way of reading the field.
+	 * Builds an entry point that loops over one way of reading the field.
 	 *
-	 * Registers are the same in all of them: 0 the object it was handed, 1 the running total, 2 the
-	 * counter, 3 the limit, 4 what the read produced, 5 the boxed result. A variant may use 6 upwards
-	 * for whatever its own read needs.
+	 * Registers: 0 the object, 1 the total, 2 the counter, 3 the limit, 4 the read, 5 the result.
 	 *
-	 * @param read The instructions that leave the field's value in register 4.
-	 * @param setup Anything that has to happen once before the loop.
-	 * @param regs The register types, which a variant extends.
-	 * @return The module, ready to load.
+	 * @param read Instructions leaving the field's value in register 4.
+	 * @param setup Anything that happens once before the loop.
+	 * @return The function index.
 	 */
 	static function loop(m:Bytecode, regs:Array<Int>, setup:Array<Instruction>, read:Array<Instruction>):Int {
 		var dyn:Int = m.prim(HDyn);

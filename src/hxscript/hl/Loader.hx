@@ -200,14 +200,9 @@ class Loader {
 	public static inline var HOOK_UNKNOWN:Int = 128;
 
 	/**
-	 * @return Which fields of libhl's `hl_setup` loading has taken from the host, as bits.
+	 * @return Which fields of libhl's `hl_setup` loading has taken, as bits.
 	 *
-	 * Loading writes to the table the whole process uses to resolve symbols, walk stacks, make
-	 * dynamic calls and unwind out of a throw, because in hl.exe that happens once at startup for the
-	 * program's own module. Every field is given back or replaced by something that defers to the
-	 * host's, so this is not a fault report: it is how a build notices that the hashlink it is
-	 * running against takes a hook this one was not written for, while that hook still works because
-	 * it was restored. `HOOK_UNKNOWN` is the bit that says so.
+	 * All of them are given back or chained, so `HOOK_UNKNOWN` is a test failing rather than a fault.
 	 */
 	public static function hooks():Int {
 		try {
@@ -218,12 +213,7 @@ class Loader {
 	}
 
 	/**
-	 * Reserves an inline cache for one field access.
-	 *
-	 * Asked for while a module is being written rather than after it loads, so the number is a
-	 * constant in the bytecode and an access does not pay an indirection to find its own cache. A
-	 * site remembers the last receiver type it saw and where the field sat in it, which turns the
-	 * second and every later access on the same shape into a pointer compare and a load.
+	 * Reserves an inline cache for one field access, as a constant the bytecode carries.
 	 *
 	 * @return The site, or -1 when this build has no runtime to hold one.
 	 */
@@ -233,10 +223,7 @@ class Loader {
 
 	/**
 	 * @param name A field name.
-	 * @return What HashLink hashes it to, which is what an access has to carry.
-	 *
-	 * Asked for rather than worked out here, because the emitter has to write the same number the jit
-	 * writes for `ODynGet` and a second implementation of a hash is a second thing to be wrong.
+	 * @return What HashLink hashes it to, asked for rather than reimplemented here.
 	 */
 	public static function hash(name:String):Int {
 		return hashOf(@:privateAccess name.bytes);

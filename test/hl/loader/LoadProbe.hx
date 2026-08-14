@@ -3,16 +3,8 @@ import hxscript.hl.Loader.Loaded;
 
 /**
  * That a HashLink process can load bytecode that did not exist when it started, and is unchanged for
- * having done it.
- *
- * The second half is the part worth a test. Loading writes to `hl_setup`, libhl's one table of how
- * this process resolves symbols, walks stacks, makes dynamic calls and unwinds out of a throw:
- * `module.c` takes two of those fields and `jit.c` takes four more, because in hl.exe that happens
- * once at startup for the program's own module and never again. Every one of them is something the
- * host's own code is already using, and nothing about losing them is visible until whatever used
- * them next runs, which may be a stack trace nobody reads until production.
- *
- * So each is measured before the load and again after it, and has to answer the same.
+ * having done it. Loading takes six fields of `hl_setup` the host is already using, so each of them
+ * is measured before the load and again after.
  */
 class LoadProbe {
 	static var failures:Int = 0;
@@ -70,13 +62,7 @@ class LoadProbe {
 		return a + '/' + b + '/' + c + '/' + d;
 	}
 
-	/**
-	 * @return A dynamic call over a signature the two implementations do not pass alike.
-	 *
-	 * One argument each of the four kinds, because that is where an integer register, a floating
-	 * point register and a pointer are assigned differently. A call taking one Int says nothing about
-	 * whether the right machinery is being used.
-	 */
+	/** @return A dynamic call over one argument of each kind, where the two conventions differ. */
 	static function hostMixedCall():String {
 		var fn:Dynamic = mixed;
 		return Reflect.callMethod(null, fn, [7, 1.5, 'x', true]);
@@ -95,12 +81,6 @@ class LoadProbe {
 			Sys.exit(1);
 		}
 
-		/*
-			The frame count is not asserted against a number. A release HL/C binary answers zero
-			frames before anything of ours has run, because it resolves them through dbghelp and has
-			nothing to resolve them from, while the VM answers five. What has to hold either way is
-			that loading does not change the answer, which is what `before` is for.
-		*/
 		var before:String = state();
 		check('the host can throw, call dynamically and call through a wrapper', hostCatches()
 			&& hostDynamicCall() == 42
