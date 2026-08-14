@@ -291,6 +291,33 @@ class Corpus {
 		check('typed catch falls to dynamic', 'try { throw 1.5; } catch (e:Int) { return "int"; } catch (e:Dynamic) { return "dyn"; }', 'dyn');
 		check('catch binds the value', 'try { throw "x"; } catch (e:String) { return e + "!"; }', 'x!');
 
+		// A trap is a live entry on the VM's own stack, given back by falling out of the `try` that
+		// opened it. `break` and `continue` do neither: they jump past that, and the entry is left
+		// pointing into a frame that has moved on. Nothing goes wrong where it was written. It goes
+		// wrong in whatever the function returned into, which is why the values below matter less
+		// than the fact that the process is still there to report them.
+		check('continue out of a try', 'var n = 0; for (i in 0...4) { try { if (i == 1) continue; n += i; } catch (e:Dynamic) {} } return n;',
+			'5');
+		check('break out of a try', 'var n = 0; for (i in 0...4) { try { if (i == 2) break; n += i; } catch (e:Dynamic) {} } return n;', '1');
+		check('continue out of a try, many times',
+			'var n = 0; for (i in 0...200) { try { if (i % 2 == 0) continue; n += 1; } catch (e:Dynamic) {} } return n;', '100');
+		check('continue out of a try in a while',
+			'var n = 0; var i = 0; while (i < 4) { i++; try { if (i == 2) continue; n += i; } catch (e:Dynamic) {} } return n;', '8');
+		check('continue out of two nested trys',
+			'var n = 0; for (i in 0...3) { try { try { if (i == 1) continue; n += 1; } catch (e:Dynamic) {} } catch (e:Dynamic) {} } return n;',
+			'2');
+		// The other half of the same question: a jump out of a loop must not give back a trap that
+		// belongs to something the loop is inside, or the `catch` below never runs.
+		check('continue keeps a try around the loop',
+			'var n = 0; try { for (i in 0...3) { try { if (i == 1) continue; n += i; } catch (e:Dynamic) {} } throw "boom"; } catch (e:Dynamic) { n += 100; } return n;',
+			'102');
+		check('break keeps a try around the loop',
+			'var n = 0; try { for (i in 0...4) { try { if (i == 2) break; n += i; } catch (e:Dynamic) {} } throw "boom"; } catch (e:Dynamic) { n += 100; } return n;',
+			'101');
+		// A clause runs with the trap already given back, so leaving one gives back nothing.
+		check('continue from inside a catch',
+			'var n = 0; for (i in 0...4) { try { if (i == 1) throw "x"; n += i; } catch (e:Dynamic) { continue; } } return n;', '5');
+
 		check('null-safe field, present', 'var o = {a: 5}; return o?.a;', '5');
 		check('null-safe field, null', 'var o:Dynamic = null; return o?.a;', 'null');
 		check('null-safe call, present', 'var s = "hi"; return s?.toUpperCase();', 'HI');

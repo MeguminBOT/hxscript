@@ -102,6 +102,18 @@ class Emitter {
 	/** Where each `continue` is, filled in the same way. */
 	var continues:Array<Array<Int>>;
 
+	/**
+	 * How many traps were open when each loop was entered.
+	 *
+	 * A trap is a live entry on the VM's own stack, and it is popped by falling out of the `try` that
+	 * opened it or by firing. A `break` or a `continue` inside one does neither: it jumps past the
+	 * `OEndTrap` and leaves the entry pointing into a frame that has moved on, which is not an error
+	 * anywhere near where it was made. It is an access violation later, in whatever the function
+	 * returned into. So a jump out of a loop ends the traps the loop opened, and this is what says
+	 * which those are: the ones above the depth the loop started at.
+	 */
+	var loopTraps:Array<Int>;
+
 	/** The declared return type of the function being written. */
 	var returns:Int;
 
@@ -364,6 +376,7 @@ class Emitter {
 		elements = [];
 		breaks = [];
 		continues = [];
+		loopTraps = [];
 		returns = 0;
 		owning = '';
 		classes = new StringMap();
@@ -1355,6 +1368,7 @@ class Emitter {
 		elements = [];
 		breaks = [];
 		continues = [];
+		loopTraps = [];
 		returns = sig.ret;
 		inside = c.name;
 		traps = 0;
@@ -1411,6 +1425,7 @@ class Emitter {
 		elements = [];
 		breaks = [];
 		continues = [];
+		loopTraps = [];
 		returns = sig.ret;
 		inside = c.name;
 		traps = 0;
@@ -1579,6 +1594,7 @@ class Emitter {
 		elements = [];
 		breaks = [];
 		continues = [];
+		loopTraps = [];
 		returns = sig.ret;
 		inside = host;
 		traps = 0;
@@ -1770,18 +1786,21 @@ class Emitter {
 
 				breaks.push([]);
 				continues.push([]);
+				loopTraps.push(traps);
 				loopBody(body);
 
 				land(continues.pop());
 				back(head);
 				land(out);
 				land(breaks.pop());
+				loopTraps.pop();
 
 			case EDoWhile(cond, body):
 				var head:Int = mark();
 
 				breaks.push([]);
 				continues.push([]);
+				loopTraps.push(traps);
 				loopBody(body);
 
 				land(continues.pop());
@@ -1790,6 +1809,7 @@ class Emitter {
 				condition(cond, true, again);
 				landAt(again, head);
 				land(breaks.pop());
+				loopTraps.pop();
 
 			case EFor(name, it, body):
 				if (rangeOf(it) != null)
@@ -1835,11 +1855,13 @@ class Emitter {
 			case EBreak:
 				if (breaks.length == 0)
 					throw new Unsupported('a break outside a loop', e.pos);
+				leaveTraps();
 				breaks[breaks.length - 1].push(jump(OJAlways));
 
 			case EContinue:
 				if (continues.length == 0)
 					throw new Unsupported('a continue outside a loop', e.pos);
+				leaveTraps();
 				continues[continues.length - 1].push(jump(OJAlways));
 
 			case EUnop(op, _, target) if (op == '++' || op == '--'):
@@ -1892,6 +1914,7 @@ class Emitter {
 
 		breaks.push([]);
 		continues.push([]);
+		loopTraps.push(traps);
 		loopBody(body);
 
 		land(continues.pop());
@@ -1899,6 +1922,7 @@ class Emitter {
 		back(head);
 		land(out);
 		land(breaks.pop());
+		loopTraps.pop();
 
 		pop();
 	}
@@ -1927,12 +1951,14 @@ class Emitter {
 
 		breaks.push([]);
 		continues.push([]);
+		loopTraps.push(traps);
 		loopBody(body);
 
 		land(continues.pop());
 		back(head);
 		land(out);
 		land(breaks.pop());
+		loopTraps.pop();
 
 		pop();
 	}
@@ -1967,12 +1993,14 @@ class Emitter {
 
 		breaks.push([]);
 		continues.push([]);
+		loopTraps.push(traps);
 		loopBody(body);
 
 		land(continues.pop());
 		back(head);
 		land(out);
 		land(breaks.pop());
+		loopTraps.pop();
 
 		pop();
 	}
@@ -4548,6 +4576,19 @@ class Emitter {
 	}
 
 	/**
+	 * Gives back the traps the loop being left opened, which a `break` or a `continue` has to do.
+	 *
+	 * Not every trap, the way a return does, because the jump lands inside whatever encloses the
+	 * loop and any trap opened out there is still the one in force when it gets there.
+	 */
+	function leaveTraps():Void {
+		var outside:Int = loopTraps[loopTraps.length - 1];
+
+		for (i in outside...traps)
+			ops.push({op: OEndTrap, args: [1]});
+	}
+
+	/**
 	 * @return Which enum constructor a call names, or null when it names something else.
 	 *
 	 * Both spellings answer here: the qualified one, and the bare one an import brings into scope.
@@ -4738,6 +4779,7 @@ class Emitter {
 		var heldScopes:Array<StringMap<Int>> = scopes;
 		var heldBreaks:Array<Array<Int>> = breaks;
 		var heldContinues:Array<Array<Int>> = continues;
+		var heldLoopTraps:Array<Int> = loopTraps;
 		var heldReturns:Int = returns;
 		var heldInside:Null<String> = inside;
 		var heldTraps:Int = traps;
@@ -4750,6 +4792,7 @@ class Emitter {
 		elements = [];
 		breaks = [];
 		continues = [];
+		loopTraps = [];
 		returns = tDyn;
 		inside = null;
 		traps = 0;
@@ -4789,6 +4832,7 @@ class Emitter {
 		scopes = heldScopes;
 		breaks = heldBreaks;
 		continues = heldContinues;
+		loopTraps = heldLoopTraps;
 		returns = heldReturns;
 		inside = heldInside;
 		traps = heldTraps;
