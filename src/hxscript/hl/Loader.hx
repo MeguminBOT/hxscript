@@ -255,6 +255,15 @@ class Loader {
 	 * @return The shape it keeps that method in, as [nargs, return, each argument] by type kind and
 	 *         counting the receiver, or null when nothing up its chain declares it.
 	 */
+	/**
+	 * @param base A class the world already has.
+	 * @param name A field name.
+	 * @return The type kind it keeps that field as, or -1 when nothing up its chain declares it.
+	 */
+	public static function fieldKind(base:hl.Type, name:String):Int {
+		return kindOf(base, @:privateAccess name.bytes);
+	}
+
 	public static function protoShape(base:hl.Type, name:String):Null<Array<Int>> {
 		var found:hl.NativeArray<Int> = shapeOf(base, @:privateAccess name.bytes);
 		return found == null ? null : [for (i in 0...found.length) found[i]];
@@ -364,6 +373,10 @@ class Loader {
 
 	@:hlNative("?hxscript", "proto_shape") static function shapeOf(base:hl.Type, name:hl.Bytes):hl.NativeArray<Int> {
 		return null;
+	}
+
+	@:hlNative("?hxscript", "field_kind") static function kindOf(base:hl.Type, name:hl.Bytes):Int {
+		return -1;
 	}
 
 	@:hlNative("?hxscript", "closure") static function closure(module:Loaded, findex:Int):Dynamic {

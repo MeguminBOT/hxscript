@@ -688,6 +688,101 @@ static vdynamic *hxs_dispatch( vdynamic *obj, vdynamic *name, vdynamic *slot, vd
 }
 
 /** Calls a method on a receiver whose type the site remembers, with the receiver passed first. */
+/**
+	The shapes a resolved method can be called in without going through hl_dyn_call.
+
+	Only receivers and pointers, which is every argument count up to three of anything the VM carries
+	as a pointer. A double or a narrower integer is passed somewhere else by the platform's own
+	convention and there is no one signature that covers both, so those keep the general path.
+*/
+typedef int (*hxs_ptr_i0)( void * );
+typedef int (*hxs_ptr_i1)( void *, void * );
+typedef int (*hxs_ptr_i2)( void *, void *, void * );
+typedef int (*hxs_ptr_i3)( void *, void *, void *, void * );
+
+typedef double (*hxs_ptr_d0)( void * );
+typedef double (*hxs_ptr_d1)( void *, void * );
+typedef double (*hxs_ptr_d2)( void *, void *, void * );
+typedef double (*hxs_ptr_d3)( void *, void *, void *, void * );
+
+/** What a resolved call can be answered as without allocating one. */
+#define HXS_WANT_ANY	0
+#define HXS_WANT_INT	1
+#define HXS_WANT_FLOAT	2
+
+/**
+	Casts a call's arguments to what the method declares, when every one of them is a pointer.
+
+	The cast is not skipped. hl_dyn_call checks each argument against the signature, and a script may
+	hand a method the wrong kind of value; without the check that stops being an error and starts
+	being memory the callee reads as something it is not.
+
+	@return Whether the shape is one that can be called directly, with the arguments left in `out`.
+*/
+static bool hxs_pointers( vclosure *cl, vdynamic **args, int nargs, void **out ) {
+	hl_type_fun *ft = cl->t->fun;
+	int i;
+
+	if( ft->nargs != nargs + 1 )
+		return false;
+
+	for(i=1;i<ft->nargs;i++) {
+		if( !hl_is_ptr(ft->args[i]) )
+			return false;
+
+		out[i - 1] = hl_dyn_castp(args + (i - 1), &hlt_dyn, ft->args[i]);
+	}
+
+	return true;
+}
+
+/**
+	Calls a resolved method and answers with a number rather than a box.
+
+	**This is where a host call was spending most of itself.** hl_dyn_call builds a temporary array,
+	walks the signature, dispatches through the VM's own caller and then allocates a dynamic to put
+	the result in, and a method answering an `Int` is most of the calls a script makes into a host.
+
+	@return Whether the call was made, with its answer in `out`.
+*/
+static bool hxs_direct( vclosure *cl, vdynamic *obj, vdynamic **args, int nargs, int want, double *out ) {
+	void *p[3];
+
+	if( nargs > 3 || cl->hasValue )
+		return false;
+
+	if( want == HXS_WANT_INT ) {
+		if( cl->t->fun->ret->kind != HI32 && cl->t->fun->ret->kind != HBOOL )
+			return false;
+	} else if( want == HXS_WANT_FLOAT ) {
+		if( cl->t->fun->ret->kind != HF64 )
+			return false;
+	} else {
+		return false;
+	}
+
+	if( !hxs_pointers(cl,args,nargs,p) )
+		return false;
+
+	if( want == HXS_WANT_INT ) {
+		switch( nargs ) {
+		case 0: *out = (double)((hxs_ptr_i0)cl->fun)(obj); break;
+		case 1: *out = (double)((hxs_ptr_i1)cl->fun)(obj,p[0]); break;
+		case 2: *out = (double)((hxs_ptr_i2)cl->fun)(obj,p[0],p[1]); break;
+		default: *out = (double)((hxs_ptr_i3)cl->fun)(obj,p[0],p[1],p[2]); break;
+		}
+		return true;
+	}
+
+	switch( nargs ) {
+	case 0: *out = ((hxs_ptr_d0)cl->fun)(obj); break;
+	case 1: *out = ((hxs_ptr_d1)cl->fun)(obj,p[0]); break;
+	case 2: *out = ((hxs_ptr_d2)cl->fun)(obj,p[0],p[1]); break;
+	default: *out = ((hxs_ptr_d3)cl->fun)(obj,p[0],p[1],p[2]); break;
+	}
+	return true;
+}
+
 static vdynamic *hxs_called( vdynamic *obj, vdynamic *name, vdynamic *slot, int site, vdynamic **args, int nargs ) {
 	vclosure cl;
 	vdynamic *passed[8];
@@ -740,6 +835,80 @@ static vdynamic *hxs_called( vdynamic *obj, vdynamic *name, vdynamic *slot, int 
 
 HL_PRIM vdynamic *HL_NAME(invoke0)( vdynamic *obj, vdynamic *name, vdynamic *slot, int site ) {
 	return hxs_called(obj,name,slot,site,NULL,0);
+}
+
+/**
+	The same call answering a number, for a destination that already is one.
+
+	The general path answers a dynamic, so a method returning an `Int` had its answer allocated and
+	opened again by the instruction after it, which measured as most of what the call cost.
+*/
+static double hxs_numeric( vdynamic *obj, vdynamic *name, vdynamic *slot, int site, vdynamic **args, int nargs, int want ) {
+	vclosure cl;
+	double out;
+	vdynamic *answered;
+
+	if( hxs_method(obj,site,&cl) && hxs_direct(&cl,obj,args,nargs,want,&out) )
+		return out;
+
+	answered = hxs_called(obj,name,slot,site,args,nargs);
+
+	if( answered == NULL )
+		return 0;
+
+	return want == HXS_WANT_INT
+		? (double)hl_dyn_casti(&answered,&hlt_dyn,&hlt_i32)
+		: hl_dyn_castd(&answered,&hlt_dyn);
+}
+
+HL_PRIM int HL_NAME(invokei0)( vdynamic *obj, vdynamic *name, vdynamic *slot, int site ) {
+	return (int)hxs_numeric(obj,name,slot,site,NULL,0,HXS_WANT_INT);
+}
+
+HL_PRIM int HL_NAME(invokei1)( vdynamic *obj, vdynamic *name, vdynamic *slot, int site, vdynamic *a ) {
+	vdynamic *args[1];
+	args[0] = a;
+	return (int)hxs_numeric(obj,name,slot,site,args,1,HXS_WANT_INT);
+}
+
+HL_PRIM int HL_NAME(invokei2)( vdynamic *obj, vdynamic *name, vdynamic *slot, int site, vdynamic *a, vdynamic *b ) {
+	vdynamic *args[2];
+	args[0] = a;
+	args[1] = b;
+	return (int)hxs_numeric(obj,name,slot,site,args,2,HXS_WANT_INT);
+}
+
+HL_PRIM int HL_NAME(invokei3)( vdynamic *obj, vdynamic *name, vdynamic *slot, int site, vdynamic *a, vdynamic *b, vdynamic *c ) {
+	vdynamic *args[3];
+	args[0] = a;
+	args[1] = b;
+	args[2] = c;
+	return (int)hxs_numeric(obj,name,slot,site,args,3,HXS_WANT_INT);
+}
+
+HL_PRIM double HL_NAME(invoked0)( vdynamic *obj, vdynamic *name, vdynamic *slot, int site ) {
+	return hxs_numeric(obj,name,slot,site,NULL,0,HXS_WANT_FLOAT);
+}
+
+HL_PRIM double HL_NAME(invoked1)( vdynamic *obj, vdynamic *name, vdynamic *slot, int site, vdynamic *a ) {
+	vdynamic *args[1];
+	args[0] = a;
+	return hxs_numeric(obj,name,slot,site,args,1,HXS_WANT_FLOAT);
+}
+
+HL_PRIM double HL_NAME(invoked2)( vdynamic *obj, vdynamic *name, vdynamic *slot, int site, vdynamic *a, vdynamic *b ) {
+	vdynamic *args[2];
+	args[0] = a;
+	args[1] = b;
+	return hxs_numeric(obj,name,slot,site,args,2,HXS_WANT_FLOAT);
+}
+
+HL_PRIM double HL_NAME(invoked3)( vdynamic *obj, vdynamic *name, vdynamic *slot, int site, vdynamic *a, vdynamic *b, vdynamic *c ) {
+	vdynamic *args[3];
+	args[0] = a;
+	args[1] = b;
+	args[2] = c;
+	return hxs_numeric(obj,name,slot,site,args,3,HXS_WANT_FLOAT);
 }
 
 HL_PRIM vdynamic *HL_NAME(invoke1)( vdynamic *obj, vdynamic *name, vdynamic *slot, int site, vdynamic *a ) {
@@ -827,6 +996,14 @@ HL_PRIM void HL_NAME(stored)( vdynamic *obj, vdynamic *name, double value, vdyna
 static hxs_native hxs_native_table[] = {
 	{ "storei", (void*)HL_NAME(storei) },
 	{ "stored", (void*)HL_NAME(stored) },
+	{ "invokei0", (void*)HL_NAME(invokei0) },
+	{ "invokei1", (void*)HL_NAME(invokei1) },
+	{ "invokei2", (void*)HL_NAME(invokei2) },
+	{ "invokei3", (void*)HL_NAME(invokei3) },
+	{ "invoked0", (void*)HL_NAME(invoked0) },
+	{ "invoked1", (void*)HL_NAME(invoked1) },
+	{ "invoked2", (void*)HL_NAME(invoked2) },
+	{ "invoked3", (void*)HL_NAME(invoked3) },
 	{ "invoke0", (void*)HL_NAME(invoke0) },
 	{ "invoke1", (void*)HL_NAME(invoke1) },
 	{ "invoke2", (void*)HL_NAME(invoke2) },
@@ -1034,6 +1211,26 @@ HL_PRIM vdynamic *HL_NAME(super_method)( hl_type *base, vdynamic *obj, vbyte *na
 	return NULL;
 }
 
+/** @return What kind a class keeps a field as, or -1 when nothing up its chain declares one. */
+HL_PRIM int HL_NAME(field_kind)( hl_type *t, vbyte *name ) {
+	hl_runtime_obj *rt;
+	int hash;
+
+	if( t == NULL || t->kind != HOBJ )
+		return -1;
+
+	hash = hl_hash_gen((uchar*)name,true);
+
+	for(rt = hl_get_obj_rt(t); rt; rt = rt->parent) {
+		hl_field_lookup *f = hl_lookup_find(rt->lookup,rt->nlookup,hash);
+
+		if( f && f->field_index >= 0 && f->t != NULL )
+			return f->t->kind;
+	}
+
+	return -1;
+}
+
 /** @return Whether a class up the chain declares a field of that name, which a script may not shadow. */
 HL_PRIM bool HL_NAME(has_field)( hl_type *t, vbyte *name ) {
 	hl_runtime_obj *rt;
@@ -1181,6 +1378,10 @@ HL_PRIM varray *HL_NAME(proto_shape)( hl_type *base, vbyte *name ) {
 	return NULL;
 }
 
+HL_PRIM int HL_NAME(field_kind)( hl_type *t, vbyte *name ) {
+	return -1;
+}
+
 /** No bytecode can be loaded here, so no cache is ever read. */
 HL_PRIM int HL_NAME(site)( int hash ) {
 	return -1;
@@ -1249,5 +1450,6 @@ DEFINE_PRIM(_I32, proto_index, _TYPE _BYTES);
 DEFINE_PRIM(_BOOL, has_field, _TYPE _BYTES);
 DEFINE_PRIM(_DYN, super_method, _TYPE _DYN _BYTES);
 DEFINE_PRIM(_ARR, proto_shape, _TYPE _BYTES);
+DEFINE_PRIM(_I32, field_kind, _TYPE _BYTES);
 DEFINE_PRIM(_I32, entry_index, _ABSTRACT(hxs_module));
 DEFINE_PRIM(_DYN, closure, _ABSTRACT(hxs_module) _I32);

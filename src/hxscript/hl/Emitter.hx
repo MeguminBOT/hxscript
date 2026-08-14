@@ -288,6 +288,21 @@ class Emitter {
 	/** The base the world already has, for each class whose chain leaves the batch. */
 	var hosts:StringMap<hl.Type>;
 
+	/**
+	 * The world's class each local was written with, innermost scope last.
+	 *
+	 * Not a register type: a class of the world is not a type this module holds, and a value of one
+	 * stays in a dynamic register. What this is for is knowing what a member of it answers, so that
+	 * a call into the world lands in a register of the right kind rather than in a boxed one.
+	 */
+	var annotated:Array<StringMap<String>>;
+
+	/** What the world answered for each type name a script wrote, asked once. */
+	var known:StringMap<Null<hl.Type>>;
+
+	/** What kind each member of one of those is, by class name then member. */
+	var answers:StringMap<Int>;
+
 	/** The type each class's own value is, which is where its statics sit. */
 	var holders:StringMap<Int>;
 
@@ -327,6 +342,7 @@ class Emitter {
 		ops = [];
 		regs = [];
 		scopes = [];
+		annotated = [];
 		breaks = [];
 		continues = [];
 		returns = 0;
@@ -359,6 +375,8 @@ class Emitter {
 		entries = new StringMap();
 		tables = new StringMap();
 		hosts = new StringMap();
+		known = new StringMap();
+		answers = new StringMap();
 		holders = new StringMap();
 		staticSlots = new StringMap();
 		staticTypes = new StringMap();
@@ -1262,6 +1280,7 @@ class Emitter {
 		ops = [];
 		regs = [];
 		scopes = [];
+		annotated = [];
 		breaks = [];
 		continues = [];
 		returns = sig.ret;
@@ -1316,6 +1335,7 @@ class Emitter {
 		ops = [];
 		regs = [];
 		scopes = [];
+		annotated = [];
 		breaks = [];
 		continues = [];
 		returns = sig.ret;
@@ -1482,6 +1502,7 @@ class Emitter {
 		ops = [];
 		regs = [];
 		scopes = [];
+		annotated = [];
 		breaks = [];
 		continues = [];
 		returns = sig.ret;
@@ -1500,6 +1521,7 @@ class Emitter {
 		for (i in 0...fn.args.length) {
 			regs.push(sig.args[i + first]);
 			scopes[scopes.length - 1].set(fn.args[i].name, i + first);
+			annotate(fn.args[i].name, fn.args[i].t);
 		}
 
 		/**
@@ -1606,6 +1628,7 @@ class Emitter {
 				var slot:Int = reg(announced == null ? infer(init) : announced);
 				into(init, slot);
 				scopes[scopes.length - 1].set(n, slot);
+				annotate(n, t);
 
 			case EBinop('=', target, value):
 				switch (target.e) {
@@ -2579,8 +2602,8 @@ class Emitter {
 
 	var storeFloatNative:Int = -1;
 
-	/** This module's indices for the callers, by how many arguments they take. */
-	var invokeNatives:Array<Int> = [-1, -1, -1, -1];
+	/** This module's indices for the callers, by how many arguments they take then by what they answer. */
+	var invokeNatives:Array<Map<Int, Int>> = [new Map(), new Map(), new Map(), new Map()];
 
 	/** This module's indices for the readers that answer a primitive rather than a boxed value. */
 	var fetchIntNative:Int = -1;
@@ -2766,13 +2789,32 @@ class Emitter {
 		 */
 		if (usings.length == 0 && params.length < invokeNatives.length) {
 			var held:Array<Int> = [for (p in params) dynOf(p)];
-			var call:Array<Int> = [reg(tDyn), invokeIndex(params.length), target, named(name), siteSlot(), siteIndex(name)];
+
+			/**
+			 * A caller that already wants a number is answered with one. The general reader answers
+			 * a dynamic, so a method returning an `Int` had its answer allocated and opened again by
+			 * the instruction after it, which is the same allocation a field read was paying.
+			 */
+			var wanted:Int = (regs[slot] == tI32 || regs[slot] == tF64) ? regs[slot] : tDyn;
+			var landed:Int = wanted == tDyn ? reg(tDyn) : slot;
+
+			var call:Array<Int> = [
+				landed,
+				invokeIndex(params.length, wanted),
+				target,
+				named(name),
+				siteSlot(),
+				siteIndex(name)
+			];
 
 			for (h in held)
 				call.push(h);
 
 			ops.push({op: OCallN, args: call});
-			unbox(call[0], slot);
+
+			if (landed != slot)
+				unbox(landed, slot);
+
 			return;
 		}
 
@@ -2917,16 +2959,19 @@ class Emitter {
 	 * @param count How many arguments the call passes.
 	 * @return This module's index for the caller that takes that many.
 	 */
-	function invokeIndex(count:Int):Int {
-		if (invokeNatives[count] < 0) {
+	function invokeIndex(count:Int, wanted:Int):Int {
+		var named:String = wanted == tI32 ? 'invokei' : (wanted == tF64 ? 'invoked' : 'invoke');
+		var held:Map<Int, Int> = invokeNatives[count];
+
+		if (!held.exists(wanted)) {
 			var args:Array<Int> = [tDyn, tDyn, tDyn, tI32];
 			for (i in 0...count)
 				args.push(tDyn);
 
-			invokeNatives[count] = module.native('hxs', 'invoke' + count, module.typeId(TFun(args, tDyn)));
+			held.set(wanted, module.native('hxs', named + count, module.typeId(TFun(args, wanted))));
 		}
 
-		return invokeNatives[count];
+		return held.get(wanted);
 	}
 
 	function storeIntIndex():Int {
@@ -3562,11 +3607,119 @@ class Emitter {
 	/** Opens a scope. */
 	inline function push():Void {
 		scopes.push(new StringMap());
+		annotated.push(new StringMap());
 	}
 
 	/** Closes one. */
 	inline function pop():Void {
 		scopes.pop();
+		annotated.pop();
+	}
+
+	/**
+	 * Records that a name was written with a class the world already has.
+	 *
+	 * @param name The local.
+	 * @param t Its annotation, or null when it had none.
+	 */
+	function annotate(name:String, t:Null<CType>):Void {
+		var written:Null<String> = baseName(t);
+
+		if (written == null || classes.exists(written) || declared.exists(written))
+			return;
+
+		if (knownAs(written) != null)
+			annotated[annotated.length - 1].set(name, written);
+	}
+
+	/**
+	 * @param name A type as a script wrote it.
+	 * @return The world's type for it, or null when nothing there is a class of that name.
+	 *
+	 * Asked once per name. The answer decides what a member of it is, which is asked for every
+	 * access the emitter writes, and going out to the world for each of those would cost more than
+	 * the knowledge is worth.
+	 */
+	function knownAs(name:String):Null<hl.Type> {
+		if (known.exists(name))
+			return known.get(name);
+
+		var found:Dynamic = world(name);
+		var t:Null<hl.Type> = (found != null && found is Class) ? (cast found : hl.BaseType).__type__ : null;
+
+		if (t != null && Loader.fieldCount(t) < 0)
+			t = null;
+
+		known.set(name, t);
+		return t;
+	}
+
+	/**
+	 * What a member of a class the world already has answers with.
+	 *
+	 * **This is what makes reaching the host fast.** A call into the world had no type until it came
+	 * back, so its answer was boxed and everything the script did with it afterwards was dynamic
+	 * too. A local written with a class the world has says which class, and the world says what its
+	 * members answer, and the difference measured is thirty-fold on the same line.
+	 *
+	 * @param obj What is being read from or called on.
+	 * @param name The member.
+	 * @param called Whether it is being called rather than read.
+	 * @return Its register type, or dynamic when nothing here can say.
+	 */
+	function worldlyKind(obj:Expr, name:String, called:Bool):Int {
+		var written:Null<String> = worldly(obj);
+		if (written == null)
+			return tDyn;
+
+		var key:String = written + (called ? '(' : '.') + name;
+
+		if (!answers.exists(key)) {
+			var held:Null<hl.Type> = knownAs(written);
+			var kind:Int = -1;
+
+			if (held == null) {
+				kind = -1;
+			} else if (called) {
+				var shape:Null<Array<Int>> = Loader.protoShape(held, name);
+				if (shape != null)
+					kind = shape[1];
+			} else {
+				kind = Loader.fieldKind(held, name);
+			}
+
+			var found:Int = kind < 0 ? tDyn : fromKind(kind);
+
+			/**
+			 * Nothing is inferred as void. A call that answers nothing is written as a statement, and
+			 * a register of that type is not somewhere a value can be put on the way.
+			 */
+			answers.set(key, (found < 0 || found == tVoid) ? tDyn : found);
+		}
+
+		return answers.get(key);
+	}
+
+	/**
+	 * @param e An expression.
+	 * @return The world's class it is held as, or null when nothing said.
+	 */
+	function worldly(e:Expr):Null<String> {
+		return switch (e.e) {
+			case EParent(inner): worldly(inner);
+
+			case EIdent(name):
+				var i:Int = annotated.length - 1;
+				while (i >= 0) {
+					var here:Null<String> = annotated[i].get(name);
+					if (here != null)
+						return here;
+					i--;
+				}
+				null;
+
+			case _: null;
+		}
 	}
 
 	/** @return The register a name is bound to, innermost scope first, or null when it is unbound. */
@@ -3630,14 +3783,22 @@ class Emitter {
 
 			case EField(obj, name, _):
 				var held:Null<Int> = fieldType(obj, name);
-				held == null ? tDyn : held;
+				held == null ? worldlyKind(obj, name, false) : held;
 
 			case ECall(callee, _):
 				if (selfCall(callee) != null) {
 					tDyn;
 				} else {
 					var sig:Null<Signature> = calledSignature(callee);
-					sig == null ? tDyn : sig.ret;
+
+					if (sig != null) {
+						sig.ret;
+					} else {
+						switch (callee.e) {
+							case EField(obj, name, _): worldlyKind(obj, name, true);
+							case _: tDyn;
+						}
+					}
 				}
 
 			case _: tDyn;
@@ -4372,6 +4533,7 @@ class Emitter {
 		ops = [];
 		regs = [];
 		scopes = [];
+		annotated = [];
 		breaks = [];
 		continues = [];
 		returns = tDyn;
