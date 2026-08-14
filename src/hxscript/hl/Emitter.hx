@@ -252,6 +252,15 @@ class Emitter {
 	var owners:Map<Int, String>;
 
 	/**
+	 * The last expression written, so a refusal with nowhere of its own to point can point at it.
+	 *
+	 * A conversion that cannot be made is found in `move`, which is handed two registers and knows
+	 * nothing about where they came from. Reported with no position it named the module and nothing
+	 * else, which on a file of any size is not a report at all.
+	 */
+	var at:Null<Position> = null;
+
+	/**
 	 * Whether what is being written is a field's starting value rather than an assignment.
 	 *
 	 * A declaration's starting value goes into storage even when a setter stands in front of it,
@@ -1672,6 +1681,9 @@ class Emitter {
 	 * @throws Unsupported If it has no instruction here.
 	 */
 	function statement(e:Expr):Void {
+		if (e.pos != null)
+			at = e.pos;
+
 		switch (e.e) {
 			case EBlock(body):
 				push();
@@ -1706,7 +1718,13 @@ class Emitter {
 					case EIdent(name) if (propertyOf(inside, name) != null):
 						setField(thisExpr(e.pos), name, value, e.pos);
 
-					case EIdent(name) if (isMemberOf(name) || reachesHost()):
+					case EIdent(name) if (isMemberOf(name) || hostDeclares(name)):
+						setField(thisExpr(e.pos), name, value, e.pos);
+
+					case EIdent(name) if (ambientMembers.exists(name)):
+						throw new Unsupported('an assignment to ' + name + ', which the host offers to read rather than to write', e.pos);
+
+					case EIdent(name) if (reachesHost()):
 						setField(thisExpr(e.pos), name, value, e.pos);
 
 					case EField({e: EIdent(cls)}, name, _) if (isStaticOf(cls, name)):
@@ -2033,6 +2051,9 @@ class Emitter {
 	 * @throws Unsupported If it has no instruction here.
 	 */
 	function into(e:Expr, slot:Int):Void {
+		if (e.pos != null)
+			at = e.pos;
+
 		var want:Int = regs[slot];
 
 		if (want == tDyn) {
@@ -2090,7 +2111,7 @@ class Emitter {
 					return;
 				}
 
-				if (isMemberOf(name) || reachesHost()) {
+				if (isMemberOf(name) || hostDeclares(name)) {
 					getField(thisExpr(e.pos), name, slot, e.pos);
 					return;
 				}
@@ -2103,6 +2124,12 @@ class Emitter {
 				if (ambientMembers.exists(name)) {
 					var host:{owner:String, field:String} = ambientMembers.get(name);
 					emitHostRead(host.owner, host.field, slot);
+					return;
+				}
+
+				/** Last, because it is a guess where everything above it was something known. */
+				if (reachesHost()) {
+					getField(thisExpr(e.pos), name, slot, e.pos);
 					return;
 				}
 
@@ -2552,7 +2579,13 @@ class Emitter {
 	 * @throws Unsupported If it was given more arguments than it declares.
 	 */
 	function emitDeclared(sig:Signature, receiver:Int, params:Array<Expr>, slot:Int, pos:Position, seat:Int = -1):Void {
-		var first:Int = receiver >= 0 ? 1 : 0;
+		/**
+		 * A method's shape counts the instance whether or not the call passes one. `OCallThis` takes
+		 * it from register 0 rather than from the arguments, so the arguments still start after it;
+		 * counting from the front there put the first one where the instance goes, and a method
+		 * calling another on `this` with anything at all refused the module.
+		 */
+		var first:Int = (receiver >= 0 || seat >= 0) ? 1 : 0;
 		var taken:Int = sig.args.length - first;
 
 		/**
@@ -3251,6 +3284,27 @@ class Emitter {
 	 * When it does, a name nothing here recognises is still likely to be a field, since the base
 	 * brought members along that only the world can list.
 	 */
+	/**
+	 * Whether the base the world has really declares a name, rather than merely might.
+	 *
+	 * `reachesHost` is the question asked when there was nothing better: the base is the world's, so
+	 * an unknown name is *probably* a field of it. That guess beat everything after it, including the
+	 * names the host went to the trouble of declaring ambient, so a class extending anything at all
+	 * read `screenWidth` as one of its own fields and found nothing there. Asking the world instead
+	 * is exact wherever the base could be resolved.
+	 *
+	 * @param name A bare name.
+	 * @return Whether the base declares it as a field or a method.
+	 */
+	function hostDeclares(name:String):Bool {
+		var above:Null<hl.Type> = rootHost(inside);
+
+		if (above == null)
+			return false;
+
+		return Loader.declares(above, name) || Loader.protoAt(above, name) >= 0;
+	}
+
 	function reachesHost():Bool {
 		var at:Null<String> = inside;
 
@@ -3465,7 +3519,29 @@ class Emitter {
 			return;
 		}
 
-		throw new Unsupported('a value of one type where another was declared', null);
+		throw new Unsupported('a ' + describe(a) + ' where a ' + describe(b) + ' was declared', at);
+	}
+
+	/**
+	 * @param t A register type.
+	 * @return What to call it in a refusal, so the reader knows which two would not go together.
+	 */
+	function describe(t:Int):String {
+		if (owners.exists(t))
+			return owners.get(t);
+
+		if (t == tVoid)
+			return 'Void';
+		if (t == tI32)
+			return 'Int';
+		if (t == tF64)
+			return 'Float';
+		if (t == tBool)
+			return 'Bool';
+		if (t == tDyn)
+			return 'Dynamic';
+
+		return 'value';
 	}
 
 	/** @return Whether a type is one the VM cannot carry in a dynamic without boxing it first. */

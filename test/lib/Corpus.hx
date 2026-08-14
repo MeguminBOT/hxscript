@@ -421,6 +421,14 @@ class Corpus {
 		check('a method calling another on this', 'return new T().outer();', '21',
 			'public function new() {} public function inner():Int return 21; public function outer():Int return inner();');
 
+		// With an argument, which is a different instruction's worth of bookkeeping: a method's shape
+		// counts the instance whether or not the call passes one, so the arguments start after it.
+		// Reached only through a call on `this`, which is why the case above never found this.
+		check('a method calling another on this with an argument', 'return new T().outer(6);', '20',
+			'public function new() {} public function inner(n:Int):Int return n * 3; public function outer(n:Int):Int return inner(n) + 2;');
+		check('a method calling another on this with two arguments', 'return new T().outer();', '11',
+			'public function new() {} public function inner(a:Int, b:Float):Int return a + Std.int(b); public function outer():Int return inner(4, 7.5);');
+
 		check('a field set by the base and read by the child', 'return new Child().read();', '7',
 			null,
 			'class Base { public var kept:Int; public function new() { kept = 7; } }\n'
