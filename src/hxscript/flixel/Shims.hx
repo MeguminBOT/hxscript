@@ -27,6 +27,7 @@ class Shims {
 
 	/** Registers every flixel member whose runtime form the library does not carry. */
 	public static function register():Void {
+		#if (flixel >= "6.0.0")
 		set('flixel.FlxG.switchState', function(o:Dynamic, args:Array<Dynamic>):Dynamic {
 			var next:Dynamic = args[0];
 			var current:Dynamic = FlxG.state;
@@ -77,6 +78,7 @@ class Shims {
 
 			return null;
 		});
+		#end
 	}
 }
 #end
