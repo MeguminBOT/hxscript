@@ -55,8 +55,10 @@ class Autowire {
 		Context.onAfterInitMacros(function():Void {
 			var forced:{refs:Array<Expr>, args:Array<FunctionArg>, named:Array<String>} = reference(libs);
 			var bridges:Array<Expr> = Bridges.generate(libs);
+			var titles:Array<String> = [for (lib in libs) lib.title];
 
-			manifest(bridges, forced, globals, abstracts, [for (lib in libs) lib.title]);
+			manifest(bridges, forced, globals, abstracts, titles);
+			hxscript.macro.Banner.wired(titles, bridges.length, forced.named.length, abstracts.length, globals.length);
 		});
 	}
 

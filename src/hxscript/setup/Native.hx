@@ -91,13 +91,13 @@ class Native {
 	static function report(what:Outcome):Void {
 		switch (what) {
 			case Ready(path):
-				if (Context.defined('hxscript_verbose'))
-					Context.info('hxscript: ' + path + ' is current', Context.currentPos());
+				hxscript.macro.Banner.note('native', path + ' is current');
 
 			case Built(path):
-				Context.info('hxscript: built ' + path, Context.currentPos());
+				hxscript.macro.Banner.note('native', 'built ' + path);
 
 			case Missing(reason, remedy):
+				hxscript.macro.Banner.note('native', 'missing, so every script will be interpreted');
 				Context.warning('hxscript: compiled scripts need a native module and ' + reason + '\n' + remedy + '\n'
 					+ 'Until then every script is interpreted, which is a slower program rather than a broken one.',
 					Context.currentPos());

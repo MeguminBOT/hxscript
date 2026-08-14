@@ -330,6 +330,15 @@ class Emitter {
 	/** What the world answered for each type name a script wrote, asked once. */
 	var known:StringMap<Null<hl.Type>>;
 
+	/** Whether the world answers to a bare name with a type, by name. */
+	var names:StringMap<Bool>;
+
+	/** Whether a host static's value can be taken once and kept, by owner and field. */
+	var constants:StringMap<Bool>;
+
+	/** The names this module declares outside any class, which belong to it rather than to the world. */
+	var moduleNames:StringMap<Bool>;
+
 	/** What kind each member of one of those is, by class name then member. */
 	var answers:StringMap<Int>;
 
@@ -408,6 +417,9 @@ class Emitter {
 		tables = new StringMap();
 		hosts = new StringMap();
 		known = new StringMap();
+		names = new StringMap();
+		constants = new StringMap();
+		moduleNames = new StringMap();
 		answers = new StringMap();
 		holders = new StringMap();
 		staticSlots = new StringMap();
@@ -452,8 +464,9 @@ class Emitter {
 				case DTypedef(t):
 					declared.set(t.name, true);
 
-				case DField(_):
+				case DField(f):
 					loose = true;
+					moduleNames.set(f.name, true);
 
 				case DUsing(path):
 					usings.push(path.join('.'));
@@ -2161,6 +2174,20 @@ class Emitter {
 					return;
 				}
 
+				/**
+				 * A type of another module, named as a value.
+				 *
+				 * `Handoff.mode = 2` is a field write whose receiver is a class, and a batch is one
+				 * module, so a class any other module declared is not in it. Everything above answers
+				 * about this module or about a member of this class, and none of it can, so a project
+				 * of more than one file could name its own class in one and not in another.
+				 */
+				if (!moduleNames.exists(name) && namesType(name)) {
+					var found:Int = typeNamed(name);
+					move(found, slot);
+					return;
+				}
+
 				if (!loose)
 					throw new Unsupported(name + ', which is neither a local nor a field here', e.pos);
 
@@ -2832,6 +2859,25 @@ class Emitter {
 	 * @param slot Where to leave the value.
 	 */
 	function emitHostRead(owner:String, field:String, slot:Int):Void {
+		/**
+		 * A static that has somewhere to live is read from where it lives, every time.
+		 *
+		 * The global is filled once, when the module loads, which is right for a name whose value is
+		 * fixed and wrong for every other. It was wrong for a static of another module, and a project
+		 * is many modules: one screen writes `Nav.pending` and the next frame reads back the null it
+		 * held at load. Nothing reports that. The screen simply never changes, and a static holding a
+		 * list read before its own initialiser ran is a null somebody iterates.
+		 *
+		 * The class is what stays put, so that is what the global holds, and the field is read off it
+		 * through the same cache an ordinary field read uses: one offset, resolved once per type.
+		 */
+		if (!folded(owner, field)) {
+			var from:Int = reg(tDyn);
+			ops.push({op: OGetGlobal, args: [from, hostSlot(owner, '')]});
+			readNamed(from, field, slot);
+			return;
+		}
+
 		if (regs[slot] == tDyn) {
 			ops.push({op: OGetGlobal, args: [slot, hostSlot(owner, field)]});
 			return;
@@ -2840,6 +2886,45 @@ class Emitter {
 		var held:Int = reg(tDyn);
 		ops.push({op: OGetGlobal, args: [held, hostSlot(owner, field)]});
 		ops.push({op: OSafeCast, args: [slot, held]});
+	}
+
+	/**
+	 * @param owner A type the world holds.
+	 * @param field One of its statics.
+	 * @return Whether its value can be taken once and kept.
+	 *
+	 * Only when the world has the type and the type has no runtime field of that name. `Math.PI` is
+	 * the case: the compiler substitutes it and there is nothing left on `$Math` to read, so the
+	 * value the loader folds is the only one there will ever be. Anything with storage has storage
+	 * because something may write it.
+	 */
+	function folded(owner:String, field:String):Bool {
+		var key:String = owner + '#' + field;
+
+		if (!constants.exists(key))
+			constants.set(key, fixed(owner, field));
+
+		return constants.get(key);
+	}
+
+	/** @return The answer `folded` caches, worked out once per name. */
+	function fixed(owner:String, field:String):Bool {
+		var found:Dynamic = world(owner);
+
+		/**
+		 * A name the world does not answer to keeps the single binding it has always had. The loader
+		 * refuses a module whose host names resolve to nothing, so turning this into a read off that
+		 * nothing would trade a working module for a refused one over a name that already works.
+		 */
+		if (found == null)
+			return true;
+
+		/** A class a script declared keeps its statics where only the world can find them. */
+		if (found is hxscript.types.ScriptedClass)
+			return false;
+
+		var holder:Null<hl.Type> = hl.Type.getDynamic(found);
+		return holder == null || Loader.fieldKind(holder, field) < 0;
 	}
 
 	/**
@@ -3189,7 +3274,21 @@ class Emitter {
 			return;
 		}
 
-		var target:Int = dynOf(obj);
+		readNamed(dynOf(obj), name, slot);
+	}
+
+	/**
+	 * Writes a read of a named field off a value already in a register.
+	 *
+	 * The tail of `getField`, on its own so a read whose receiver is not an expression can use it
+	 * too. A static of another module is one of those: the receiver is that module's class, which is
+	 * a value this module holds rather than anything the script wrote.
+	 *
+	 * @param target A register holding the receiver, as a dynamic.
+	 * @param name The field.
+	 * @param slot Where to leave the value.
+	 */
+	function readNamed(target:Int, name:String, slot:Int):Void {
 		var named:Int = named(name);
 		var cell:Int = siteSlot();
 		var site:Int = siteIndex(name, 'get_');
@@ -3870,6 +3969,21 @@ class Emitter {
 	 * access the emitter writes, and going out to the world for each of those would cost more than
 	 * the knowledge is worth.
 	 */
+	/**
+	 * @param name A bare name.
+	 * @return Whether the world answers to it with a type.
+	 *
+	 * Asked of the world rather than guessed from the spelling. A capital letter is a convention and
+	 * binding on one would turn a misspelled local into a global that loads as null, where asking
+	 * turns it into the refusal it was.
+	 */
+	function namesType(name:String):Bool {
+		if (!names.exists(name))
+			names.set(name, world(name) != null);
+
+		return names.get(name);
+	}
+
 	function knownAs(name:String):Null<hl.Type> {
 		if (known.exists(name))
 			return known.get(name);
