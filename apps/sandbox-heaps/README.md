@@ -183,6 +183,7 @@ something that runs in it before you have written anything.
 | --- | --- |
 | `heaps` | a scripted `h2d.Object` with forty drifting squares, plus a scripted enum and a scripted abstract with an operator |
 | `plain` | a `static main()`: no framework at all, printing what a script can reach |
+| `puzzle` | a whole game: seven-bag randomiser, wall kicks, ghost piece, hold, lock delay and levels, in two modules |
 
 ### If a project behaves differently once it is compiled
 
@@ -194,25 +195,16 @@ else.
 > JIT is turned on, so there the two are worth separating. HashLink jits whatever it loads, so
 > bytecode here is already machine code and a third setting would be a control that did nothing.
 
-### One template compiles, one does not, and the log says why
+### All three templates compile, and the log says so
 
-`plain` compiles in full. `heaps` is refused and interpreted, and the reason is worth knowing rather
-than discovering:
+Every shipped template is taken by the compiler in full. That was not always true: HashLink used to
+model no `extends` at all, so a class with a base was compiled as if it had none and `super` had
+nothing to reach, and `heaps` was refused for it. A scripted class is a real type of the loaded
+module now, laid out after whatever it extends, with its methods in the table a virtual call
+dispatches through, so `extends`, `super` and `v is C` all mean what they mean interpreted.
 
-```
-compiled 0 class(es); interpreting Playground: super(), because a class of this
-batch is compiled with no base; all interpreted
-```
-
-**HashLink compiles a batch's classes into module types of its own**, which is also why `v is C` is
-refused for a class of the batch: the instances a loaded module makes are its own. Nothing models
-`extends` there yet, so a class with a base is compiled as if it had none and `super` has nothing to
-reach. cppia has `CALLSUPER` and passes the same cases, so this is a gap between the two backends
-rather than something neither can do.
-
-The refusal is the designed behaviour rather than a fault: the module is interpreted, costs speed and
-nothing else, and every answer stays right. `test/lib/Corpus.hx` now carries four `super` cases, so
-the gap is a number both backends are held to instead of something a real app finds by surprise.
+If a project of your own is refused, the log names the module, the line and the construct, and the
+module is quietly interpreted: it costs speed and nothing else, and every answer stays right.
 
 **The check takes ten seconds**: set the run mode to interpreted. If the behaviour changes back, it
 is the compiler rather than your script.
