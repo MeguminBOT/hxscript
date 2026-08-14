@@ -174,6 +174,22 @@ class Frontier {
 			'static function first(v:HostVec):Float { return v.x; }', 'import HostVec;');
 		probe('an abstract returned through a declared return type', 'return Std.string(make(2, 5));',
 			'static function make(x:Float, y:Float):HostVec { return new HostVec(x, y); }', 'import HostVec;');
+		/*
+			An own method called by bare name from inside a closure, which is what every event handler
+			in an interface is: `hit.onClick = function(e) tapped();`. A lambda is emitted with no
+			receiver, so a name that is a member of the class around it resolves to nothing and the
+			module is refused. Written out because the sandbox's widgets template is refused for
+			exactly this and it is the most ordinary line in it.
+		*/
+		probe('an own method called from a closure', 'var t = new T(); var f = t.go(); f(); f(); return Std.string(t.count);',
+			'public var count:Int = 0;
+public function new() {}
+function bump():Void { count++; }
+public function go():Dynamic { return function() { bump(); }; }');
+		probe('an own field read from a closure', 'var t = new T(); return Std.string(t.read()());',
+			'var held:Int = 7;
+public function new() {}
+public function read():Dynamic { return function() { return held; }; }');
 		probe('a host static read', 'return Std.string(Math.PI > 3);');
 		probe('a host static that changes', 'var a = Std.string(Date.now().getTime() > 0); return a;');
 		probe('a host method on a value', 'return "ab".toUpperCase();');

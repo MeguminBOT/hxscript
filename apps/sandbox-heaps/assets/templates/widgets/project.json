@@ -1,0 +1,6 @@
+{
+	"title": "Widgets",
+	"kind": "heaps",
+	"entry": "Widgets",
+	"description": "The half of h2d a interface is built from rather than the half a game is: interactives and their callbacks, masks, scale grids, tile groups, filters, layers and blend modes. Each is a different path through the library than a sprite that only moves."
+}
