@@ -3767,6 +3767,17 @@ class Interp {
 		}
 
 		if (!Reflect.isFunction(fun)) {
+			/**
+			 * A constructor of a host enum, which is not a field of the enum on every target: hxcpp
+			 * answers with a function and HashLink answers with nothing, so asking the enum to make
+			 * one is what agrees everywhere.
+			 */
+			if (o is Enum || o is ScriptedEnum) {
+				var at:Int = Type.getEnumConstructs(o).indexOf(f);
+				if (at >= 0)
+					return Type.createEnum(o, f, args);
+			}
+
 			for (t in usings) {
 				var fun = get(t, f, true);
 				if (!Reflect.isFunction(fun))

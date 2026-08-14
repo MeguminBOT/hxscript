@@ -14,19 +14,14 @@ None. Every case with a written answer produced it in every column that ran it.
 
 **cppia-jit** against `cpp-interp`: 281 agree, **0 differ**, 0 refused, 0 fell back to the interpreter, 0 killed the process.
 
-**hlc-jit** against `hlc-interp`: 280 agree, **1 differ**, 0 refused, 0 fell back to the interpreter, 0 killed the process.
-
-| case | mode | interpreted | compiled |
-| --- | --- | --- | --- |
-| a host enum matched | hlc-jit | threw an anonymous object has no field Some | 7 |
+**hlc-jit** against `hlc-interp`: 281 agree, **0 differ**, 0 refused, 0 fell back to the interpreter, 0 killed the process.
 
 ## Where the interpreter itself reads differently per target
 
-2 of 281 cases. This is reachability, not semantics.
+1 of 281 cases. This is reachability, not semantics.
 
 | case | eval-interp | cpp-interp | hlc-interp |
 | --- | --- | --- | --- |
-| a host enum matched | 7 | 7 | threw an anonymous object has no field Some |
 | an abstract Map through its alias | **killed** | 1 | 1 |
 
 <details>
@@ -280,7 +275,7 @@ None. Every case with a written answer produced it in every column that ran it.
 | 243 | a host method on a value | AB | AB | AB | AB | AB | AB |
 | 244 | a host class constructed | hi | hi | hi | hi | hi | hi |
 | 245 | a host enum value | None | None | None | None | None | None |
-| 246 | a host enum matched | 7 | 7 | 7 | 7 | threw an anonymous object has no field Some | 7 |
+| 246 | a host enum matched | 7 | 7 | 7 | 7 | 7 | 7 |
 | 247 | an abstract Map through its alias | **killed** | 1 | 1 | 1 | 1 | 1 |
 | 248 | Lambda over an array | 3 | 3 | 3 | 3 | 3 | 3 |
 | 249 | haxe.Json round trip | {"a":1} | {"a":1} | {"a":1} | {"a":1} | {"a":1} | {"a":1} |
