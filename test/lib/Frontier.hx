@@ -199,6 +199,16 @@ public function read():Dynamic { return function() { return held; }; }');
 		probe('an enum abstract constructor, bare', 'return Std.string(Add);', null, 'import HostFlag;');
 		probe('an enum abstract constructor, through an import', 'return Std.string(HostFlag.Add);', null, 'import HostFlag;');
 		probe('an enum abstract constructor, unimported', 'return Std.string(HostFlag.Add);');
+		/*
+			The same table read a second way. An enum abstract's constant is not the only thing an
+			import binds as a mirror rather than as a value: `import Pack.Type.field` binds one too,
+			and so does every module-level field. These separate the two halves of what a backend has
+			to do with one, because they are opposites: a constant may be taken once and kept, and a
+			static something writes may not, and reading the mirror itself is wrong for both.
+		*/
+		probe('a host static by bare name after a static import', 'return Std.string(step);', null, 'import HostDial.step;');
+		probe('a host static written then read by bare name', 'HostDial.turns = 5; return Std.string(turns);', null, 'import HostDial.turns;');
+		probe('a host static written then read qualified', 'HostDial.turns = 6; return Std.string(HostDial.turns);');
 		probe('a host static read', 'return Std.string(Math.PI > 3);');
 		probe('a host static that changes', 'var a = Std.string(Date.now().getTime() > 0); return a;');
 		probe('a host method on a value', 'return "ab".toUpperCase();');

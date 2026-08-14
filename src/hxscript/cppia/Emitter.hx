@@ -369,12 +369,10 @@ class Emitter {
 				case DPackage(path):
 					pack = path.join('.');
 				case DImport(path, mode):
-					var full:String = path.join('.');
-					var short:String = switch (mode) {
+					recordImport(path, switch (mode) {
 						case IAsName(alias): alias;
 						case _: path[path.length - 1];
-					}
-					typePaths.set(short, full);
+					});
 				case DClass(c) | DInterface(c):
 					var full:String = pack.length > 0 ? pack + '.' + c.name : c.name;
 					typePaths.set(c.name, full);
@@ -637,11 +635,10 @@ class Emitter {
 					pack = path.join('.');
 
 				case DImport(path, mode):
-					var full:String = path.join('.');
-					typePaths.set(switch (mode) {
+					recordImport(path, switch (mode) {
 						case IAsName(alias): alias;
 						case _: path[path.length - 1];
-					}, full);
+					});
 
 				case DClass(c) | DInterface(c):
 					typePaths.set(c.name, pack.length > 0 ? pack + '.' + c.name : c.name);
@@ -3702,6 +3699,37 @@ class Emitter {
 		w.type(target.substr(0, split));
 		w.str(target.substr(split + 2));
 		return true;
+	}
+
+	/**
+	 * Records what an `import` puts in scope, which is a type or a static of one.
+	 *
+	 * `import pack.Type.field` binds a name that is a field of something rather than a type. Read as
+	 * a type it named a path with no class behind it, and what was emitted for it was `CLASSOF` of
+	 * that path, which evaluates to null: the script's name answered null with nothing said about it,
+	 * where the interpreter answered the field's value.
+	 *
+	 * Resolving the shorter path is what separates the two. A path that answers nothing stays a type
+	 * import, so a name that really is unknown is still refused where it is used rather than here.
+	 *
+	 * @param path The imported path's segments.
+	 * @param short The name it binds.
+	 */
+	function recordImport(path:Array<String>, short:String):Void {
+		var full:String = path.join('.');
+
+		if (path.length > 1 && hxscript.types.TypeTools.resolve(full) == null) {
+			var owner:String = path.slice(0, path.length - 1).join('.');
+			var field:String = path[path.length - 1];
+			var held:Dynamic = hxscript.types.TypeTools.resolve(owner);
+
+			if (held != null && Type.getClassFields(held).indexOf(field) >= 0) {
+				ambientMembers.set(short, owner + '::' + field);
+				return;
+			}
+		}
+
+		typePaths.set(short, full);
 	}
 
 	/**

@@ -32,8 +32,11 @@ import hxscript.Module;
 import hxscript.hl.Binding;
 import hxscript.hl.Binding.BindingKind;
 import hxscript.hl.Loader;
+import hxscript.runtime.Reference;
 import hxscript.syntax.Expr;
+import hxscript.types.IScriptedType;
 import hxscript.types.ScriptedClass;
+import hxscript.types.TypeTools;
 #end
 
 /**
@@ -176,6 +179,7 @@ class Backend {
 		emitter.world = function(name:String):Dynamic {
 			return hostOwner(name, module, env);
 		};
+		emitter.ambientStatics(staticImports(module, env));
 
 		try {
 			emitter.declare(module.decls, module.name);
@@ -401,6 +405,67 @@ class Backend {
 	}
 
 	/**
+	 * The bare names this module's own imports bind to a static of a class the host compiled.
+	 *
+	 * `import pack.Type.field` puts a name in scope that is a field of something rather than a type,
+	 * and the interpreter records that as a mirror in the table it records types in. There is no
+	 * right value to bind for such a name: the mirror itself is what compiled code answered with, and
+	 * the value taken once at load is a static frozen at whatever it held before anything ran.
+	 *
+	 * So it is not bound as a value at all. Written out as an ambient static it goes through the same
+	 * route a host configures for its own globals, which reads the field off its owner every time,
+	 * and that is what the name means.
+	 *
+	 * @param module The module whose imports decide what a short name means.
+	 * @param env The world, which has to agree that the path names the owner.
+	 * @return Each written `name=owner.path::field`, the form `ambientStatics` takes.
+	 */
+	static function staticImports(module:Module, env:Environment):Array<String> {
+		var out:Array<String> = [];
+
+		if (module == null || module.interp == null)
+			return out;
+
+		for (name => held in module.interp.imports) {
+			if (!(held is Reference))
+				continue;
+
+			switch (cast(held, Reference)) {
+				case RProperty(owner, field):
+					/**
+					 * Only when the path resolves back to the very thing the mirror holds. An owner is
+					 * a host class here but a scripted class or a module's field table there, and
+					 * those two have statics the world cannot find by path; asking the world to agree
+					 * is what separates them, and costs one resolve per imported name.
+					 */
+					var path:Null<String> = pathOfValue(owner);
+
+					if (path != null && TypeTools.resolve(path, env) == owner)
+						out.push(name + '=' + path + '::' + field);
+
+				case _:
+			}
+		}
+
+		return out;
+	}
+
+	/**
+	 * @param held A value that may be a class.
+	 * @return The path it is known by, or null when it is not a class the host compiled.
+	 */
+	static function pathOfValue(held:Dynamic):Null<String> {
+		if (held == null || held is IScriptedType)
+			return null;
+
+		try {
+			return Type.getClassName(cast held);
+		} catch (e:Dynamic) {
+			return null;
+		}
+	}
+
+	/**
 	 * Finds what a name a script wrote refers to.
 	 *
 	 * **The module's own imports come first, and leaving them out was a real bug.** A script that
@@ -417,7 +482,18 @@ class Backend {
 	 */
 	static function hostOwner(owner:String, module:Module, env:Environment):Dynamic {
 		if (module != null && module.interp != null && module.interp.imports.exists(owner)) {
-			var imported:Dynamic = module.interp.imports.get(owner);
+			/**
+			 * Through the interpreter, because the table holds a mirror wherever a name stands for
+			 * something that is not a plain value, and read straight the mirror is what compiled code
+			 * answered with: `RProperty($HostDial,step)` where the script wrote `step`, and
+			 * `RAbstractEnumValue($AbstractValue_HostFlag,1)` where it wrote an enum abstract's
+			 * constant. Both stringified to the reference and neither said anything was wrong.
+			 *
+			 * A mirror of a property answers null here and falls through on purpose. It is a field of
+			 * something rather than a type, so it is compiled as a read of its owner instead, which
+			 * `staticImports` arranges.
+			 */
+			var imported:Dynamic = module.interp.constantMirror(module.interp.imports.get(owner));
 			if (imported != null)
 				return imported;
 		}

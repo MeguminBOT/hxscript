@@ -1511,6 +1511,33 @@ class Interp {
 	}
 
 	/**
+	 * Materializes a mirror standing for a constant, and answers nothing for one that is not.
+	 *
+	 * The import table holds a `Reference` wherever a name stands for something that is not a plain
+	 * value, so anything reading that table to find out what a name means gets the mirror unless it
+	 * asks through here. A compiler is the caller that needs it: a name it reads straight is answered
+	 * with the mirror itself.
+	 *
+	 * **A property is deliberately not answered.** An enum's constructor and an enum abstract's
+	 * constant are fixed, so taking one and keeping it is right. A property has storage because
+	 * something may write it, and a compiler that took one here would read it once and never see the
+	 * write; that name has to be compiled as a read of its owner instead.
+	 *
+	 * @param v The stored value or mirror.
+	 * @return The value, unchanged when it was never a mirror, or null for a mirror of a property.
+	 */
+	public function constantMirror(v:Dynamic):Dynamic {
+		if (!(v is Reference))
+			return v;
+
+		return switch (cast(v, Reference)) {
+			case REnumValue(t, i): resolveEnumValue(t, i);
+			case RAbstractEnumValue(t, i): createAbstractEnum(t, i);
+			case _: null;
+		}
+	}
+
+	/**
 	 * Resolves a bare identifier to a value, checking imports first, then top-level variables, and
 	 * materializing any mirror it finds.
 	 *
