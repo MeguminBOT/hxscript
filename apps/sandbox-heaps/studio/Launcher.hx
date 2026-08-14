@@ -2,6 +2,7 @@ package studio;
 
 import h2d.Object;
 import h2d.Scene;
+import h3d.scene.Object as Object3D;
 import host.Api;
 import host.Project;
 import host.Sandbox;
@@ -46,6 +47,31 @@ class Launcher {
 
 	/** What a `KObject` or `KProject` draws into, owned here rather than by the project. */
 	static var layer:Object = null;
+
+	/**
+	 * The 3D scene, given by the app for the reason `onScene` is.
+	 *
+	 * heaps keeps two scene graphs and a project may want either. `hxd.App` makes both and this app
+	 * drew only the flat one, so a project reaching for 3D had nowhere to put anything. A script
+	 * asks for this through `world()` rather than by extending it: `h3d.scene.Object` inlines an
+	 * abstract's constructor, which is the one shape a generated bridge cannot re-emit.
+	 */
+	public static var world:Object3D = null;
+
+	/** Told when the 3D scene is being used, so the app knows whether to draw it. */
+	public static var onWorld:Bool->Void = null;
+
+	/**
+	 * @return The 3D scene, and from now on it is drawn.
+	 *
+	 * Asking is what turns it on. A project that never asks costs nothing, which is most of them.
+	 */
+	public static function reach3D():Object3D {
+		if (world != null && onWorld != null)
+			onWorld(true);
+
+		return world;
+	}
 
 	/** Whether the input hooks are installed. */
 	static var listening:Bool = false;
@@ -345,6 +371,12 @@ class Launcher {
 
 		if (layer != null)
 			layer.removeChildren();
+
+		if (world != null)
+			world.removeChildren();
+
+		if (onWorld != null)
+			onWorld(false);
 
 		Api.onQuit = null;
 	}

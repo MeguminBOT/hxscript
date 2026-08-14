@@ -231,8 +231,38 @@ class Presets {
 			'hxd.res.DefaultFont',
 			'hxd.snd.Channel',
 			'hxd.snd.effect.Pitch',
-			'hxscript.heaps.SoundTools'
+			'hxscript.heaps.SoundTools',
+
+			/**
+			 * The 3D half, which was missing entirely. heaps is not a 2D engine with 3D bolted on: a
+			 * project picks one scene graph or the other, and a preset offering only `h2d` says the
+			 * library does not support half of what the framework is for.
+			 */
+			'h3d.scene.Object',
+			'h3d.scene.Mesh',
+			'h3d.scene.Graphics',
+			'h3d.scene.Box',
+			'h3d.scene.Sphere',
+			'h3d.scene.Interactive',
+			'h3d.scene.CameraController',
+			'h3d.scene.fwd.DirLight',
+			'h3d.scene.fwd.PointLight',
+			'h3d.prim.Cube',
+			'h3d.prim.Sphere',
+			'h3d.prim.Cylinder',
+			'h3d.prim.Grid',
+			'h3d.mat.Material',
+			'h3d.mat.Texture',
+			'h3d.Camera',
+			'h3d.Quat',
+			'h3d.col.Bounds'
 		],
+		/**
+		 * `h3d.scene.Object` is deliberately not here. Its constructor inlines an abstract's own
+		 * constructor, which assigns to `this`, and a bridge has to re-emit the constructor it
+		 * extends. Scripts reach 3D by building into the scene rather than by being part of it,
+		 * which is what `world()` is for.
+		 */
 		bases: ['h2d.Object'],
 		abstractPackages: [],
 		/**
@@ -241,7 +271,7 @@ class Presets {
 		 * what gives an abstract something to resolve to, and this is the one a project reaches for
 		 * most: it is what `getBounds`, `globalToLocal` and every collision shape are written in.
 		 */
-		abstracts: ['h2d.BlendMode', 'h2d.col.Point'],
+		abstracts: ['h2d.BlendMode', 'h2d.col.Point', 'h3d.Vector', 'h3d.Matrix'],
 		abstractExclude: [],
 		globals: [
 			'hxscript.heaps.SoundTools',
@@ -251,7 +281,12 @@ class Presets {
 			'h2d.Text',
 			'h2d.Tile',
 			'hxd.Key',
-			'hxd.Timer'
+			'hxd.Timer',
+			'h3d.scene.Object',
+			'h3d.scene.Mesh',
+			'h3d.prim.Cube',
+			'h3d.mat.Material',
+			'h3d.Vector'
 		]
 	};
 

@@ -71,6 +71,16 @@ class Bridges {
 					continue;
 				}
 
+				/**
+				 * Two bases with the same simple name are ordinary, not exotic. heaps has `h2d.Object`
+				 * and `h3d.scene.Object`, and a bridge named after the last segment alone meant the
+				 * second was dropped with a warning nobody reads, so a scripted 3D project could not
+				 * exist. Whichever comes first keeps the short name, since bridges are indexed by the
+				 * base they extend rather than by what they are called and only a person reads these.
+				 */
+				if (taken.exists(name) && taken.get(name) != base)
+					name = 'Scripted' + flatten(base);
+
 				if (taken.exists(name)) {
 					Context.warning('hxscript: bridge name $name already taken by ${taken.get(name)}; skipping $base', pos);
 					continue;
@@ -102,6 +112,19 @@ class Bridges {
 		}
 
 		return refs;
+	}
+
+	/**
+	 * @param path A type path.
+	 * @return It as one capitalised word, so `h3d.scene.Object` becomes `H3dSceneObject`.
+	 */
+	static function flatten(path:String):String {
+		var out:String = '';
+
+		for (part in path.split('.'))
+			out += part.length == 0 ? '' : part.charAt(0).toUpperCase() + part.substr(1);
+
+		return out;
 	}
 
 	/** Types a scan found and would not bridge, and why, for the verbose report. */

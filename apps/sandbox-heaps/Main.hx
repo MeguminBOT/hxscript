@@ -77,6 +77,9 @@ class Main extends hxd.App {
 
 	var gallery:Null<Gallery>;
 
+	/** Whether a 3D project is running, which is the only time that scene is worth drawing. */
+	var drawing3D:Bool = false;
+
 	override function init():Void {
 		/**
 		 * The conformance run, before anything is mounted.
@@ -117,6 +120,9 @@ class Main extends hxd.App {
 			Api.screenHeight = Viewport.CANVAS_HEIGHT;
 
 			Launcher.onScene = borrow;
+			Launcher.world = s3d;
+			Launcher.onWorld = function(on:Bool):Void drawing3D = on;
+			Api.onWorld = Launcher.reach3D;
 			Shell.mount(root, surface);
 
 			hxd.Window.getInstance().addEventTarget(function(e:hxd.Event):Void {
@@ -171,6 +177,14 @@ class Main extends hxd.App {
 	 */
 	override function render(e:h3d.Engine):Void {
 		Metrics.beginDraw();
+
+		/**
+		 * The 3D scene first, when there is one running. It fills the frame and the flat scenes are
+		 * drawn over it, which is the order every heaps program uses and the only one where a 2D
+		 * interface on top of a 3D world is visible.
+		 */
+		if (drawing3D)
+			s3d.render(e);
 
 		var below:Scene = borrowed != null ? borrowed : stage;
 		below.render(e);

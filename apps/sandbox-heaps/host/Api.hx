@@ -94,4 +94,25 @@ class Api {
 	public static function uptime():Float {
 		return haxe.Timer.stamp() - began;
 	}
+
+	/**
+	 * The 3D scene to build into.
+	 *
+	 * heaps keeps two scene graphs and a project may want either. A 2D project becomes an
+	 * `h2d.Object` and is drawn by being one; a 3D project cannot, because `h3d.scene.Object`
+	 * inlines an abstract's constructor and a generated bridge has to re-emit the constructor it
+	 * extends. So a 3D project asks for the scene and puts things in it, which reaches all of heaps'
+	 * 3D and needs nothing generated.
+	 *
+	 * Asking is what turns that scene on: a project that never calls this costs nothing.
+	 *
+	 * @return The scene's root, or null in a build with no 3D.
+	 */
+	@:scriptStatic('world')
+	public static function world():Dynamic {
+		return onWorld == null ? null : onWorld();
+	}
+
+	/** Given by the app, so this class needs no reference to the launcher. */
+	public static var onWorld:Void->Dynamic = null;
 }
