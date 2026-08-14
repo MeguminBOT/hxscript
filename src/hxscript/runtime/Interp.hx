@@ -3858,7 +3858,7 @@ class Interp {
 	 * @return The compiled class standing in for it, or `o` unchanged.
 	 */
 	function staticHost(o:Dynamic):Dynamic {
-		#if hxscript_cppia
+		#if (hxscript_cppia || hxscript_hl)
 		if (environment != null && environment.substituting && o is ScriptedClass) {
 			var native:Class<Dynamic> = environment.compiled.get((cast o : ScriptedClass).path);
 			if (native != null)

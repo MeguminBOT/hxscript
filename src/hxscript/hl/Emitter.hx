@@ -137,6 +137,24 @@ class Emitter {
 	/** Members written `var x(null, ...)`, which nothing may read, by class then name. */
 	var unreadable:StringMap<StringMap<Bool>>;
 
+	/**
+	 * What may be reached as storage rather than through the world, by class then name.
+	 *
+	 * `READS` and `WRITES` say which side of an access is plain. A declaration with an accessor on a
+	 * side keeps going through the world's own reader there, whatever storage stands behind it, so
+	 * that a `dynamic` getter or a setter with a `default` getter means what it means interpreted.
+	 */
+	var reach:StringMap<StringMap<Int>>;
+
+	/** The read side of a declaration is plain storage. */
+	static inline var READS:Int = 1;
+
+	/** The write side of a declaration is plain storage. */
+	static inline var WRITES:Int = 2;
+
+	/** It keeps storage at all, which is what a field is laid out for. */
+	static inline var KEEPS:Int = 4;
+
 	/** The names each class declares as statics, by class. */
 	var owned:StringMap<StringMap<Bool>>;
 
@@ -263,6 +281,15 @@ class Emitter {
 	/** The base the world already has, for each class whose chain leaves the batch. */
 	var hosts:StringMap<hl.Type>;
 
+	/** The type each class's own value is, which is where its statics sit. */
+	var holders:StringMap<Int>;
+
+	/** Where each static sits in that type, by class then name. */
+	var staticSlots:StringMap<StringMap<Int>>;
+
+	/** The register type of each static, by class then name. */
+	var staticTypes:StringMap<StringMap<Int>>;
+
 	/** Each class of the batch, in the order they were laid out. */
 	public var emitted(default, null):Array<Emitted>;
 
@@ -303,6 +330,7 @@ class Emitter {
 		opened = new StringMap();
 		props = new StringMap();
 		unreadable = new StringMap();
+		reach = new StringMap();
 		owned = new StringMap();
 		memberTypes = new StringMap();
 		declared = new StringMap();
@@ -324,6 +352,9 @@ class Emitter {
 		entries = new StringMap();
 		tables = new StringMap();
 		hosts = new StringMap();
+		holders = new StringMap();
+		staticSlots = new StringMap();
+		staticTypes = new StringMap();
 		emitted = [];
 		links = [];
 
@@ -489,10 +520,13 @@ class Emitter {
 		var own:StringMap<Bool> = new StringMap();
 		var types:StringMap<Int> = new StringMap();
 		var closed:StringMap<Bool> = new StringMap();
+		var reached:StringMap<Int> = new StringMap();
 
 		for (f in c.fields) {
 			switch (f.kind) {
 				case KVar(v):
+					reached.set(f.name, reaching(f, v));
+
 					if (!isStatic(f) && v.get == 'null')
 						closed.set(f.name, true);
 
@@ -516,6 +550,7 @@ class Emitter {
 		members.set(c.name, own);
 		props.set(c.name, accessors);
 		unreadable.set(c.name, closed);
+		reach.set(c.name, reached);
 		owned.set(c.name, statics);
 		memberTypes.set(c.name, types);
 
@@ -637,13 +672,12 @@ class Emitter {
 						continue;
 
 					/**
-					 * A property whose reads and writes are both accessors has no storage of its
-					 * own, so nothing here holds one either. Laying a field out for it would make
-					 * reflection answer with the storage that is not supposed to exist, where the
-					 * interpreter answers with nothing. `@:isVar` says it does keep one after all,
-					 * which is the whole of what that metadata is for.
+					 * A declaration whose every side is an accessor has no storage of its own, so
+					 * nothing here holds one either. Laying a field out for it would make reflection
+					 * answer with the storage that is not supposed to exist, where the interpreter
+					 * answers with nothing.
 					 */
-					if (property(v) && !stored(f))
+					if (reaching(f, v) & KEEPS == 0)
 						continue;
 
 					fields.push({name: module.stringId(f.name), type: typeOf(v.type)});
@@ -689,7 +723,8 @@ class Emitter {
 
 		inherit(c, inBatch, host);
 
-		var global:Int = module.global(tDyn);
+		var kept:Array<String> = holder(c);
+		var global:Int = module.global(holders.get(c.name));
 		values.set(c.name, global);
 
 		module.defineType(shapes.get(c.name), TObj(module.stringId(pathOf(c.name)), fields, protos, baseType, global + 1));
@@ -698,12 +733,72 @@ class Emitter {
 			name: c.name,
 			path: pathOf(c.name),
 			type: shapes.get(c.name),
+			holder: holders.get(c.name),
 			global: global,
 			construct: builderOf(c),
 			host: inBatch == null ? base : null,
 			base: inBatch,
-			methods: methods
+			methods: methods,
+			stored: kept
 		});
+	}
+
+	/**
+	 * Lays out the type a class's own value is.
+	 *
+	 * The world lays a class value out this way: a type per class extending `hl.BaseType.Class`,
+	 * carrying that class's statics as ordinary fields. Following it means a static is an offset off
+	 * a global rather than a name looked up in the class the interpreter holds, and it means the
+	 * value is one `Type.initClass` can make, so everything the world does with a class still works.
+	 *
+	 * A static with no starting value is held as a dynamic whatever it was declared, because what the
+	 * world puts there before anything runs is null and a typed field has nowhere to put one.
+	 *
+	 * @param c The class.
+	 * @return The names it lays out, in the order they were written.
+	 */
+	function holder(c:ClassDecl):Array<String> {
+		var base:hl.Type = hl.Type.get((null : hl.BaseType.Class));
+		var above:Int = module.reserveType();
+
+		module.defineType(above, TObj(module.stringId('hl.Class'), [], [], -1, 0));
+		links.push({at: above, type: base});
+
+		var fields:Array<Field> = [];
+		var index:StringMap<Int> = new StringMap();
+		var kinds:StringMap<Int> = new StringMap();
+		var kept:Array<String> = [];
+		var at:Int = Loader.fieldCount(base);
+
+		for (f in c.fields) {
+			if (!isStatic(f))
+				continue;
+
+			/** A name the class value already carries is the world's, and a script may not take it. */
+			if (Loader.declares(base, f.name))
+				continue;
+
+			var held:Int = switch (f.kind) {
+				case KVar(v) if (reaching(f, v) & KEEPS == 0): continue;
+				case KVar(v): v.expr == null ? tDyn : typeOf(v.type);
+				case KFunction(_): tDyn;
+			};
+
+			fields.push({name: module.stringId(f.name), type: held});
+			index.set(f.name, at);
+			kinds.set(f.name, held);
+			kept.push(f.name);
+			at++;
+		}
+
+		var made:Int = module.reserveType();
+		module.defineType(made, TObj(module.stringId('$' + pathOf(c.name)), fields, [], above, 0));
+
+		holders.set(c.name, made);
+		staticSlots.set(c.name, index);
+		staticTypes.set(c.name, kinds);
+
+		return kept;
 	}
 
 	/**
@@ -854,19 +949,22 @@ class Emitter {
 	 * @param name The field.
 	 * @return Its position and register type, or null when this is not that.
 	 */
-	function laidOut(obj:Expr, name:String):Null<{at:Int, of:Int}> {
+	function laidOut(obj:Expr, name:String, side:Int):Null<{at:Int, of:Int}> {
 		var cls:Null<String> = heldAs(obj);
 		if (cls == null)
+			return null;
+
+		/**
+		 * A side with an accessor in front of it keeps going through the world, whatever storage
+		 * stands behind it. A starting value is written straight in, which is what a declaration's
+		 * `= value` is rather than an assignment.
+		 */
+		if (!initialising && reachOf(cls, name) & side == 0)
 			return null;
 
 		var at:Null<String> = cls;
 
 		while (at != null) {
-			/** A property is not a field, whatever storage stands behind it: reading one is a call. */
-			var accessors:Null<StringMap<{get:String, set:String}>> = props.get(at);
-			if (!initialising && accessors != null && accessors.exists(name))
-				return null;
-
 			var here:Null<StringMap<Int>> = slots.get(at);
 			if (here != null && here.exists(name))
 				return {at: here.get(name), of: slotTypes.get(at).get(name)};
@@ -883,7 +981,7 @@ class Emitter {
 	 * @return What that field holds, or null when this batch did not lay it out.
 	 */
 	function fieldType(obj:Expr, name:String):Null<Int> {
-		var here:Null<{at:Int, of:Int}> = laidOut(obj, name);
+		var here:Null<{at:Int, of:Int}> = laidOut(obj, name, READS);
 		return here == null ? null : here.of;
 	}
 
@@ -2694,7 +2792,7 @@ class Emitter {
 		 * A field of a class this batch laid out is one instruction, because where it sits was
 		 * decided when the class was written rather than being asked for at every read.
 		 */
-		var here:Null<{at:Int, of:Int}> = laidOut(obj, name);
+		var here:Null<{at:Int, of:Int}> = laidOut(obj, name, READS);
 
 		if (here != null) {
 			var held:Int = reg(infer(obj));
@@ -2749,7 +2847,7 @@ class Emitter {
 		}
 
 		/** The same instruction the read is, for the same reason. */
-		var here:Null<{at:Int, of:Int}> = laidOut(obj, name);
+		var here:Null<{at:Int, of:Int}> = laidOut(obj, name, WRITES);
 
 		if (here != null) {
 			var into:Int = reg(infer(obj));
@@ -3373,6 +3471,15 @@ class Emitter {
 		var at:Null<String> = inside != null ? inside : owning;
 
 		while (at != null) {
+			/**
+			 * What a static is laid out as, before what it was announced as. One with no starting
+			 * value is a dynamic whatever its annotation said, because null is what it holds until
+			 * something puts a value there.
+			 */
+			var kept:Null<StringMap<Int>> = staticTypes.get(at);
+			if (kept != null && kept.exists(name))
+				return kept.get(name);
+
 			var known:Null<StringMap<Int>> = memberTypes.get(at);
 			if (known != null && known.exists(name))
 				return known.get(name);
@@ -3679,6 +3786,53 @@ class Emitter {
 		return false;
 	}
 
+	/**
+	 * How a declaration may be reached: whether it keeps storage, and which side of an access can
+	 * go straight to it.
+	 *
+	 * A side is plain when nothing was written for it or it was written `default`. `null` keeps
+	 * storage but is not readable from outside; `never` keeps none of its own; an accessor name or
+	 * `dynamic` means a call, and which call is the world's business rather than this one's.
+	 *
+	 * @param f The field.
+	 * @param v Its declaration.
+	 * @return `KEEPS`, `READS` and `WRITES` as bits.
+	 */
+	function reaching(f:FieldDecl, v:VarDecl):Int {
+		var reads:Bool = v.get == null || v.get == 'default';
+		var writes:Bool = v.set == null || v.set == 'default';
+
+		var held:Int = 0;
+		if (reads)
+			held |= READS;
+		if (writes)
+			held |= WRITES;
+
+		if (reads || writes || v.get == 'null' || v.set == 'null' || stored(f))
+			held |= KEEPS;
+
+		return held;
+	}
+
+	/**
+	 * @param cls A class of the batch, or null.
+	 * @param name A field name.
+	 * @return How it may be reached, walking the bases, or 0 when nothing of the batch declares it.
+	 */
+	function reachOf(cls:Null<String>, name:String):Int {
+		var at:Null<String> = cls;
+
+		while (at != null) {
+			var here:Null<StringMap<Int>> = reach.get(at);
+			if (here != null && here.exists(name))
+				return here.get(name);
+
+			at = bases.get(at);
+		}
+
+		return 0;
+	}
+
 	/** @return Whether a property was declared to keep storage behind its accessors anyway. */
 	function stored(f:FieldDecl):Bool {
 		if (f.meta == null)
@@ -3736,7 +3890,36 @@ class Emitter {
 			return;
 		}
 
+		var at:Null<Int> = staticAt(cls, name, READS);
+
+		if (at != null) {
+			var held:Int = reg(holders.get(cls));
+			ops.push({op: OGetGlobal, args: [held, values.get(cls)]});
+
+			var kind:Int = staticTypes.get(cls).get(name);
+			var got:Int = regs[slot] == kind ? slot : reg(kind);
+			ops.push({op: OField, args: [got, held, at]});
+
+			if (got != slot)
+				move(got, slot);
+
+			return;
+		}
+
 		callSupport('get', [ownerOf(cls), named(name)], slot);
+	}
+
+	/**
+	 * @param cls A class of the batch.
+	 * @param name A static's name.
+	 * @return Where it sits in that class's own value, or null when this batch did not lay it out.
+	 */
+	function staticAt(cls:String, name:String, side:Int):Null<Int> {
+		if (reachOf(cls, name) & side == 0)
+			return null;
+
+		var here:Null<StringMap<Int>> = staticSlots.get(cls);
+		return here == null || !here.exists(name) ? null : here.get(name);
 	}
 
 	/** Writes a write of a static, through its accessor when it has one. */
@@ -3749,6 +3932,19 @@ class Emitter {
 
 			var discard:Int = reg(tDyn);
 			emitCall({e: EField({e: EIdent(cls), pos: pos}, 'set_' + name, false), pos: pos}, [value], discard, pos);
+			return;
+		}
+
+		var at:Null<Int> = staticAt(cls, name, WRITES);
+
+		if (at != null) {
+			var held:Int = reg(holders.get(cls));
+			ops.push({op: OGetGlobal, args: [held, values.get(cls)]});
+
+			var written:Int = reg(staticTypes.get(cls).get(name));
+			into(value, written);
+
+			ops.push({op: OSetField, args: [held, at, written]});
 			return;
 		}
 

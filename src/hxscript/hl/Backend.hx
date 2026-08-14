@@ -150,9 +150,9 @@ class Backend {
 		return holders.exists(path);
 	}
 
-	/** @return Nothing: a compiled function replaces the interpreted one inside the class it was in. */
+	/** @return The class standing in for a scripted one, which is where its statics are too. */
 	public static function substitute(path:String):Dynamic {
-		return null;
+		return built.get(path);
 	}
 
 	/** Which classes have at least one compiled function in them. */
@@ -242,6 +242,12 @@ class Backend {
 		var bases:Array<hl.Type> = [];
 
 		for (link in emitter.links) {
+			if (link.type != null) {
+				at.push(link.at);
+				bases.push(link.type);
+				continue;
+			}
+
 			var found:Dynamic = hostOwner(link.host, module, env);
 
 			if (found == null || !(found is Class)) {
@@ -295,10 +301,12 @@ class Backend {
 	 */
 	static function install(made:Emitted, loaded:Loaded, module:Module, env:Environment, report:Report):Void {
 		var shape:Null<hl.Type> = Loader.typeAt(loaded, made.type);
-		if (shape == null)
+		var keeps:Null<hl.Type> = Loader.typeAt(loaded, made.holder);
+
+		if (shape == null || keeps == null)
 			return;
 
-		var cls:hl.BaseType.Class = classValue(shape, made.path);
+		var cls:hl.BaseType.Class = classValue(keeps, shape, made.path);
 		if (cls == null)
 			return;
 
@@ -314,6 +322,19 @@ class Backend {
 		var above:Dynamic = made.host == null ? null : hostOwner(made.host, module, env);
 
 		var owner:Dynamic = env.resolve(made.path);
+
+		/**
+		 * The statics move across as they stand. The interpreter has already evaluated them by the
+		 * time a world is compiled, and evaluating them a second time would run every initialiser
+		 * twice; from here on the class value is where they live, because everything that reads one
+		 * is sent there.
+		 */
+		if (owner is ScriptedClass) {
+			var from:ScriptedClass = cast owner;
+
+			for (name in made.stored)
+				Reflect.setField(cls, name, from.reflectGetField(name));
+		}
 
 		Runtime.replaces(made.path, {
 			path: made.path,
@@ -339,13 +360,14 @@ class Backend {
 	 * `Type.getClass`, `Type.resolveClass` and `Std.isOfType` answer about a compiled class the same
 	 * way they answer about any other.
 	 *
-	 * @param shape The loaded type.
+	 * @param keeps The type holding its statics, which is what the value itself is.
+	 * @param shape The loaded type its instances are.
 	 * @param path What to call it.
 	 * @return Its class value.
 	 */
 	@:access(Type)
-	static function classValue(shape:hl.Type, path:String):hl.BaseType.Class {
-		return Type.initClass(hl.Type.get((null : hl.BaseType.Class)), shape, @:privateAccess path.bytes);
+	static function classValue(keeps:hl.Type, shape:hl.Type, path:String):hl.BaseType.Class {
+		return Type.initClass(keeps, shape, @:privateAccess path.bytes);
 	}
 
 	/** Every class compiled so far, by scripted path, across every world. */
