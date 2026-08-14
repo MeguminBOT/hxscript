@@ -1819,12 +1819,7 @@ class Emitter {
 			return;
 		}
 
-		// THROWAWAY MEASUREMENT: what a field costs as an instruction rather than a call.
-		var target:Int = dynOf(obj);
-		var held:Int = landing(slot);
-		ops.push({op: ODynGet, args: [held, target, module.stringId(name)]});
-		if (held != slot)
-			move(held, slot);
+		callSupport('fetch', [dynOf(obj), named(name), siteSlot()], slot);
 	}
 
 	/** Writes a field write, by name and through the world, for the reasons `getField` gives. */
