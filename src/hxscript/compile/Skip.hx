@@ -25,7 +25,7 @@ class Skip {
 		return '$name ($origin:$line): $reason';
 	}
 
-	#if hxscript_cppia
+	#if (hxscript_cppia || hxscript_hl)
 	/**
 	 * @param name The module's name.
 	 * @param e What the emitter refused, carrying where it was when it knew.

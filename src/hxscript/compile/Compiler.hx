@@ -26,6 +26,8 @@ import hxscript.Environment;
 import hxscript.Module;
 #if hxscript_cppia
 import hxscript.cppia.Backend;
+#elseif hxscript_hl
+import hxscript.hl.Backend;
 #end
 
 /**
@@ -44,7 +46,7 @@ class Compiler {
 
 	/** @return Whether a backend for this target is in this build. */
 	static function get_available():Bool {
-		#if hxscript_cppia
+		#if (hxscript_cppia || hxscript_hl)
 		return Backend.available;
 		#else
 		return false;
@@ -60,14 +62,16 @@ class Compiler {
 	 * @return One sentence naming what is wrong and what would fix it, or null when nothing is.
 	 */
 	public static function unavailable():Null<String> {
-		#if hxscript_cppia
+		#if (hxscript_cppia || hxscript_hl)
 		return Backend.unavailable();
+		#elseif hl
+		return 'this build carries no compiler; add -D hxscript_hl on HashLink';
 		#else
 		return 'this build carries no compiler; add -D hxscript_cppia on hxcpp';
 		#end
 	}
 
-	#if hxscript_cppia
+	#if (hxscript_cppia || hxscript_hl)
 	/**
 	 * Types a script may name without importing them, as full paths.
 	 *
@@ -95,7 +99,8 @@ class Compiler {
 		return Backend.statics = v;
 	}
 
-	/** Whether to turn the target's JIT on before the first module loads. */
+	#if hxscript_cppia
+	/** Whether to turn the target's JIT on before the first module loads. Cppia only: HashLink always jits. */
 	public static var jit(get, set):Bool;
 
 	static function get_jit():Bool {
@@ -113,6 +118,7 @@ class Compiler {
 	public static function isCompiled(path:String):Bool {
 		return Backend.isCompiled(path);
 	}
+	#end
 
 	/**
 	 * Compiles what it can of a world and binds the results into it.
