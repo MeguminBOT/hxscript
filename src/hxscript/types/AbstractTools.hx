@@ -27,6 +27,51 @@ class AbstractTools {
 	}
 
 	/**
+	 * Builds an abstract the host compiled, whose constructor is not on the class a script names.
+	 *
+	 * An abstract's constructor assigns to `this`, which has no meaning as a method on a value, so
+	 * Haxe emits it as a static `_new` on the implementation class. The wrapper standing in for the
+	 * abstract has a constructor of its own that boxes one underlying value, so `new HostVec(3, 4)`
+	 * reached that instead and was told it could not make a `HostVec` out of a `3`.
+	 *
+	 * This is the shape every geometry type in a framework has: `h3d.Vector`, `h3d.Matrix` and
+	 * `h2d.col.Point` are all it, and between them they are what a project's positions, transforms and
+	 * bounds tests are written in.
+	 *
+	 * Here rather than in either caller because both need it and neither owns it: the interpreter
+	 * constructs through `Interp.cnew` and a compiled HashLink module through `Runtime.make`, and the
+	 * two answering differently about what `new` means is the whole hazard.
+	 *
+	 * @param c The class the name resolved to.
+	 * @param args The constructor's arguments.
+	 * @return The wrapped value, or null when this is not a host abstract with a reachable
+	 *         constructor, which leaves the ordinary path to answer.
+	 */
+	public static function construct(c:Dynamic, args:Array<Dynamic>):Dynamic {
+		if (c == null || !(c is Class) || Type.getSuperClass(c) != AbstractValue)
+			return null;
+
+		var path:Dynamic = Reflect.field(c, 'implClass');
+		if (path == null)
+			return null;
+
+		var impl:Class<Dynamic> = Type.resolveClass(path);
+		if (impl == null)
+			return null;
+
+		/**
+		 * A missing `_new` leaves this to the ordinary path rather than reporting anything. An
+		 * abstract need not have a constructor at all, and one that is `inline` may have been left
+		 * with no runtime form, which is a fact about the host's build rather than about the script.
+		 */
+		var make:Dynamic = Reflect.field(impl, '_new');
+		if (make == null)
+			return null;
+
+		return Type.createInstance(c, [Reflect.callMethod(null, make, args)]);
+	}
+
+	/**
 	 * Opens a boxed abstract toward a type it declares itself convertible to.
 	 *
 	 * An `@:to` method answers first. Failing that, a `to` on the declaration itself hands the

@@ -14,23 +14,14 @@ None. Every case with a written answer produced it in every column that ran it.
 
 **cppia-jit** against `cpp-interp`: 309 agree, **0 differ**, 14 refused, 0 fell back to the interpreter, 0 killed the process.
 
-**hlc-jit** against `hlc-interp`: 323 agree, **0 differ**, 0 refused, 0 fell back to the interpreter, 0 killed the process.
+**hlc-jit** against `hlc-interp`: 314 agree, **0 differ**, 9 refused, 0 fell back to the interpreter, 0 killed the process.
 
 ## Where the interpreter itself reads differently per target
 
-11 of 323 cases. This is reachability, not semantics.
+2 of 323 cases. This is reachability, not semantics.
 
 | case | eval-interp | cpp-interp | hlc-interp |
 | --- | --- | --- | --- |
-| a host abstract constructed | threw Something went wrong | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| a host abstract property | threw Something went wrong | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| a host abstract field | threw Something went wrong | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| a host abstract operator | threw Something went wrong | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| a host abstract in an array | threw Something went wrong | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| an abstract operator on a parameter | threw Something went wrong | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| an abstract method taking its own abstract | threw Something went wrong | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| a field of an abstract bound as a parameter | threw Something went wrong | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| an abstract returned through a declared return type | threw Something went wrong | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
 | a host enum constructor bare after an import | None | 0 | None |
 | an abstract Map through its alias | **killed** | 1 | 1 |
 
@@ -302,15 +293,15 @@ None. Every case with a written answer produced it in every column that ran it.
 | 260 | rest arguments | 6 | 6 | 6 | 6 | 6 | 6 |
 | 261 | a static extension on an unknown receiver | abab | abab | abab | abab | abab | abab |
 | 262 | a typed catch on a scripted class | caught | caught | caught | caught | caught | caught |
-| 263 | a host abstract constructed | threw Something went wrong | threw Can't cast Int to HostVec | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| 264 | a host abstract property | threw Something went wrong | threw Can't cast Int to HostVec | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| 265 | a host abstract field | threw Something went wrong | threw Can't cast Int to HostVec | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| 266 | a host abstract operator | threw Something went wrong | threw Can't cast Int to HostVec | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| 267 | a host abstract in an array | threw Something went wrong | threw Can't cast Int to HostVec | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| 268 | an abstract operator on a parameter | threw Something went wrong | threw Can't cast Int to HostVec | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| 269 | an abstract method taking its own abstract | threw Something went wrong | threw Can't cast Int to HostVec | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| 270 | a field of an abstract bound as a parameter | threw Something went wrong | threw Can't cast Int to HostVec | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| 271 | an abstract returned through a declared return type | threw Something went wrong | threw Can't cast Int to HostVec | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
+| 263 | a host abstract constructed | 3:4 | 3:4 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 3:4 | refused: new HostVec, which is an abstract the host compiled and whose forwa... |
+| 264 | a host abstract property | 5 | 5 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 5 | refused: new HostVec, which is an abstract the host compiled and whose forwa... |
+| 265 | a host abstract field | 7 | 7 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 7 | refused: new HostVec, which is an abstract the host compiled and whose forwa... |
+| 266 | a host abstract operator | 4:6 | 4:6 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 4:6 | refused: new HostVec, which is an abstract the host compiled and whose forwa... |
+| 267 | a host abstract in an array | 2:2 | 2:2 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 2:2 | refused: new HostVec, which is an abstract the host compiled and whose forwa... |
+| 268 | an abstract operator on a parameter | 2:4 | 2:4 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 2:4 | refused: new HostVec, which is an abstract the host compiled and whose forwa... |
+| 269 | an abstract method taking its own abstract | 2:4 | 2:4 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 2:4 | refused: new HostVec, which is an abstract the host compiled and whose forwa... |
+| 270 | a field of an abstract bound as a parameter | 3 | 3 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 3 | refused: new HostVec, which is an abstract the host compiled and whose forwa... |
+| 271 | an abstract returned through a declared return type | 2:5 | 2:5 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 2:5 | refused: new HostVec, which is an abstract the host compiled and whose forwa... |
 | 272 | an own method called from a closure | 2 | 2 | 2 | 2 | 2 | 2 |
 | 273 | an own field read from a closure | 7 | 7 | 7 | 7 | 7 | 7 |
 | 274 | an enum abstract constructor, bare | 1 | 1 | refused: unresolved identifier Add | refused: unresolved identifier Add | 1 | 1 |

@@ -3973,6 +3973,10 @@ class Interp {
 		if (c is ScriptedAbstract)
 			return (cast c : ScriptedAbstract).create(args);
 
+		var boxed:Dynamic = AbstractTools.construct(c, args);
+		if (boxed != null)
+			return boxed;
+
 		return Type.createInstance(c, args);
 	}
 }

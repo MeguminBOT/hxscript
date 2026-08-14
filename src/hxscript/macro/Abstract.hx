@@ -274,6 +274,21 @@ class Abstract {
 		implPath.push(ab.impl.get().name);
 		var implStr = macro $v{implPath.join('.')};
 
+		/**
+		 * Where the abstract's own members really live, named so the runtime can reach them.
+		 *
+		 * `impl` above is the abstract's path, which is what a script writes and what nothing answers
+		 * to at runtime. This is the class Haxe actually emitted the members onto, and the constructor
+		 * is the reason it has to be reachable: assigning to `this` has no meaning as a method on a
+		 * value, so `new` becomes a static `_new` here and there is nowhere else to find it.
+		 */
+		cls.fields.push({
+			name: 'implClass',
+			pos: pos,
+			access: [APublic, AStatic],
+			kind: FProp('default', 'never', macro :String, implStr)
+		});
+
 		var rabstractT = {name: ab.name, pack: ab.pack};
 		var abstractT = {name: cls.name, pack: ab.pack};
 

@@ -3124,6 +3124,21 @@ class Emitter {
 		}
 
 		/**
+		 * An abstract the host compiled is refused, which is what the cppia backend does with one.
+		 *
+		 * Constructing one works: the runtime reaches the static `_new` the constructor became, the
+		 * same way the interpreter does. What does not work is the wrapper afterwards. A bare
+		 * `@:forward` generates no member per forwarded field, so reading `v.x` is a question asked of
+		 * `AbstractTools.forwards` at access time, and compiled code reads a field off the object
+		 * through a resolved offset instead and finds nothing there: `v.x + v.y` answered 0 where the
+		 * interpreter answered 7, and a wrapper handed to a method expecting the underlying value
+		 * threw. Answering differently is worse than declining, so this declines and the module is
+		 * interpreted, where all of it works.
+		 */
+		if (!classes.exists(cls) && hostAbstract(cls))
+			throw new Unsupported('new ' + cls + ', which is an abstract the host compiled and whose forwarded members a compiled module cannot reach', pos);
+
+		/**
 		 * A class of the batch is allocated here rather than asked of the world, because this module
 		 * holds its layout. Every one of them has a constructor, synthesised when the script wrote
 		 * none, so the field initialisers run either way.
@@ -3153,6 +3168,24 @@ class Emitter {
 		 * what the interpreter does with the same line.
 		 */
 		callSupport('make', [typeNamed(cls), given], slot);
+	}
+
+	/**
+	 * @param cls A name a script wrote after `new`.
+	 * @return Whether it names an abstract the host compiled.
+	 *
+	 * The path is asked first and the world second, and the second is what does the work. A script
+	 * writes `new Vector(1, 2, 3)` after importing `h3d.Vector`, and no index answers to `Vector`, so
+	 * asking the path alone let every real name through: the corpus fixture is named in full and
+	 * passed, while the sandbox's 3D template compiled its vectors and read every field back as null.
+	 * The world resolves a short name the way the module's own imports do.
+	 */
+	function hostAbstract(cls:String):Bool {
+		if (hxscript.types.AbstractTools.resolve(cls) != null)
+			return true;
+
+		var found:Dynamic = world(cls);
+		return found != null && (found is Class) && Type.getSuperClass(found) == hxscript.types.AbstractValue;
 	}
 
 	/**

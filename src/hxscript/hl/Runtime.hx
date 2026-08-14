@@ -1134,6 +1134,16 @@ class Runtime {
 		if (type is hxscript.types.ScriptedAbstract)
 			return (type : hxscript.types.ScriptedAbstract).create((args : Array<Dynamic>));
 
+		/**
+		 * The same question the interpreter asks, through the same helper. An abstract the host
+		 * compiled keeps its constructor as a static on its implementation class, and building the
+		 * wrapper directly boxes the first argument instead: compiled code threw `Can't cast Int to
+		 * HostVec` where the interpreter had just built the value.
+		 */
+		var boxed:Dynamic = hxscript.types.AbstractTools.construct(type, (args : Array<Dynamic>));
+		if (boxed != null)
+			return boxed;
+
 		return hxscript.proxy.TypeProxy.createInstance(type, (args : Array<Dynamic>));
 	}
 
