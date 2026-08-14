@@ -242,11 +242,12 @@ typedef struct {
 	void *fn;
 } hxs_native;
 
-/** One field access site: the last receiver type it saw, and where the field sat in it. */
+/** One field access site: the name it reads, the last receiver type it saw, and where the field sat. */
 typedef struct {
 	hl_type *t;
 	hl_type *ft;
 	int offset;
+	int hash;
 } hxs_site;
 
 static hxs_site *hxs_sites = NULL;
@@ -254,7 +255,7 @@ static int hxs_site_count = 0;
 static int hxs_site_cap = 0;
 
 /** @return A cache index for one access, baked into the bytecode as a constant, or -1. */
-HL_PRIM int HL_NAME(site)( void ) {
+HL_PRIM int HL_NAME(site)( int hash ) {
 	if( hxs_site_count == hxs_site_cap ) {
 		int cap = hxs_site_cap ? hxs_site_cap * 2 : 256;
 		hxs_site *grown = (hxs_site*)realloc(hxs_sites,sizeof(hxs_site) * cap);
@@ -263,10 +264,48 @@ HL_PRIM int HL_NAME(site)( void ) {
 		hxs_site_cap = cap;
 	}
 	memset(hxs_sites + hxs_site_count,0,sizeof(hxs_site));
+	hxs_sites[hxs_site_count].hash = hash;
 	return hxs_site_count++;
 }
 
-/** @return Where the field lives, or NULL when this receiver has no plain field of that name. */
+/** Whether instances of this type keep script fields the world reads for them, rather than HL fields. */
+static bool hxs_is_scripted( hl_type *t ) {
+	static int vars_hash = 0;
+	hl_runtime_obj *rt;
+
+	if( vars_hash == 0 )
+		vars_hash = hl_hash_gen(USTR("__vars"),false);
+
+	rt = hl_get_obj_rt(t);
+	while( rt ) {
+		if( hl_lookup_find(rt->lookup,rt->nlookup,vars_hash) )
+			return true;
+		rt = rt->parent;
+	}
+	return false;
+}
+
+/** The world's own reader and writer, for every receiver the fast path must not answer for. */
+static vclosure *hxs_read_through = NULL;
+static vclosure *hxs_write_through = NULL;
+static bool hxs_through_rooted = false;
+
+HL_PRIM void HL_NAME(fallback)( vclosure *read, vclosure *write ) {
+	hxs_read_through = read;
+	hxs_write_through = write;
+	if( !hxs_through_rooted ) {
+		hl_add_root((void**)&hxs_read_through);
+		hl_add_root((void**)&hxs_write_through);
+		hxs_through_rooted = true;
+	}
+}
+
+/**
+	@return Where the field lives, or NULL when this receiver has no plain field of that name.
+
+	A scripted instance is refused whatever it appears to have, because a script may declare a field
+	that shadows one of its native base's and the world answers with the script's.
+*/
 static void *hxs_field( vdynamic *obj, int hash, int site, hl_type **ft ) {
 	hxs_site *s;
 	hl_runtime_obj *rt;
@@ -283,7 +322,7 @@ static void *hxs_field( vdynamic *obj, int hash, int site, hl_type **ft ) {
 		return (char*)obj + s->offset;
 	}
 
-	if( obj->t->kind != HOBJ ) {
+	if( obj->t->kind != HOBJ || hxs_is_scripted(obj->t) ) {
 		s->t = obj->t;
 		s->offset = -1;
 		return NULL;
@@ -395,7 +434,58 @@ HL_PRIM int HL_NAME(hash)( vbyte *name ) {
 	return hl_hash_gen((uchar*)name,true);
 }
 
+/**
+	Reads a field for compiled code, falling through to the world's reader.
+
+	@param slot The Haxe side cache the reader keeps for this same access.
+	@param site This access's cache here.
+*/
+HL_PRIM vdynamic *HL_NAME(fetch)( vdynamic *obj, vdynamic *name, vdynamic *slot, int site ) {
+	hl_type *ft;
+	void *addr;
+	vdynamic *args[3];
+
+	addr = hxs_field(obj,site < 0 || site >= hxs_site_count ? 0 : hxs_sites[site].hash,site,&ft);
+	if( addr )
+		return hl_is_ptr(ft) ? *(vdynamic**)addr : hl_make_dyn(addr,ft);
+
+	if( hxs_read_through == NULL )
+		return NULL;
+
+	args[0] = obj;
+	args[1] = name;
+	args[2] = slot;
+	return hl_dyn_call(hxs_read_through,args,3);
+}
+
+/** Writes a field for compiled code, falling through to the world's writer. */
+HL_PRIM void HL_NAME(store)( vdynamic *obj, vdynamic *name, vdynamic *value, vdynamic *slot, int site ) {
+	hl_type *ft;
+	void *addr;
+	vdynamic *args[4];
+
+	addr = hxs_field(obj,site < 0 || site >= hxs_site_count ? 0 : hxs_sites[site].hash,site,&ft);
+	if( addr ) {
+		if( hl_is_ptr(ft) && (value == NULL || hl_same_type(value->t,ft)) )
+			*(void**)addr = value;
+		else
+			hl_write_dyn(addr,ft,value,false);
+		return;
+	}
+
+	if( hxs_write_through == NULL )
+		return;
+
+	args[0] = obj;
+	args[1] = name;
+	args[2] = value;
+	args[3] = slot;
+	hl_dyn_call(hxs_write_through,args,4);
+}
+
 static hxs_native hxs_native_table[] = {
+	{ "fetch", (void*)HL_NAME(fetch) },
+	{ "store", (void*)HL_NAME(store) },
 	{ "getp", (void*)HL_NAME(getp) },
 	{ "geti", (void*)HL_NAME(geti) },
 	{ "getd", (void*)HL_NAME(getd) },
@@ -552,8 +642,11 @@ HL_PRIM hxs_module *HL_NAME(load)( vbyte *data, int size ) {
 }
 
 /** No bytecode can be loaded here, so no cache is ever read. */
-HL_PRIM int HL_NAME(site)( void ) {
+HL_PRIM int HL_NAME(site)( int hash ) {
 	return -1;
+}
+
+HL_PRIM void HL_NAME(fallback)( vclosure *read, vclosure *write ) {
 }
 
 HL_PRIM int HL_NAME(hash)( vbyte *name ) {
@@ -604,7 +697,8 @@ DEFINE_PRIM(_I32, state, _NO_ARG);
 DEFINE_PRIM(_I32, built_for, _NO_ARG);
 DEFINE_PRIM(_BYTES, last_error, _NO_ARG);
 DEFINE_PRIM(_I32, hooks, _NO_ARG);
-DEFINE_PRIM(_I32, site, _NO_ARG);
+DEFINE_PRIM(_I32, site, _I32);
+DEFINE_PRIM(_VOID, fallback, _DYN _DYN);
 DEFINE_PRIM(_I32, hash, _BYTES);
 DEFINE_PRIM(_VOID, set_global, _ABSTRACT(hxs_module) _I32 _DYN);
 DEFINE_PRIM(_ABSTRACT(hxs_module), load, _BYTES _I32);

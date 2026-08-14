@@ -1534,6 +1534,12 @@ class Emitter {
 	/** How many field-access sites have been given a memory, so each one's key is its own. */
 	var sites:Int = 0;
 
+	/** This module's index for the runtime's reader, declared the first time a field is read. */
+	var fetchNative:Int = -1;
+
+	/** This module's index for the runtime's writer. */
+	var storeNative:Int = -1;
+
 	/**
 	 * A register holding this access site's own cache cell.
 	 *
@@ -1807,6 +1813,27 @@ class Emitter {
 	 * is the reader the interpreter itself uses, so the two agree about properties and accessors
 	 * without either having to know about the other.
 	 */
+	function fetchIndex():Int {
+		if (fetchNative < 0)
+			fetchNative = module.native('hxs', 'fetch', module.typeId(TFun([tDyn, tDyn, tDyn, tI32], tDyn)));
+
+		return fetchNative;
+	}
+
+	function storeIndex():Int {
+		if (storeNative < 0)
+			storeNative = module.native('hxs', 'store', module.typeId(TFun([tDyn, tDyn, tDyn, tDyn, tI32], tVoid)));
+
+		return storeNative;
+	}
+
+	/** @return A register holding this access's cache index, which the runtime resolves against. */
+	function siteIndex(name:String):Int {
+		var held:Int = reg(tI32);
+		ops.push({op: OInt, args: [held, module.intId(Loader.site(Loader.hash(name)))]});
+		return held;
+	}
+
 	function getField(obj:Expr, name:String, slot:Int, pos:Position):Void {
 		var cls:Null<String> = ownerNamed(obj);
 		var reader:Null<{get:String, set:String}> = propertyOf(cls, name);
@@ -1819,7 +1846,14 @@ class Emitter {
 			return;
 		}
 
-		callSupport('fetch', [dynOf(obj), named(name), siteSlot()], slot);
+		var target:Int = dynOf(obj);
+		var named:Int = named(name);
+		var cell:Int = siteSlot();
+		var site:Int = siteIndex(name);
+		var returned:Int = reg(tDyn);
+
+		ops.push({op: OCall4, args: [returned, fetchIndex(), target, named, cell, site]});
+		unbox(returned, slot);
 	}
 
 	/** Writes a field write, by name and through the world, for the reasons `getField` gives. */
@@ -1836,7 +1870,13 @@ class Emitter {
 			return;
 		}
 
-		callSupport('store', [dynOf(obj), named(name), dynOf(value), siteSlot()], reg(tDyn));
+		var target:Int = dynOf(obj);
+		var held:Int = named(name);
+		var written:Int = dynOf(value);
+		var cell:Int = siteSlot();
+		var site:Int = siteIndex(name);
+
+		ops.push({op: OCallN, args: [reg(tVoid), storeIndex(), target, held, written, cell, site]});
 	}
 
 	/**

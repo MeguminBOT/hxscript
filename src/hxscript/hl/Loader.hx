@@ -163,8 +163,18 @@ class Loader {
 	 * @return It, or null when it could not be read; `error` then says why.
 	 */
 	public static function load(bytes:Bytes):Null<Loaded> {
+		if (!wired) {
+			wired = true;
+			try {
+				setFallback(Runtime.fetch, Runtime.store);
+			} catch (e:Dynamic) {}
+		}
+
 		return read(@:privateAccess bytes.b, bytes.length);
 	}
+
+	/** Whether the runtime has been given the world's reader and writer for what it cannot resolve. */
+	static var wired:Bool = false;
 
 	/**
 	 * Wraps one of a loaded module's functions as an ordinary function value.
@@ -215,10 +225,11 @@ class Loader {
 	/**
 	 * Reserves an inline cache for one field access, as a constant the bytecode carries.
 	 *
+	 * @param hash What the field name hashes to, which the cache resolves against.
 	 * @return The site, or -1 when this build has no runtime to hold one.
 	 */
-	public static function site():Int {
-		return nextSite();
+	public static function site(hash:Int):Int {
+		return nextSite(hash);
 	}
 
 	/**
@@ -269,9 +280,11 @@ class Loader {
 		return 0;
 	}
 
-	@:hlNative("?hxscript", "site") static function nextSite():Int {
+	@:hlNative("?hxscript", "site") static function nextSite(hash:Int):Int {
 		return -1;
 	}
+
+	@:hlNative("?hxscript", "fallback") static function setFallback(read:Dynamic, write:Dynamic):Void {}
 
 	@:hlNative("?hxscript", "hash") static function hashOf(name:hl.Bytes):Int {
 		return 0;

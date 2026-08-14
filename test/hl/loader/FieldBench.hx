@@ -135,11 +135,27 @@ class FieldBench {
 
 			var entry:Int = loop(byNative, [dyn, i32, i32, i32, i32, dyn, i32, i32], [
 				{op: OInt, args: [6, byNative.intId(Loader.hash('v'))]},
-				{op: OInt, args: [7, byNative.intId(Loader.site())]}
+				{op: OInt, args: [7, byNative.intId(Loader.site(Loader.hash('v')))]}
 			], [
 				{op: OCall3, args: [4, geti, 0, 6, 7]}
 			]);
 			time('hxs.geti', byNative, entry);
+		}
+
+		var byFetch:Bytecode = new Bytecode();
+		{
+			var i32:Int = byFetch.prim(HI32);
+			var dyn:Int = byFetch.prim(HDyn);
+			var fetch:Int = byFetch.native('hxs', 'fetch', byFetch.typeId(TFun([dyn, dyn, dyn, i32], dyn)));
+
+			var entry:Int = loop(byFetch, [dyn, i32, i32, i32, i32, dyn, i32, dyn, dyn], [
+				{op: OInt, args: [6, byFetch.intId(Loader.site(Loader.hash('v')))]},
+				{op: ONull, args: [7]}
+			], [
+				{op: OCall4, args: [8, fetch, 0, 7, 7, 6]},
+				{op: OSafeCast, args: [4, 8]}
+			]);
+			time('hxs.fetch', byFetch, entry);
 		}
 
 		var byClosure:Bytecode = new Bytecode();
