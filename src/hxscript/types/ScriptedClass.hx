@@ -190,7 +190,7 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 			if (!field.access.contains(AStatic))
 				continue;
 
-			var l:Variable = {r: null, access: field.access};
+			var l:Variable = {ref: null, access: field.access};
 
 			switch (field.kind) {
 				default:

@@ -299,6 +299,8 @@ static bool hxs_is_scripted( hl_type *t ) {
 */
 typedef vdynamic *(*hxs_read3)( vdynamic *, vdynamic *, vdynamic * );
 typedef void (*hxs_write4)( vdynamic *, vdynamic *, vdynamic *, vdynamic * );
+typedef void (*hxs_writei)( vdynamic *, vdynamic *, int, vdynamic * );
+typedef void (*hxs_writed)( vdynamic *, vdynamic *, double, vdynamic * );
 typedef int (*hxs_readi3)( vdynamic *, vdynamic *, vdynamic * );
 typedef double (*hxs_readd3)( vdynamic *, vdynamic *, vdynamic * );
 
@@ -308,7 +310,9 @@ typedef double (*hxs_readd3)( vdynamic *, vdynamic *, vdynamic * );
 #define HXS_THROUGH_READ_INT	2
 #define HXS_THROUGH_READ_FLOAT	3
 #define HXS_THROUGH_CALL		4
-#define HXS_THROUGH_COUNT		8
+#define HXS_THROUGH_WRITE_INT	8
+#define HXS_THROUGH_WRITE_FLOAT	9
+#define HXS_THROUGH_COUNT		12
 
 static vclosure *hxs_through[HXS_THROUGH_COUNT] = { NULL };
 static bool hxs_through_rooted = false;
@@ -739,7 +743,70 @@ HL_PRIM vdynamic *HL_NAME(invoke3)( vdynamic *obj, vdynamic *name, vdynamic *slo
 	return hxs_called(obj,name,slot,site,args,3);
 }
 
+/**
+	Writes a number into a field without boxing it on the way in.
+
+	A field of the host is written where it sits, the way the untyped writer does it. Anything else is
+	the world's, and the world is handed the number rather than a box around it, which is the whole
+	point of the typed pair.
+*/
+HL_PRIM void HL_NAME(storei)( vdynamic *obj, vdynamic *name, int value, vdynamic *slot, int site ) {
+	hl_type *ft;
+	void *addr = hxs_field(obj,site < 0 || site >= hxs_site_count ? 0 : hxs_sites[site].hash,site,&ft);
+	vclosure *c;
+
+	if( addr ) {
+		switch( ft->kind ) {
+		case HI32:
+			*(int*)addr = value;
+			return;
+		case HBOOL:
+		case HUI8:
+			*(unsigned char*)addr = (unsigned char)value;
+			return;
+		case HUI16:
+			*(unsigned short*)addr = (unsigned short)value;
+			return;
+		case HF64:
+			*(double*)addr = value;
+			return;
+		default:
+			hl_dyn_seti(obj,hxs_sites[site].hash,&hlt_i32,value);
+			return;
+		}
+	}
+
+	c = hxs_through[HXS_THROUGH_WRITE_INT];
+	if( c == NULL || c->hasValue )
+		return;
+
+	((hxs_writei)c->fun)(obj,name,value,slot);
+}
+
+HL_PRIM void HL_NAME(stored)( vdynamic *obj, vdynamic *name, double value, vdynamic *slot, int site ) {
+	hl_type *ft;
+	void *addr = hxs_field(obj,site < 0 || site >= hxs_site_count ? 0 : hxs_sites[site].hash,site,&ft);
+	vclosure *c;
+
+	if( addr ) {
+		if( ft->kind == HF64 ) {
+			*(double*)addr = value;
+			return;
+		}
+		hl_dyn_setd(obj,hxs_sites[site].hash,value);
+		return;
+	}
+
+	c = hxs_through[HXS_THROUGH_WRITE_FLOAT];
+	if( c == NULL || c->hasValue )
+		return;
+
+	((hxs_writed)c->fun)(obj,name,value,slot);
+}
+
 static hxs_native hxs_native_table[] = {
+	{ "storei", (void*)HL_NAME(storei) },
+	{ "stored", (void*)HL_NAME(stored) },
 	{ "invoke0", (void*)HL_NAME(invoke0) },
 	{ "invoke1", (void*)HL_NAME(invoke1) },
 	{ "invoke2", (void*)HL_NAME(invoke2) },

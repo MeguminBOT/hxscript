@@ -1588,6 +1588,11 @@ class Emitter {
 	/** This module's index for the runtime's writer. */
 	var storeNative:Int = -1;
 
+	/** This module's indices for the writers that take a number rather than a box around one. */
+	var storeIntNative:Int = -1;
+
+	var storeFloatNative:Int = -1;
+
 	/** This module's indices for the callers, by how many arguments they take. */
 	var invokeNatives:Array<Int> = [-1, -1, -1, -1];
 
@@ -1921,6 +1926,20 @@ class Emitter {
 		return invokeNatives[count];
 	}
 
+	function storeIntIndex():Int {
+		if (storeIntNative < 0)
+			storeIntNative = module.native('hxs', 'storei', module.typeId(TFun([tDyn, tDyn, tI32, tDyn, tI32], tVoid)));
+
+		return storeIntNative;
+	}
+
+	function storeFloatIndex():Int {
+		if (storeFloatNative < 0)
+			storeFloatNative = module.native('hxs', 'stored', module.typeId(TFun([tDyn, tDyn, tF64, tDyn, tI32], tVoid)));
+
+		return storeFloatNative;
+	}
+
 	function storeIndex():Int {
 		if (storeNative < 0)
 			storeNative = module.native('hxs', 'store', module.typeId(TFun([tDyn, tDyn, tDyn, tDyn, tI32], tVoid)));
@@ -1988,6 +2007,25 @@ class Emitter {
 
 		var target:Int = dynOf(obj);
 		var held:Int = named(name);
+
+		/**
+		 * A number goes in as a number. Boxing one to write it allocates, and the measurement put
+		 * that allocation at three times what reaching the field costs.
+		 */
+		var wanted:Int = infer(value);
+
+		if (wanted == tI32 || wanted == tF64) {
+			var raw:Int = reg(wanted);
+			into(value, raw);
+
+			var cell:Int = siteSlot();
+			var site:Int = siteIndex(name);
+			var writer:Int = wanted == tI32 ? storeIntIndex() : storeFloatIndex();
+
+			ops.push({op: OCallN, args: [reg(tVoid), writer, target, held, raw, cell, site]});
+			return;
+		}
+
 		var written:Int = dynOf(value);
 		var cell:Int = siteSlot();
 		var site:Int = siteIndex(name);

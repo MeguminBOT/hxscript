@@ -589,6 +589,96 @@ class Runtime {
 	 * @return The value.
 	 */
 	/**
+	 * @return The slot this access names, or null when there is no plain one to reach.
+	 *
+	 * The same question `fetch` and `store` ask, asked once so the typed paths can ask it too.
+	 */
+	static inline function slotFor(o:Dynamic, name:Dynamic, site:Dynamic):Null<Variable> {
+		if (!(o is IScriptedInstance))
+			return null;
+
+		var cell:Slot = cast site;
+		var inst:IScriptedInstance = cast o;
+		return (cell.owner == inst) ? cell.held : remember(inst, name, cell);
+	}
+
+	/**
+	 * Reads a field a compiled body wants as an `Int`, without boxing what it found.
+	 *
+	 * A slot in the numeric lane answers from it. Anything else is what the ordinary read would have
+	 * given, opened the way the interpreter opens one, since a script's value may be a boxed
+	 * abstract that a cast cannot see into.
+	 */
+	public static function fetchInt(o:Dynamic, name:Dynamic, site:Dynamic):Int {
+		var held:Null<Variable> = slotFor(o, name, site);
+
+		if (held != null && held.a == null && held.isNumeric())
+			return held.asInt();
+
+		return toInt(fetch(o, name, site));
+	}
+
+	/** Reads a field a compiled body wants as a `Float`, without boxing what it found. */
+	public static function fetchFloat(o:Dynamic, name:Dynamic, site:Dynamic):Float {
+		var held:Null<Variable> = slotFor(o, name, site);
+
+		if (held != null && held.a == null && held.isNumeric())
+			return held.asFloat();
+
+		return toFloat(fetch(o, name, site));
+	}
+
+	/**
+	 * Writes an `Int` into a field without boxing it on the way in.
+	 *
+	 * The guards are the ones the ordinary write makes: a boxed abstract, a final, a method being
+	 * rebound, and whether the declared type will have this value. What is different is only that the
+	 * value never becomes a `Dynamic`, which is what a slot in the numeric lane makes possible.
+	 */
+	public static function storeInt(o:Dynamic, name:Dynamic, v:Int, site:Dynamic):Void {
+		var held:Null<Variable> = slotFor(o, name, site);
+
+		if (held != null && held.a == null && !held.isFinal && !holdsFunction(held)) {
+			var cell:Slot = cast site;
+
+			switch (cell.wants) {
+				case WAnything | WInt:
+					held.setInt(v);
+					return;
+
+				case WFloat:
+					held.setFloat(v);
+					return;
+
+				case _:
+			}
+		}
+
+		store(o, name, v, site);
+	}
+
+	/** Writes a `Float` into a field without boxing it on the way in. */
+	public static function storeFloat(o:Dynamic, name:Dynamic, v:Float, site:Dynamic):Void {
+		var held:Null<Variable> = slotFor(o, name, site);
+
+		if (held != null && held.a == null && !held.isFinal && !holdsFunction(held)) {
+			var cell:Slot = cast site;
+
+			if (cell.wants == WAnything || cell.wants == WFloat) {
+				held.setFloat(v);
+				return;
+			}
+		}
+
+		store(o, name, v, site);
+	}
+
+	/** @return Whether the slot holds a function, which a write has to rebind rather than replace. */
+	static inline function holdsFunction(held:Variable):Bool {
+		return held.lane == Variable.REFERENCE && Reflect.isFunction(held.ref);
+	}
+
+	/**
 	 * @return Which slot a plain read may take, or -1 when the access has to go the long way.
 	 *
 	 * A property is refused, since reading one runs its accessor, and so is a name the class has no
@@ -675,16 +765,6 @@ class Runtime {
 	 */
 	public static function raise(message:Dynamic):Dynamic {
 		return hxscript.runtime.Raise.custom(Std.string(message));
-	}
-
-	/** @return `fetch`, opened as an Int the way the interpreter opens one. */
-	public static function fetchInt(o:Dynamic, name:Dynamic, site:Dynamic):Int {
-		return toInt(fetch(o, name, site));
-	}
-
-	/** @return `fetch`, opened as a Float the way the interpreter opens one. */
-	public static function fetchFloat(o:Dynamic, name:Dynamic, site:Dynamic):Float {
-		return toFloat(fetch(o, name, site));
 	}
 
 	public static function fetch(o:Dynamic, name:Dynamic, site:Dynamic):Dynamic {

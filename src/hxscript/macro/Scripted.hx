@@ -1001,11 +1001,11 @@ class Scripted {
 
 					var f = Reflect.field(this, field);
 					if (Reflect.isFunction(f))
-						superLocals.set(field, {r: f});
+						superLocals.set(field, {ref: f});
 				}
 
 				/** Kept in `__vars` too, since a compiled body asks from outside any frame of the interpreter's. */
-				var __superRef:hxscript.runtime.Variable = {r: hxscript.runtime.Reference.RSuper(superLocals, __constructSuper)};
+				var __superRef:hxscript.runtime.Variable = {ref: hxscript.runtime.Reference.RSuper(superLocals, __constructSuper)};
 				__interp.locals.set('super', __superRef);
 				__vars.set('super', __superRef);
 			}
@@ -1033,14 +1033,14 @@ class Scripted {
 
 					switch (field.kind) {
 						case KFunction(fun):
-							__interp.locals.set(f, {r: null, access: field.access});
+							__interp.locals.set(f, {ref: null, access: field.access});
 
 						case KVar(v):
 							if (instanceFields.contains(f)) {
 								Reflect.setField(this, f, __interp.exprReturn(v.expr));
 							} else {
 								var l:hxscript.runtime.Variable = {
-									r: null,
+									ref: null,
 									access: field.access,
 									get: v.get,
 									set: v.set
@@ -1070,7 +1070,7 @@ class Scripted {
 
 						var f = Reflect.field(this, field);
 						if (Reflect.isFunction(f))
-							superLocals.set(field, {r: f});
+							superLocals.set(field, {ref: f});
 					}
 				}
 
@@ -1111,7 +1111,7 @@ class Scripted {
 				}
 
 				if (isSuper) {
-					var __superRef:hxscript.runtime.Variable = {r: hxscript.runtime.Reference.RSuper(superLocals, constructor ?? __constructSuper)};
+					var __superRef:hxscript.runtime.Variable = {ref: hxscript.runtime.Reference.RSuper(superLocals, constructor ?? __constructSuper)};
 					__interp.locals.set('super', __superRef);
 					__vars.set('super', __superRef);
 				}

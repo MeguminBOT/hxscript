@@ -2010,9 +2010,9 @@ class Interp {
 				declaredOld.push(locals.get(name));
 
 				if (i == params.length - 1 && hasRest) {
-					locals.set(name, {r: args.slice(params.length - 1)});
+					locals.set(name, {ref: args.slice(params.length - 1)});
 				} else {
-					locals.set(name, {r: tryCast(args[i], params[i].t), t: params[i].t});
+					locals.set(name, {ref: tryCast(args[i], params[i].t), t: params[i].t});
 				}
 			}
 
@@ -2053,14 +2053,14 @@ class Interp {
 			if (stack.length > 1) {
 				declaredNames.push(name);
 				declaredOld.push(locals.get(name));
-				var ref:Variable = {r: f};
+				var ref:Variable = {ref: f};
 				locals.set(name, ref);
 				capturedLocals.set(name, ref);
 			} else {
 				if (defineGlobals) {
 					variables.set(name, f);
 				} else {
-					locals.set(name, {r: f});
+					locals.set(name, {ref: f});
 				}
 			}
 		}
@@ -2481,7 +2481,7 @@ class Interp {
 			function runCatch(cn:String, ce:Expr):Dynamic {
 				declaredNames.push(cn);
 				declaredOld.push(locals.get(cn));
-				locals.set(cn, {r: raw});
+				locals.set(cn, {ref: raw});
 				var rv:Dynamic = expr(ce);
 				restore(old);
 				return rv;
@@ -3037,7 +3037,7 @@ class Interp {
 		if (t != null)
 			v = tryCast(v, t);
 
-		var l:Variable = (AbstractTools.isAbstract(v) ? {r: v.__a, a: v} : {r: v});
+		var l:Variable = (AbstractTools.isAbstract(v) ? {ref: v.__a, a: v} : {ref: v});
 		if (t != null)
 			l.t = t;
 		return l;
@@ -3273,7 +3273,7 @@ class Interp {
 		var it = makeIterator(expr(it));
 
 		while (it.hasNext()) {
-			locals.set(n, {r: it.next()});
+			locals.set(n, {ref: it.next()});
 
 			if (!loopRun(ef))
 				break;
@@ -3307,8 +3307,8 @@ class Interp {
 			if (v.value == null)
 				error(EUnknownField(v, 'value'));
 
-			locals.set(vk, {r: v.key});
-			locals.set(vv, {r: v.value});
+			locals.set(vk, {ref: v.key});
+			locals.set(vv, {ref: v.value});
 
 			if (!loopRun(ef))
 				break;

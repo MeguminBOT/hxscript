@@ -175,8 +175,8 @@ class Loader {
 				through[5] = Runtime.dispatch1;
 				through[6] = Runtime.dispatch2;
 				through[7] = Runtime.dispatch3;
-				through[8] = Runtime.readSlot;
-				through[9] = Runtime.writeSlot;
+				through[8] = Runtime.storeInt;
+				through[9] = Runtime.storeFloat;
 				setFallback(through);
 			} catch (e:Dynamic) {}
 		}
