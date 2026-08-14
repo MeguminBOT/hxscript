@@ -261,11 +261,26 @@ class Presets {
 		 * `h3d.scene.Object` is deliberately not here, and putting it here is answered rather than
 		 * left to fail: the build stops with the reason and the remedy, which was checked by doing it.
 		 *
-		 * A bridge re-emits the constructor of the class it extends rather than calling it, and this
-		 * one inlines an abstract's constructor, which assigns to `this` and means nothing outside
-		 * that abstract. Making it work is a change to how a bridge rebuilds a base, not a name that
-		 * can be added here. Scripts reach 3D by building into the scene rather than by being part of
-		 * it, which is what `world()` is for.
+		 * A bridge re-emits the constructor of the class it extends rather than calling it, because a
+		 * scripted subclass calls `super` from interpreted code and Haxe cannot defer a real one. The
+		 * reason given is that this constructor inlines an abstract's constructor, and there are two
+		 * layers to that, only the first of which is what it sounds like.
+		 *
+		 * The first is `flags = new ObjectFlags(0x8000)`, which inlines to a local literally named
+		 * `this`. That one is separable and foldable: the real `this` is `TConst(TThis)` and this is a
+		 * `TLocal`, so identity tells them apart before the body is turned back into source, after
+		 * which both are the same token. Folding it was written and measured and it works.
+		 *
+		 * The second is why that is not enough. `ObjectFlags` also has methods that mutate `this`
+		 * (`set` does `this |= f.toInt()`), and every flag property of this class goes through one, so
+		 * `posChanged = false` inlines to arithmetic on the underlying `Int` while the field is typed
+		 * as the abstract. Re-emitted as source that does not type: `ObjectFlags should be Int` and
+		 * `Int should be ObjectFlags`, both ways, once per flag. Making this base scriptable needs
+		 * inlined abstract arithmetic to survive a round trip through source, which is a real piece of
+		 * work and not a name that can be added here.
+		 *
+		 * Scripts reach 3D by building into the scene rather than by being part of it, which is what
+		 * `world()` is for.
 		 */
 		bases: ['h2d.Object'],
 		abstractPackages: [],
