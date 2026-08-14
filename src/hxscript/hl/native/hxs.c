@@ -312,6 +312,7 @@ typedef double (*hxs_readd3)( vdynamic *, vdynamic *, vdynamic * );
 #define HXS_THROUGH_CALL		4
 #define HXS_THROUGH_WRITE_INT	8
 #define HXS_THROUGH_WRITE_FLOAT	9
+#define HXS_THROUGH_MEMBER		10
 #define HXS_THROUGH_COUNT		12
 
 static vclosure *hxs_through[HXS_THROUGH_COUNT] = { NULL };
@@ -693,8 +694,27 @@ static vdynamic *hxs_called( vdynamic *obj, vdynamic *name, vdynamic *slot, int 
 	int i;
 	int want;
 
-	if( !hxs_method(obj,site,&cl) )
+	if( !hxs_method(obj,site,&cl) ) {
+		/*
+			A receiver of the world's own making keeps its methods as function values, so what is
+			wanted is the value rather than a dispatch: the arguments are already here, and gathering
+			them into an array for somebody else to take apart is an allocation per call.
+		*/
+		vclosure *ask = hxs_through[HXS_THROUGH_MEMBER];
+
+		if( ask && !ask->hasValue ) {
+			vclosure *fn = ((vclosure *(*)( vdynamic *, vdynamic *, vdynamic * ))ask->fun)(obj,name,slot);
+
+			/*
+				Only when the call passes exactly what the function declares. An optional argument
+				left out is fewer, and filling one in is the world's business rather than this one's.
+			*/
+			if( fn && fn->t->kind == HFUN && fn->t->fun->nargs == nargs )
+				return hl_dyn_call(fn,args,nargs);
+		}
+
 		return hxs_dispatch(obj,name,slot,args,nargs);
+	}
 
 	/*
 		A method may declare more arguments than the call passes, which is what an optional argument

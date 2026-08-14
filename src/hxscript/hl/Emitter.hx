@@ -1186,6 +1186,17 @@ class Emitter {
 				emitObject(fields, slot);
 
 			case EArray(obj, at):
+				/**
+				 * An index that is already a number goes in as one. Boxing a loop counter to pass it
+				 * is an allocation per element, which is what a sweep over an array pays otherwise.
+				 */
+				if (infer(at) == tI32) {
+					var counter:Int = reg(tI32);
+					into(at, counter);
+					callSupport('indexInt', [dynOf(obj), counter], slot);
+					return;
+				}
+
 				callSupport('index', [dynOf(obj), dynOf(at)], slot);
 
 			case EBinop('...', low, high):
@@ -2403,7 +2414,7 @@ class Emitter {
 		'neg' => 'dd', 'truthy' => 'db', 'toInt' => 'di', 'toFloat' => 'df', 'toBool' => 'db',
 		'fetch' => 'dddd', 'store' => 'ddddv', 'get' => 'ddd', 'set' => 'dddv', 'raise' => 'dd',
 		'invoke' => 'dddd', 'send' => 'ddddd', 'make' => 'ddd', 'anyMap' => 'd',
-		'index' => 'ddd', 'setIndex' => 'dddd', 'array' => 'd', 'push' => 'ddv',
+		'index' => 'ddd', 'indexInt' => 'did', 'setIndex' => 'dddd', 'array' => 'd', 'push' => 'ddv',
 		'object' => 'd', 'setField' => 'dddv', 'put' => 'dddd', 'range' => 'ddd',
 		'iterator' => 'dd', 'pairs' => 'dd', 'step' => 'db', 'take' => 'dd',
 		'args0' => 'd', 'args1' => 'dd', 'args2' => 'ddd', 'args3' => 'dddd', 'dispatch' => 'ddddd',

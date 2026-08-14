@@ -740,6 +740,23 @@ class Runtime {
 		return (at == null || at >= slots.length) ? -1 : at;
 	}
 
+	/**
+	 * @return The function a scripted instance keeps under this name, or null when there is not one.
+	 *
+	 * For a caller that has the arguments already and only needs what to call. The ordinary dispatch
+	 * gathers them into an array so it can hand them to `Reflect`, which is an allocation per call for
+	 * something the caller was holding anyway.
+	 */
+	public static function memberOf(o:Dynamic, name:Dynamic, site:Dynamic):Dynamic {
+		var held:Null<Variable> = slotFor(o, name, site);
+
+		if (held == null || held.a != null || held.lane != Variable.REFERENCE)
+			return null;
+
+		var fn:Dynamic = held.ref;
+		return Reflect.isFunction(fn) ? fn : null;
+	}
+
 	/** `dispatch`, for a receiver the native runtime could not resolve a method on. */
 	public static function dispatch0(o:Dynamic, name:Dynamic, site:Dynamic):Dynamic {
 		return dispatch(o, name, [], site);
@@ -1043,13 +1060,26 @@ class Runtime {
 
 	/** @return What sits at an index or a key, which is the same spelling over an array and a map. */
 	public static function index(o:Dynamic, i:Dynamic):Dynamic {
+		if (o is Array)
+			return (o : Array<Dynamic>)[toInt(i)];
 		if (o is haxe.Constraints.IMap)
 			return (o : haxe.Constraints.IMap<Dynamic, Dynamic>).get(i);
 		if (o is AbstractValue)
 			return index(AbstractTools.underlying(o), i);
-		if (o is Array)
-			return (o : Array<Dynamic>)[toInt(i)];
 		return o[i];
+	}
+
+	/**
+	 * Reads an index that is already a number.
+	 *
+	 * The ordinary reader takes the index as `Dynamic`, so a loop counter is boxed to pass it and
+	 * opened again on arrival, which is an allocation per element.
+	 */
+	public static function indexInt(o:Dynamic, i:Int):Dynamic {
+		if (o is Array)
+			return (o : Array<Dynamic>)[i];
+
+		return index(o, i);
 	}
 
 	/**
