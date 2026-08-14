@@ -20,7 +20,7 @@ import h2d.TileGroup;
 class SelfTest {
 	public static function cases():Array<String> {
 		return [
-			'tileFromColour', 'tileSub', 'interactive', 'callbackFires', 'layers', 'mask', 'scaleGrid', 'tileGroup', 'blendMode',
+			'tileFromColour', 'tileSub', 'interactive', 'callbackFires', 'layers', 'mask', 'scaleGrid', 'tileGroup', 'blendMode', 'blendModeQualified',
 			'filter', 'anim', 'built', 'pressed', 'stepped'
 		];
 	}
@@ -109,10 +109,26 @@ class SelfTest {
 		return 'built ' + (group != null);
 	}
 
-	/** An enum abstract of the host's, which is a different runtime form from a class. */
+	/**
+	 * An enum abstract of the host's, reached through an import.
+	 *
+	 * **This one disagrees, and the compiled answer is the right one.** `BlendMode.Add` is null in
+	 * the interpreter and `Add` compiled, so the write stores nothing on one side and the constant on
+	 * the other. The conformance project next door reads the same constant written out in full,
+	 * `h2d.BlendMode.Add`, and the two agree there, so what fails is resolving the constructor
+	 * through the import rather than the enum abstract itself.
+	 */
 	public static function blendMode():Dynamic {
 		var o:h2d.Bitmap = new h2d.Bitmap(Tile.fromColor(0xFFFFFF, 4, 4));
 		o.blendMode = BlendMode.Add;
+
+		return Std.string(o.blendMode);
+	}
+
+	/** The same constant written out in full, which is the half that works. */
+	public static function blendModeQualified():Dynamic {
+		var o:h2d.Bitmap = new h2d.Bitmap(Tile.fromColor(0xFFFFFF, 4, 4));
+		o.blendMode = h2d.BlendMode.Add;
 
 		return Std.string(o.blendMode);
 	}
