@@ -248,7 +248,11 @@ typedef struct {
 	hl_type *ft;
 	int offset;
 	int hash;
+	void *fptr;
 } hxs_site;
+
+/** What a site's offset says when it holds a method rather than a field. */
+#define HXS_SITE_METHOD (-2)
 
 static hxs_site *hxs_sites = NULL;
 static int hxs_site_count = 0;
@@ -298,24 +302,31 @@ typedef void (*hxs_write4)( vdynamic *, vdynamic *, vdynamic *, vdynamic * );
 typedef int (*hxs_readi3)( vdynamic *, vdynamic *, vdynamic * );
 typedef double (*hxs_readd3)( vdynamic *, vdynamic *, vdynamic * );
 
-/** The world's own reader and writer, for every receiver the fast path must not answer for. */
-static vclosure *hxs_read_through = NULL;
-static vclosure *hxs_write_through = NULL;
+/** The world's own reader, writer and dispatchers, for what the fast path must not answer for. */
+#define HXS_THROUGH_READ		0
+#define HXS_THROUGH_WRITE		1
+#define HXS_THROUGH_READ_INT	2
+#define HXS_THROUGH_READ_FLOAT	3
+#define HXS_THROUGH_CALL		4
+#define HXS_THROUGH_COUNT		8
+
+static vclosure *hxs_through[HXS_THROUGH_COUNT] = { NULL };
 static bool hxs_through_rooted = false;
 
-static vclosure *hxs_read_int_through = NULL;
-static vclosure *hxs_read_float_through = NULL;
+/** Takes them in the order the library passes them, which the two sides agree on and nothing checks. */
+HL_PRIM void HL_NAME(fallback)( varray *given ) {
+	int i;
+	int count = given == NULL ? 0 : given->size;
 
-HL_PRIM void HL_NAME(fallback)( vclosure *read, vclosure *write, vclosure *readInt, vclosure *readFloat ) {
-	hxs_read_through = read;
-	hxs_write_through = write;
-	hxs_read_int_through = readInt;
-	hxs_read_float_through = readFloat;
+	if( count > HXS_THROUGH_COUNT )
+		count = HXS_THROUGH_COUNT;
+
+	for(i=0;i<count;i++)
+		hxs_through[i] = hl_aptr(given,vclosure*)[i];
+
 	if( !hxs_through_rooted ) {
-		hl_add_root((void**)&hxs_read_through);
-		hl_add_root((void**)&hxs_write_through);
-		hl_add_root((void**)&hxs_read_int_through);
-		hl_add_root((void**)&hxs_read_float_through);
+		for(i=0;i<HXS_THROUGH_COUNT;i++)
+			hl_add_root((void**)&hxs_through[i]);
 		hxs_through_rooted = true;
 	}
 }
@@ -469,16 +480,16 @@ HL_PRIM vdynamic *HL_NAME(fetch)( vdynamic *obj, vdynamic *name, vdynamic *slot,
 	if( addr )
 		return hl_is_ptr(ft) ? *(vdynamic**)addr : hl_make_dyn(addr,ft);
 
-	if( hxs_read_through == NULL )
+	if( hxs_through[HXS_THROUGH_READ] == NULL )
 		return NULL;
 
-	if( !hxs_read_through->hasValue )
-		return ((hxs_read3)hxs_read_through->fun)(obj,name,slot);
+	if( !hxs_through[HXS_THROUGH_READ]->hasValue )
+		return ((hxs_read3)hxs_through[HXS_THROUGH_READ]->fun)(obj,name,slot);
 
 	args[0] = obj;
 	args[1] = name;
 	args[2] = slot;
-	return hl_dyn_call(hxs_read_through,args,3);
+	return hl_dyn_call(hxs_through[HXS_THROUGH_READ],args,3);
 }
 
 /** Writes a field for compiled code, falling through to the world's writer. */
@@ -496,11 +507,11 @@ HL_PRIM void HL_NAME(store)( vdynamic *obj, vdynamic *name, vdynamic *value, vdy
 		return;
 	}
 
-	if( hxs_write_through == NULL )
+	if( hxs_through[HXS_THROUGH_WRITE] == NULL )
 		return;
 
-	if( !hxs_write_through->hasValue ) {
-		((hxs_write4)hxs_write_through->fun)(obj,name,value,slot);
+	if( !hxs_through[HXS_THROUGH_WRITE]->hasValue ) {
+		((hxs_write4)hxs_through[HXS_THROUGH_WRITE]->fun)(obj,name,value,slot);
 		return;
 	}
 
@@ -508,7 +519,7 @@ HL_PRIM void HL_NAME(store)( vdynamic *obj, vdynamic *name, vdynamic *value, vdy
 	args[1] = name;
 	args[2] = value;
 	args[3] = slot;
-	hl_dyn_call(hxs_write_through,args,4);
+	hl_dyn_call(hxs_through[HXS_THROUGH_WRITE],args,4);
 }
 
 /**
@@ -538,16 +549,16 @@ HL_PRIM int HL_NAME(fetchi)( vdynamic *obj, vdynamic *name, vdynamic *slot, int 
 		}
 	}
 
-	if( hxs_read_int_through == NULL )
+	if( hxs_through[HXS_THROUGH_READ_INT] == NULL )
 		return 0;
 
-	if( !hxs_read_int_through->hasValue )
-		return ((hxs_readi3)hxs_read_int_through->fun)(obj,name,slot);
+	if( !hxs_through[HXS_THROUGH_READ_INT]->hasValue )
+		return ((hxs_readi3)hxs_through[HXS_THROUGH_READ_INT]->fun)(obj,name,slot);
 
 	args[0] = obj;
 	args[1] = name;
 	args[2] = slot;
-	answer = hl_dyn_call(hxs_read_int_through,args,3);
+	answer = hl_dyn_call(hxs_through[HXS_THROUGH_READ_INT],args,3);
 	return answer == NULL ? 0 : hl_dyn_casti(&answer,&hlt_dyn,&hlt_i32);
 }
 
@@ -562,20 +573,177 @@ HL_PRIM double HL_NAME(fetchd)( vdynamic *obj, vdynamic *name, vdynamic *slot, i
 	if( addr )
 		return ft->kind == HF64 ? *(double*)addr : hl_dyn_castd(addr,ft);
 
-	if( hxs_read_float_through == NULL )
+	if( hxs_through[HXS_THROUGH_READ_FLOAT] == NULL )
 		return 0.;
 
-	if( !hxs_read_float_through->hasValue )
-		return ((hxs_readd3)hxs_read_float_through->fun)(obj,name,slot);
+	if( !hxs_through[HXS_THROUGH_READ_FLOAT]->hasValue )
+		return ((hxs_readd3)hxs_through[HXS_THROUGH_READ_FLOAT]->fun)(obj,name,slot);
 
 	args[0] = obj;
 	args[1] = name;
 	args[2] = slot;
-	answer = hl_dyn_call(hxs_read_float_through,args,3);
+	answer = hl_dyn_call(hxs_through[HXS_THROUGH_READ_FLOAT],args,3);
 	return answer == NULL ? 0. : hl_dyn_castd(&answer,&hlt_dyn);
 }
 
+/**
+	Resolves a method on the receiver and remembers it, the way a field site remembers an offset.
+
+	The convention is hashlink's own, from hl_dyn_call_obj: a negative field index names a method, the
+	pointer is in the receiver's own runtime object, and the type carries the receiver as its first
+	argument.
+
+	@return Whether this receiver has a method of that name to call.
+*/
+static bool hxs_method( vdynamic *obj, int site, vclosure *out ) {
+	hxs_site *s;
+	hl_runtime_obj *rt;
+
+	if( obj == NULL || site < 0 || site >= hxs_site_count )
+		return false;
+
+	s = hxs_sites + site;
+
+	if( s->t == obj->t ) {
+		if( s->offset != HXS_SITE_METHOD )
+			return false;
+		out->t = s->ft;
+		out->fun = s->fptr;
+		out->hasValue = 0;
+#		ifdef HL_64
+		out->stackCount = 0;
+#		endif
+		return true;
+	}
+
+	if( obj->t->kind != HOBJ || hxs_is_scripted(obj->t) ) {
+		s->t = obj->t;
+		s->offset = -1;
+		return false;
+	}
+
+	rt = hl_get_obj_rt(obj->t);
+	{
+		hl_runtime_obj *at = rt;
+		while( at ) {
+			hl_field_lookup *f = hl_lookup_find(at->lookup,at->nlookup,s->hash);
+			if( f ) {
+				if( f->field_index >= 0 || f->t->kind != HFUN )
+					break;
+				s->t = obj->t;
+				s->ft = f->t;
+				s->fptr = rt->methods[-f->field_index - 1];
+				s->offset = HXS_SITE_METHOD;
+				out->t = f->t;
+				out->fun = s->fptr;
+				out->hasValue = 0;
+#				ifdef HL_64
+				out->stackCount = 0;
+#				endif
+				return true;
+			}
+			at = at->parent;
+		}
+	}
+
+	s->t = obj->t;
+	s->offset = -1;
+	return false;
+}
+
+/** Calls the world's own dispatcher, for a receiver the fast path must not answer for. */
+static vdynamic *hxs_dispatch( vdynamic *obj, vdynamic *name, vdynamic *slot, vdynamic **args, int nargs ) {
+	vclosure *c = hxs_through[HXS_THROUGH_CALL + nargs];
+	vdynamic *passed[8];
+	int i;
+
+	if( c == NULL )
+		return NULL;
+
+	if( !c->hasValue ) {
+		switch( nargs ) {
+		case 0:
+			return ((hxs_read3)c->fun)(obj,name,slot);
+		case 1:
+			return ((vdynamic *(*)( vdynamic *, vdynamic *, vdynamic *, vdynamic * ))c->fun)(obj,name,slot,args[0]);
+		case 2:
+			return ((vdynamic *(*)( vdynamic *, vdynamic *, vdynamic *, vdynamic *, vdynamic * ))c->fun)(obj,name,slot,args[0],args[1]);
+		default:
+			return ((vdynamic *(*)( vdynamic *, vdynamic *, vdynamic *, vdynamic *, vdynamic *, vdynamic * ))c->fun)(obj,name,slot,args[0],args[1],args[2]);
+		}
+	}
+
+	passed[0] = obj;
+	passed[1] = name;
+	passed[2] = slot;
+	for(i=0;i<nargs;i++)
+		passed[i + 3] = args[i];
+
+	return hl_dyn_call(c,passed,nargs + 3);
+}
+
+/** Calls a method on a receiver whose type the site remembers, with the receiver passed first. */
+static vdynamic *hxs_called( vdynamic *obj, vdynamic *name, vdynamic *slot, int site, vdynamic **args, int nargs ) {
+	vclosure cl;
+	vdynamic *passed[8];
+	int i;
+	int want;
+
+	if( !hxs_method(obj,site,&cl) )
+		return hxs_dispatch(obj,name,slot,args,nargs);
+
+	/*
+		A method may declare more arguments than the call passes, which is what an optional argument
+		is, and hl_dyn_call wants every one of them. Padding is only right where the argument can hold
+		nothing; anything else goes to the world, which knows what a missing argument means there.
+	*/
+	want = cl.t->fun->nargs;
+	if( want > (int)(sizeof(passed) / sizeof(passed[0])) || want < nargs + 1 )
+		return hxs_dispatch(obj,name,slot,args,nargs);
+
+	passed[0] = obj;
+	for(i=0;i<nargs;i++)
+		passed[i + 1] = args[i];
+
+	for(i=nargs+1;i<want;i++) {
+		if( !hl_is_ptr(cl.t->fun->args[i]) )
+			return hxs_dispatch(obj,name,slot,args,nargs);
+		passed[i] = NULL;
+	}
+
+	return hl_dyn_call(&cl,passed,want);
+}
+
+HL_PRIM vdynamic *HL_NAME(invoke0)( vdynamic *obj, vdynamic *name, vdynamic *slot, int site ) {
+	return hxs_called(obj,name,slot,site,NULL,0);
+}
+
+HL_PRIM vdynamic *HL_NAME(invoke1)( vdynamic *obj, vdynamic *name, vdynamic *slot, int site, vdynamic *a ) {
+	vdynamic *args[1];
+	args[0] = a;
+	return hxs_called(obj,name,slot,site,args,1);
+}
+
+HL_PRIM vdynamic *HL_NAME(invoke2)( vdynamic *obj, vdynamic *name, vdynamic *slot, int site, vdynamic *a, vdynamic *b ) {
+	vdynamic *args[2];
+	args[0] = a;
+	args[1] = b;
+	return hxs_called(obj,name,slot,site,args,2);
+}
+
+HL_PRIM vdynamic *HL_NAME(invoke3)( vdynamic *obj, vdynamic *name, vdynamic *slot, int site, vdynamic *a, vdynamic *b, vdynamic *c ) {
+	vdynamic *args[3];
+	args[0] = a;
+	args[1] = b;
+	args[2] = c;
+	return hxs_called(obj,name,slot,site,args,3);
+}
+
 static hxs_native hxs_native_table[] = {
+	{ "invoke0", (void*)HL_NAME(invoke0) },
+	{ "invoke1", (void*)HL_NAME(invoke1) },
+	{ "invoke2", (void*)HL_NAME(invoke2) },
+	{ "invoke3", (void*)HL_NAME(invoke3) },
 	{ "fetchi", (void*)HL_NAME(fetchi) },
 	{ "fetchd", (void*)HL_NAME(fetchd) },
 	{ "fetch", (void*)HL_NAME(fetch) },
@@ -740,7 +908,7 @@ HL_PRIM int HL_NAME(site)( int hash ) {
 	return -1;
 }
 
-HL_PRIM void HL_NAME(fallback)( vclosure *read, vclosure *write, vclosure *readInt, vclosure *readFloat ) {
+HL_PRIM void HL_NAME(fallback)( varray *given ) {
 }
 
 HL_PRIM int HL_NAME(hash)( vbyte *name ) {
@@ -792,7 +960,7 @@ DEFINE_PRIM(_I32, built_for, _NO_ARG);
 DEFINE_PRIM(_BYTES, last_error, _NO_ARG);
 DEFINE_PRIM(_I32, hooks, _NO_ARG);
 DEFINE_PRIM(_I32, site, _I32);
-DEFINE_PRIM(_VOID, fallback, _DYN _DYN _DYN _DYN);
+DEFINE_PRIM(_VOID, fallback, _ARR);
 DEFINE_PRIM(_I32, hash, _BYTES);
 DEFINE_PRIM(_VOID, set_global, _ABSTRACT(hxs_module) _I32 _DYN);
 DEFINE_PRIM(_ABSTRACT(hxs_module), load, _BYTES _I32);

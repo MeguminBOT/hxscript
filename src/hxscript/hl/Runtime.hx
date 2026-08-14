@@ -587,6 +587,23 @@ class Runtime {
 	 * @param site This access's own memory.
 	 * @return The value.
 	 */
+	/** `dispatch`, for a receiver the native runtime could not resolve a method on. */
+	public static function dispatch0(o:Dynamic, name:Dynamic, site:Dynamic):Dynamic {
+		return dispatch(o, name, [], site);
+	}
+
+	public static function dispatch1(o:Dynamic, name:Dynamic, site:Dynamic, a:Dynamic):Dynamic {
+		return dispatch(o, name, [a], site);
+	}
+
+	public static function dispatch2(o:Dynamic, name:Dynamic, site:Dynamic, a:Dynamic, b:Dynamic):Dynamic {
+		return dispatch(o, name, [a, b], site);
+	}
+
+	public static function dispatch3(o:Dynamic, name:Dynamic, site:Dynamic, a:Dynamic, b:Dynamic, c:Dynamic):Dynamic {
+		return dispatch(o, name, [a, b, c], site);
+	}
+
 	/**
 	 * Raises what the interpreter raises, for a construct that fails when it runs rather than when it
 	 * is compiled.

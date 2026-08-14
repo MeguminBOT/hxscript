@@ -1588,6 +1588,9 @@ class Emitter {
 	/** This module's index for the runtime's writer. */
 	var storeNative:Int = -1;
 
+	/** This module's indices for the callers, by how many arguments they take. */
+	var invokeNatives:Array<Int> = [-1, -1, -1, -1];
+
 	/** This module's indices for the readers that answer a primitive rather than a boxed value. */
 	var fetchIntNative:Int = -1;
 
@@ -1761,14 +1764,29 @@ class Emitter {
 	 * @param slot Where to leave the result.
 	 */
 	function sendTo(target:Int, name:String, params:Array<Expr>, slot:Int):Void {
-		var given:Int = gathered(params);
-
 		/**
 		 * With nothing brought in by `using`, the only question is what the receiver's own member is,
 		 * and that is the question a site can remember the answer to. `send` is what handles the
 		 * other case, where a name may belong to the value or to a static that takes it first, and
 		 * which of those it is cannot be settled before the value exists.
+		 *
+		 * Few enough arguments and the runtime takes them where they are, so nothing is gathered into
+		 * an array that it would immediately take apart again.
 		 */
+		if (usings.length == 0 && params.length < invokeNatives.length) {
+			var held:Array<Int> = [for (p in params) dynOf(p)];
+			var call:Array<Int> = [reg(tDyn), invokeIndex(params.length), target, named(name), siteSlot(), siteIndex(name)];
+
+			for (h in held)
+				call.push(h);
+
+			ops.push({op: OCallN, args: call});
+			unbox(call[0], slot);
+			return;
+		}
+
+		var given:Int = gathered(params);
+
 		if (usings.length == 0) {
 			callSupport('dispatch', [target, named(name), given, siteSlot()], slot);
 			return;
@@ -1885,6 +1903,22 @@ class Emitter {
 			fetchFloatNative = module.native('hxs', 'fetchd', module.typeId(TFun([tDyn, tDyn, tDyn, tI32], tF64)));
 
 		return fetchFloatNative;
+	}
+
+	/**
+	 * @param count How many arguments the call passes.
+	 * @return This module's index for the caller that takes that many.
+	 */
+	function invokeIndex(count:Int):Int {
+		if (invokeNatives[count] < 0) {
+			var args:Array<Int> = [tDyn, tDyn, tDyn, tI32];
+			for (i in 0...count)
+				args.push(tDyn);
+
+			invokeNatives[count] = module.native('hxs', 'invoke' + count, module.typeId(TFun(args, tDyn)));
+		}
+
+		return invokeNatives[count];
 	}
 
 	function storeIndex():Int {

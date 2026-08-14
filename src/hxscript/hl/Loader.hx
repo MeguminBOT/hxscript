@@ -166,7 +166,16 @@ class Loader {
 		if (!wired) {
 			wired = true;
 			try {
-				setFallback(Runtime.fetch, Runtime.store, Runtime.fetchInt, Runtime.fetchFloat);
+				var through:hl.NativeArray<Dynamic> = new hl.NativeArray<Dynamic>(8);
+				through[0] = Runtime.fetch;
+				through[1] = Runtime.store;
+				through[2] = Runtime.fetchInt;
+				through[3] = Runtime.fetchFloat;
+				through[4] = Runtime.dispatch0;
+				through[5] = Runtime.dispatch1;
+				through[6] = Runtime.dispatch2;
+				through[7] = Runtime.dispatch3;
+				setFallback(through);
 			} catch (e:Dynamic) {}
 		}
 
@@ -285,7 +294,7 @@ class Loader {
 	}
 
 	@:hlNative("?hxscript", "fallback")
-	static function setFallback(read:Dynamic, write:Dynamic, readInt:Dynamic, readFloat:Dynamic):Void {}
+	static function setFallback(given:hl.NativeArray<Dynamic>):Void {}
 
 	@:hlNative("?hxscript", "hash") static function hashOf(name:hl.Bytes):Int {
 		return 0;
