@@ -313,9 +313,12 @@ class Backend {
 
 		var above:Dynamic = made.host == null ? null : hostOwner(made.host, module, env);
 
+		var owner:Dynamic = env.resolve(made.path);
+
 		Runtime.replaces(made.path, {
 			path: made.path,
 			value: cls,
+			scripted: (owner is ScriptedClass) ? owner : null,
 			base: made.base == null ? null : (module.pack == null || module.pack.length == 0 ? made.base : module.pack.join('.') + '.' + made.base),
 			host: above == null ? null : (cast above : hl.BaseType).__type__,
 			hostClass: above,

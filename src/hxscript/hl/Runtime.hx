@@ -1078,7 +1078,36 @@ class Runtime {
 				return Std.isOfType(v, stood.value);
 		}
 
+		/**
+		 * An interface is not part of the layout, so the class the instance came from is what
+		 * answers. The library's own test would ask the instance, and an instance of a replaced
+		 * class carries no scripted class to ask.
+		 */
+		if (type is hxscript.types.ScriptedInterface) {
+			var from:Null<ScriptedClass> = declaring(v);
+
+			if (from != null)
+				return from.implementsInterface(cast type);
+		}
+
 		return hxscript.proxy.StdProxy.isOfType(v, type);
+	}
+
+	/**
+	 * @param v A value.
+	 * @return The scripted class a replaced instance came from, or null when it is not one.
+	 */
+	static function declaring(v:Dynamic):Null<ScriptedClass> {
+		var held:Dynamic = v == null ? null : Type.getClass(v);
+		if (held == null)
+			return null;
+
+		for (stood in replacements) {
+			if (stood.value == held)
+				return stood.scripted;
+		}
+
+		return null;
 	}
 
 	/**

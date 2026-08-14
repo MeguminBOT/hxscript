@@ -15,6 +15,9 @@ class Replacement {
 	/** The class value that stands in for it, which is what a type test has to be made against. */
 	public var value:Dynamic = null;
 
+	/** The scripted class it replaced, which is what still knows the interfaces it declared. */
+	public var scripted:Dynamic = null;
+
 	/** The base of the same batch it extends, by path, or null. */
 	public var base:Null<String> = null;
 
