@@ -297,6 +297,15 @@ class Emitter {
 	 */
 	var annotated:Array<StringMap<String>>;
 
+	/**
+	 * What each local written `Array<T>` holds, as a register type, innermost scope last.
+	 *
+	 * An element read out of one is a dynamic however the array was written, so everything done with
+	 * it afterwards was dynamic too. Saying what it is turns a sweep over a typed array into a cast
+	 * and an offset.
+	 */
+	var elements:Array<StringMap<Int>>;
+
 	/** What the world answered for each type name a script wrote, asked once. */
 	var known:StringMap<Null<hl.Type>>;
 
@@ -343,6 +352,7 @@ class Emitter {
 		regs = [];
 		scopes = [];
 		annotated = [];
+		elements = [];
 		breaks = [];
 		continues = [];
 		returns = 0;
@@ -1096,6 +1106,21 @@ class Emitter {
 	}
 
 	/**
+	 * Refuses a null receiver before an instruction reaches through it.
+	 *
+	 * Reading a field by offset is a load from the pointer, so a null one is not an error but a page
+	 * fault, and `var w:Thing = null` is ordinary code. One instruction turns it back into something
+	 * a script can catch.
+	 *
+	 * @param obj What is being reached through.
+	 * @param held The register holding it.
+	 */
+	function guard(obj:Expr, held:Int):Void {
+		if (!obj.e.match(EIdent('this')))
+			ops.push({op: ONullCheck, args: [held]});
+	}
+
+	/**
 	 * Where a field of a class this batch laid out sits, and what it holds.
 	 *
 	 * Only a field the batch itself declared, and only when the receiver is held as the class that
@@ -1141,6 +1166,43 @@ class Emitter {
 	function fieldType(obj:Expr, name:String):Null<Int> {
 		var here:Null<{at:Int, of:Int}> = laidOut(obj, name, READS);
 		return here == null ? null : here.of;
+	}
+
+	/**
+	 * What a field of an element of a typed array holds.
+	 *
+	 * The element itself stays dynamic, so nothing is cast and an array that does not hold what it
+	 * said still answers rather than refusing. What this buys is the read: knowing the field is an
+	 * `Int` means it comes back as one, and the arithmetic around it is arithmetic rather than a
+	 * pair of allocations.
+	 *
+	 * @param obj What is being read from.
+	 * @param name The field.
+	 * @return Its register type, or null when nothing here can say.
+	 */
+	function elementField(obj:Expr, name:String):Null<Int> {
+		var held:Null<String> = switch (obj.e) {
+			case EArray(arr, _): owners.get(element(arr));
+			case _: null;
+		};
+
+		if (held == null)
+			return null;
+
+		var at:Null<String> = held;
+
+		while (at != null) {
+			if (reachOf(at, name) & READS == 0)
+				return null;
+
+			var kinds:Null<StringMap<Int>> = slotTypes.get(at);
+			if (kinds != null && kinds.exists(name))
+				return kinds.get(name);
+
+			at = bases.get(at);
+		}
+
+		return null;
 	}
 
 	/**
@@ -1281,6 +1343,7 @@ class Emitter {
 		regs = [];
 		scopes = [];
 		annotated = [];
+		elements = [];
 		breaks = [];
 		continues = [];
 		returns = sig.ret;
@@ -1336,6 +1399,7 @@ class Emitter {
 		regs = [];
 		scopes = [];
 		annotated = [];
+		elements = [];
 		breaks = [];
 		continues = [];
 		returns = sig.ret;
@@ -1503,6 +1567,7 @@ class Emitter {
 		regs = [];
 		scopes = [];
 		annotated = [];
+		elements = [];
 		breaks = [];
 		continues = [];
 		returns = sig.ret;
@@ -2421,6 +2486,7 @@ class Emitter {
 				if (seat != null && sig != null && fits(sig, params, true)) {
 					var held:Int = reg(infer(obj));
 					into(obj, held);
+					guard(obj, held);
 					emitDeclared(sig, held, params, slot, pos, seat);
 					return;
 				}
@@ -3034,6 +3100,7 @@ class Emitter {
 		if (here != null) {
 			var held:Int = reg(infer(obj));
 			into(obj, held);
+			guard(obj, held);
 
 			var got:Int = regs[slot] == here.of ? slot : reg(here.of);
 			ops.push({op: OField, args: [got, held, here.at]});
@@ -3089,6 +3156,7 @@ class Emitter {
 		if (here != null) {
 			var into:Int = reg(infer(obj));
 			this.into(obj, into);
+			guard(obj, into);
 
 			var written:Int = reg(here.of);
 			this.into(value, written);
@@ -3608,12 +3676,14 @@ class Emitter {
 	inline function push():Void {
 		scopes.push(new StringMap());
 		annotated.push(new StringMap());
+		elements.push(new StringMap());
 	}
 
 	/** Closes one. */
 	inline function pop():Void {
 		scopes.pop();
 		annotated.pop();
+		elements.pop();
 	}
 
 	/**
@@ -3623,6 +3693,11 @@ class Emitter {
 	 * @param t Its annotation, or null when it had none.
 	 */
 	function annotate(name:String, t:Null<CType>):Void {
+		var holds:Int = holding(t);
+
+		if (holds != tDyn)
+			elements[elements.length - 1].set(name, holds);
+
 		var written:Null<String> = baseName(t);
 
 		if (written == null || classes.exists(written) || declared.exists(written))
@@ -3630,6 +3705,40 @@ class Emitter {
 
 		if (knownAs(written) != null)
 			annotated[annotated.length - 1].set(name, written);
+	}
+
+	/**
+	 * @param t An annotation.
+	 * @return The register type an element of it is, or dynamic when it is not an array of one.
+	 */
+	function holding(t:Null<CType>):Int {
+		return switch (t) {
+			case CTParent(inner): holding(inner);
+			case CTPath(['Array'], params) if (params != null && params.length == 1): typeOf(params[0]);
+			case _: tDyn;
+		}
+	}
+
+	/**
+	 * @param e An expression.
+	 * @return The register type an element read out of it is, or dynamic when nothing said.
+	 */
+	function element(e:Expr):Int {
+		return switch (e.e) {
+			case EParent(inner): element(inner);
+
+			case EIdent(name):
+				var i:Int = elements.length - 1;
+				while (i >= 0) {
+					var here:Null<Int> = elements[i].get(name);
+					if (here != null)
+						return here;
+					i--;
+				}
+				tDyn;
+
+			case _: tDyn;
+		}
 	}
 
 	/**
@@ -3781,8 +3890,19 @@ class Emitter {
 			case ENew(cls, _) if (shapes.exists(cls)): shapes.get(cls);
 			case ENew(_, _): tDyn;
 
+			/**
+			 * An element is held as what the array said only when that is a number, because a number
+			 * is converted rather than cast: an array whose annotation was not what it held would
+			 * otherwise stop answering and start refusing, which is not what the interpreter does
+			 * with the same line and not what cppia does either. The class case gets its speed from
+			 * the field below instead, which needs no cast at all.
+			 */
+			case EArray(obj, _):
+				var held:Int = element(obj);
+				instance(held) ? tDyn : held;
+
 			case EField(obj, name, _):
-				var held:Null<Int> = fieldType(obj, name);
+				var held:Null<Int> = fieldType(obj, name) ?? elementField(obj, name);
 				held == null ? worldlyKind(obj, name, false) : held;
 
 			case ECall(callee, _):
@@ -4534,6 +4654,7 @@ class Emitter {
 		regs = [];
 		scopes = [];
 		annotated = [];
+		elements = [];
 		breaks = [];
 		continues = [];
 		returns = tDyn;

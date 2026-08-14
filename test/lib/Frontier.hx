@@ -71,6 +71,20 @@ class Frontier {
 		probe('Reflect.fields of a structure', 'var o = {a: 1, b: 2}; var f = Reflect.fields(o); f.sort(function(x, y) return x < y ? -1 : 1); return f.join(",");');
 		probe('Reflect.hasField', 'var o = {a: 1}; return Std.string(Reflect.hasField(o, "a")) + "/" + Std.string(Reflect.hasField(o, "z"));');
 		probe('Reflect.callMethod on a scripted static', 'return Std.string(Reflect.callMethod(null, twice, [21]));', 'static function twice(n:Int):Int return n * 2;');
+		// Reaching through a null of a class the script named is not here, and the reason is worth
+		// writing down: cppia takes the process down on all three of read, write and call, so a case
+		// for them would make every run of this suite crash and resume three times. HashLink throws
+		// a catchable `Null access` for each. Both are stricter than the interpreter, which answers
+		// null for the read.
+		// An annotated array is read as the annotation says, which is what makes a sweep over one
+		// fast. A script that defeats its own annotation with a `cast` is outside what Haxe promises
+		// and the two answer differently: `var all:Array<T> = cast [1, 2]; all[0].v` reads null
+		// interpreted and 0 compiled, because a field known to be an `Int` comes back as one. Not a
+		// case, because there is nothing there for a compiler to be held to.
+		probe('a typed array of a scripted class', 'var all:Array<T> = [new T(), new T()]; all[1].v = 5; return Std.string(all[0].v + all[1].v);',
+			'public var v:Int = 2; public function new() {}');
+		probe('a typed array holding a null', 'var all:Array<T> = [null]; return Std.string(all[0]);',
+			'public var v:Int = 0; public function new() {}');
 		probe('Reflect.fields of a scripted instance',
 			'var f = Reflect.fields(new T()); f.sort(function(x, y) return x < y ? -1 : 1); return f.join(",");',
 			'public var a:Int = 1; public var b:String = "x"; public function new() {} public function m():Int return 2;');
