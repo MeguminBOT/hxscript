@@ -214,6 +214,15 @@ public function read():Dynamic { return function() { return held; }; }');
 		probe('a host method on a value', 'return "ab".toUpperCase();');
 		probe('a host class constructed', 'var b = new StringBuf(); b.add("hi"); return b.toString();');
 		probe('a host enum value', 'return Std.string(haxe.ds.Option.None);');
+		/*
+			The same enum named three shorter ways. The sandbox reads `BlendMode.Add` as null after
+			importing it and the same constructor written out in full as the constructor, and
+			`h2d.BlendMode` is an ordinary enum rather than the enum abstract it was first put down
+			as, so what these ask about is a plain enum reached by a short name.
+		*/
+		probe('a host enum through an import', 'return Std.string(Option.None);', null, 'import haxe.ds.Option;');
+		probe('a host enum constructor bare after an import', 'return Std.string(None);', null, 'import haxe.ds.Option;');
+		probe('a host enum constructor with arguments through an import', 'return Std.string(Option.Some(3));', null, 'import haxe.ds.Option;');
 		probe('a host enum matched', 'var o = haxe.ds.Option.Some(7); switch (o) { case Some(v): return Std.string(v); case None: return "none"; }');
 		probe('an abstract Map through its alias', 'var m:Map<String, Int> = new Map(); m.set("a", 1); return Std.string(m.get("a"));');
 		probe('Lambda over an array', 'return Std.string(Lambda.count([1, 2, 3]));');

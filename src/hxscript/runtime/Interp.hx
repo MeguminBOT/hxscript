@@ -2783,8 +2783,20 @@ class Interp {
 						}
 					}
 
+					/**
+					 * Through `fromType`, because an import answered here may be an enum and a
+					 * constructor of one reads like a static without being one. This is the short
+					 * path, taken whenever a chain's first segment is a name already in scope, and it
+					 * answered by reflection alone: `haxe.ds.Option.None` is resolved segment by
+					 * segment and was built, `Option.None` after importing it came through here and
+					 * was not.
+					 *
+					 * On HashLink that was a null where the constructor belonged, with nothing said
+					 * about it. `Option.Some(3)` was right throughout, being a call rather than a
+					 * read, which is what made it look like a problem with the name.
+					 */
 					if (base != null)
-						return get(base, f, m);
+						return fromType(base, f, m);
 				default:
 			}
 		}
@@ -2886,7 +2898,18 @@ class Interp {
 					}
 				}
 			} else {
-				got = get(got, field, maybe);
+				/**
+				 * Through `fromType`, because what a chain has already resolved may be an enum, and a
+				 * constructor of one reads like a static without being one. `haxe.ds.Option.None` was
+				 * built and `Option.None` after importing it was not: the first is a path resolved
+				 * segment by segment, the second an import answered whole, and only the first reached
+				 * the question that builds the value.
+				 *
+				 * On HashLink that showed as a null where the constructor belonged, with nothing said
+				 * about it. `Option.Some(3)` was right throughout, being a call rather than a read,
+				 * which is what made it look like a problem with the name.
+				 */
+				got = fromType(got, field, maybe);
 			}
 		}
 
@@ -3616,12 +3639,14 @@ class Interp {
 			return read;
 
 		/**
-		 * `getEnumName` rather than `getEnumConstructs` as the test, because the first answers null
-		 * for anything that is not an enum and the second is only defined for one. `get` already
-		 * asks it of arbitrary values a few lines above, so it is known to be safe here.
+		 * `is Enum` rather than asking reflection anything, because reflection is what is dangerous
+		 * here. `Type.getEnumName` stood in this place and it ends the hxcpp process for a value that
+		 * is not an enum, which was survivable only while this was reached with a resolved type and
+		 * nothing else. It is now reached with whatever a name in scope resolved to, and the first
+		 * ordinary thing to arrive was a scripted instance with a null field: `t.maybe == null` took
+		 * the process down. A value test cannot.
 		 */
-		var named:Null<String> = try Type.getEnumName(t) catch (e:Dynamic) null;
-		if (named == null)
+		if (!(t is Enum))
 			return read;
 
 		var names:Array<String> = HaxeType.getEnumConstructs(t);
