@@ -285,6 +285,19 @@ static bool hxs_is_scripted( hl_type *t ) {
 	return false;
 }
 
+/**
+	Calls a static Haxe function of a known shape without going through hl_dyn_call.
+
+	hl_dyn_call boxes every argument and reads the callee's signature to marshal against, and this
+	path is taken on every access to a scripted instance, which is most of the accesses a script
+	makes. A closure over no receiver is a plain function pointer with the platform's own convention,
+	which is what both the jit and generated C produce, so it can be called as one.
+*/
+typedef vdynamic *(*hxs_read3)( vdynamic *, vdynamic *, vdynamic * );
+typedef void (*hxs_write4)( vdynamic *, vdynamic *, vdynamic *, vdynamic * );
+typedef int (*hxs_readi3)( vdynamic *, vdynamic *, vdynamic * );
+typedef double (*hxs_readd3)( vdynamic *, vdynamic *, vdynamic * );
+
 /** The world's own reader and writer, for every receiver the fast path must not answer for. */
 static vclosure *hxs_read_through = NULL;
 static vclosure *hxs_write_through = NULL;
@@ -459,6 +472,9 @@ HL_PRIM vdynamic *HL_NAME(fetch)( vdynamic *obj, vdynamic *name, vdynamic *slot,
 	if( hxs_read_through == NULL )
 		return NULL;
 
+	if( !hxs_read_through->hasValue )
+		return ((hxs_read3)hxs_read_through->fun)(obj,name,slot);
+
 	args[0] = obj;
 	args[1] = name;
 	args[2] = slot;
@@ -482,6 +498,11 @@ HL_PRIM void HL_NAME(store)( vdynamic *obj, vdynamic *name, vdynamic *value, vdy
 
 	if( hxs_write_through == NULL )
 		return;
+
+	if( !hxs_write_through->hasValue ) {
+		((hxs_write4)hxs_write_through->fun)(obj,name,value,slot);
+		return;
+	}
 
 	args[0] = obj;
 	args[1] = name;
@@ -520,6 +541,9 @@ HL_PRIM int HL_NAME(fetchi)( vdynamic *obj, vdynamic *name, vdynamic *slot, int 
 	if( hxs_read_int_through == NULL )
 		return 0;
 
+	if( !hxs_read_int_through->hasValue )
+		return ((hxs_readi3)hxs_read_int_through->fun)(obj,name,slot);
+
 	args[0] = obj;
 	args[1] = name;
 	args[2] = slot;
@@ -540,6 +564,9 @@ HL_PRIM double HL_NAME(fetchd)( vdynamic *obj, vdynamic *name, vdynamic *slot, i
 
 	if( hxs_read_float_through == NULL )
 		return 0.;
+
+	if( !hxs_read_float_through->hasValue )
+		return ((hxs_readd3)hxs_read_float_through->fun)(obj,name,slot);
 
 	args[0] = obj;
 	args[1] = name;

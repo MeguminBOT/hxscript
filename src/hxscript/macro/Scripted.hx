@@ -1004,7 +1004,10 @@ class Scripted {
 						superLocals.set(field, {r: f});
 				}
 
-				__interp.locals.set('super', {r: hxscript.runtime.Reference.RSuper(superLocals, __constructSuper)});
+				/** Kept in `__vars` too, since a compiled body asks from outside any frame of the interpreter's. */
+				var __superRef:hxscript.runtime.Variable = {r: hxscript.runtime.Reference.RSuper(superLocals, __constructSuper)};
+				__interp.locals.set('super', __superRef);
+				__vars.set('super', __superRef);
 			}
 			/**
 			 * Binds a scripted class's own fields as interpreter locals.
@@ -1013,6 +1016,15 @@ class Scripted {
 			 * @param isSuper Whether it is being bound as an ancestor rather than the instance itself.
 			 */
 			function setFields(t:hxscript.types.ScriptedClass, isSuper:Bool = false) {
+				/**
+				 * What `super` means inside this class's own bodies, taken before the scope holds
+				 * this class's methods. A compiled body has no closure carrying a lexical `super` and
+				 * has to ask the instance, and asking without saying which class is asking finds the
+				 * nearest answer and calls itself forever.
+				 */
+				if (__interp.locals.exists('super'))
+					__vars.set('super@' + t.path, __interp.locals.get('super'));
+
 				for (field in t.decl.fields) {
 					var f:String = field.name;
 
@@ -1077,7 +1089,10 @@ class Scripted {
 								continue;
 							}
 
-							__interp.locals.get(f).r = __interp.buildFunction(f, fun.args, fun.expr, fun.ret, superLocals);
+							/** A backend that compiled this method hands back a closure bound to this instance. */
+							var __compiled:Dynamic = t.boundMember(f, this);
+							__interp.locals.get(f).r = __compiled != null ? __compiled : __interp.buildFunction(f, fun.args, fun.expr, fun.ret,
+								superLocals);
 
 						case KVar(v):
 							if (__interp.locals.exists(f)) {
@@ -1095,8 +1110,11 @@ class Scripted {
 					superLocals.set(f, __interp.locals.get(f));
 				}
 
-				if (isSuper)
-					__interp.locals.set('super', {r: hxscript.runtime.Reference.RSuper(superLocals, constructor ?? __constructSuper)});
+				if (isSuper) {
+					var __superRef:hxscript.runtime.Variable = {r: hxscript.runtime.Reference.RSuper(superLocals, constructor ?? __constructSuper)};
+					__interp.locals.set('super', __superRef);
+					__vars.set('super', __superRef);
+				}
 			}
 
 			/**

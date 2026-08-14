@@ -609,8 +609,9 @@ class Runtime {
 
 	public static function fetch(o:Dynamic, name:Dynamic, site:Dynamic):Dynamic {
 		if (o is IScriptedInstance) {
+			var cell:Slot = cast site;
 			var inst:IScriptedInstance = cast o;
-			var held:Null<Variable> = (site.owner == inst) ? site.held : remember(inst, name, site);
+			var held:Null<Variable> = (cell.owner == inst) ? cell.held : remember(inst, name, cell);
 
 			if (held != null)
 				return held.a != null ? held.a : held.r;
