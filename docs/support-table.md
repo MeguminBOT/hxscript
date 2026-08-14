@@ -10,9 +10,9 @@ None. Every case with a written answer produced it in every column that ran it.
 
 ## Compiled against interpreted, per target
 
-**cppia** against `cpp-interp`: 303 agree, **0 differ**, 0 refused, 0 fell back to the interpreter, 9 killed the process.
+**cppia** against `cpp-interp`: 303 agree, **0 differ**, 9 refused, 0 fell back to the interpreter, 0 killed the process.
 
-**cppia-jit** against `cpp-interp`: 303 agree, **0 differ**, 0 refused, 0 fell back to the interpreter, 9 killed the process.
+**cppia-jit** against `cpp-interp`: 303 agree, **0 differ**, 9 refused, 0 fell back to the interpreter, 0 killed the process.
 
 **hlc-jit** against `hlc-interp`: 312 agree, **0 differ**, 0 refused, 0 fell back to the interpreter, 0 killed the process.
 
@@ -301,15 +301,15 @@ None. Every case with a written answer produced it in every column that ran it.
 | 260 | rest arguments | 6 | 6 | 6 | 6 | 6 | 6 |
 | 261 | a static extension on an unknown receiver | abab | abab | abab | abab | abab | abab |
 | 262 | a typed catch on a scripted class | caught | caught | caught | caught | caught | caught |
-| 263 | a host abstract constructed | threw Something went wrong | threw Can't cast Int to HostVec | **killed** | **killed** | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| 264 | a host abstract property | threw Something went wrong | threw Can't cast Int to HostVec | **killed** | **killed** | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| 265 | a host abstract field | threw Something went wrong | threw Can't cast Int to HostVec | **killed** | **killed** | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| 266 | a host abstract operator | threw Something went wrong | threw Can't cast Int to HostVec | **killed** | **killed** | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| 267 | a host abstract in an array | threw Something went wrong | threw Can't cast Int to HostVec | **killed** | **killed** | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| 268 | an abstract operator on a parameter | threw Something went wrong | threw Can't cast Int to HostVec | **killed** | **killed** | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| 269 | an abstract method taking its own abstract | threw Something went wrong | threw Can't cast Int to HostVec | **killed** | **killed** | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| 270 | a field of an abstract bound as a parameter | threw Something went wrong | threw Can't cast Int to HostVec | **killed** | **killed** | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
-| 271 | an abstract returned through a declared return type | threw Something went wrong | threw Can't cast Int to HostVec | **killed** | **killed** | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
+| 263 | a host abstract constructed | threw Something went wrong | threw Can't cast Int to HostVec | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
+| 264 | a host abstract property | threw Something went wrong | threw Can't cast Int to HostVec | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
+| 265 | a host abstract field | threw Something went wrong | threw Can't cast Int to HostVec | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
+| 266 | a host abstract operator | threw Something went wrong | threw Can't cast Int to HostVec | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
+| 267 | a host abstract in an array | threw Something went wrong | threw Can't cast Int to HostVec | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
+| 268 | an abstract operator on a parameter | threw Something went wrong | threw Can't cast Int to HostVec | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
+| 269 | an abstract method taking its own abstract | threw Something went wrong | threw Can't cast Int to HostVec | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
+| 270 | a field of an abstract bound as a parameter | threw Something went wrong | threw Can't cast Int to HostVec | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
+| 271 | an abstract returned through a declared return type | threw Something went wrong | threw Can't cast Int to HostVec | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | threw Can't cast Int to HostVec | threw Can't cast Int to HostVec |
 | 272 | a host static read | true | true | true | true | true | true |
 | 273 | a host static that changes | true | true | true | true | true | true |
 | 274 | a host method on a value | AB | AB | AB | AB | AB | AB |

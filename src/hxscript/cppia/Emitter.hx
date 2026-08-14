@@ -1225,6 +1225,19 @@ class Emitter {
 					return;
 				}
 
+				/**
+				 * A host abstract has no runtime class to make, and cppia does not report that: the
+				 * generated `NEW` names a type its loader cannot find and the process ends, silently
+				 * and with a success code, part way through whatever it was doing. Refusing the module
+				 * hands it to the interpreter, which fails the same construct with a message somebody
+				 * can read.
+				 *
+				 * Only a host one. An abstract a script declared is built above this, through the
+				 * constructor the batch emitted for it.
+				 */
+				if (hxscript.types.AbstractTools.resolve(cl) != null)
+					throw new Unsupported('new ' + cl + ', which is an abstract the host compiled and so has no class to make', e.pos);
+
 				var built:String = (cl == 'Map' || cl == 'haxe.ds.Map') && !typePaths.exists(cl) ? 'hxscript.runtime.AnyMap' : resolveType(cl, e.pos);
 				var wantedNew:Int = padArgs(declaredClass(built), 'new', params.length);
 				w.pos(line);
