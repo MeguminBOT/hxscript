@@ -31,7 +31,10 @@ import hxscript.hl.Bytecode.Instruction;
 import hxscript.compile.Accessors;
 import hxscript.compile.Capture;
 import hxscript.compile.Unsupported;
+import hxscript.hl.Emitted;
+import hxscript.hl.Emitted.Link;
 import hxscript.hl.TypeEntry.Field;
+import hxscript.hl.TypeEntry.Proto;
 import hxscript.syntax.Expr;
 
 /** What a batch function looks like to a caller, before or after its body has been written. */
@@ -131,6 +134,9 @@ class Emitter {
 	/** The accessors of each property, by class then name. A property is not a field. */
 	var props:StringMap<StringMap<{get:String, set:String}>>;
 
+	/** Members written `var x(null, ...)`, which nothing may read, by class then name. */
+	var unreadable:StringMap<StringMap<Bool>>;
+
 	/** The names each class declares as statics, by class. */
 	var owned:StringMap<StringMap<Bool>>;
 
@@ -207,6 +213,73 @@ class Emitter {
 	 */
 	public var bindings(default, null):Array<Binding>;
 
+	/**
+	 * The type each class of the batch is, by name.
+	 *
+	 * A class of the batch is a type this module holds: its own entry in the table, its fields laid
+	 * out after whatever it extends, and its methods in the table a virtual call dispatches through.
+	 * That is what makes a field an offset rather than a question, which is the whole of why this
+	 * exists.
+	 */
+	var shapes:StringMap<Int>;
+
+	/** Which class each of those types is, so a register's type says what it holds. */
+	var owners:Map<Int, String>;
+
+	/**
+	 * Whether what is being written is a field's starting value rather than an assignment.
+	 *
+	 * A declaration's starting value goes into storage even when a setter stands in front of it,
+	 * which is what Haxe does with the same line.
+	 */
+	var initialising:Bool = false;
+
+	/**
+	 * The method whose body is being written, or null outside one.
+	 *
+	 * Read only to keep a property's own accessor from calling itself: inside `get_x`, `x` is the
+	 * storage behind the property rather than another read of the property.
+	 */
+	var writing:Null<String> = null;
+
+	/** The global each class's own value goes in, by name. */
+	var values:StringMap<Int>;
+
+	/** Where each field sits, counting the ones the class inherits, by class then name. */
+	var slots:StringMap<StringMap<Int>>;
+
+	/** The register type of each field this batch lays out, by class then name. */
+	var slotTypes:StringMap<StringMap<Int>>;
+
+	/** How many fields each class has, counting the ones it inherits. */
+	var widths:StringMap<Int>;
+
+	/** Where each method sits in the table a virtual call goes through, by class then name. */
+	var entries:StringMap<StringMap<Int>>;
+
+	/** How many entries each class's method table has, counting the ones it inherits. */
+	var tables:StringMap<Int>;
+
+	/** The base the world already has, for each class whose chain leaves the batch. */
+	var hosts:StringMap<hl.Type>;
+
+	/** Each class of the batch, in the order they were laid out. */
+	public var emitted(default, null):Array<Emitted>;
+
+	/** Every type that stands for a class the world already has, for the loader to point at the real one. */
+	public var links(default, null):Array<Link>;
+
+	/**
+	 * What a name the script wrote refers to in the world.
+	 *
+	 * A class extending one the world has needs that class before anything can be laid out, because
+	 * where its own first field sits is decided by how many the base already has. Only a host can
+	 * answer that, so the answer is handed in rather than worked out here.
+	 */
+	public dynamic function world(name:String):Dynamic {
+		return null;
+	}
+
 	var tVoid:Int;
 	var tI32:Int;
 	var tF64:Int;
@@ -229,6 +302,7 @@ class Emitter {
 		bases = new StringMap();
 		opened = new StringMap();
 		props = new StringMap();
+		unreadable = new StringMap();
 		owned = new StringMap();
 		memberTypes = new StringMap();
 		declared = new StringMap();
@@ -241,6 +315,17 @@ class Emitter {
 		collector = null;
 		traps = 0;
 		bindings = [];
+		shapes = new StringMap();
+		owners = new Map();
+		values = new StringMap();
+		slots = new StringMap();
+		slotTypes = new StringMap();
+		widths = new StringMap();
+		entries = new StringMap();
+		tables = new StringMap();
+		hosts = new StringMap();
+		emitted = [];
+		links = [];
 
 		tVoid = module.prim(HVoid);
 		tI32 = module.prim(HI32);
@@ -289,6 +374,23 @@ class Emitter {
 			}
 		}
 
+		/**
+		 * Every class takes its place in the type table before any of them is shaped, because a
+		 * method takes its own class as its first argument and there is no shaping one of those
+		 * without an index to give it.
+		 */
+		for (decl in decls) {
+			switch (decl.d) {
+				case DClass(c):
+					if (!shapes.exists(c.name)) {
+						var held:Int = module.reserveType();
+						shapes.set(c.name, held);
+						owners.set(held, c.name);
+					}
+				case _:
+			}
+		}
+
 		for (decl in decls) {
 			switch (decl.d) {
 				case DClass(c):
@@ -296,20 +398,85 @@ class Emitter {
 				case _:
 			}
 		}
+
+		/**
+		 * Laid out base first, whatever order they were written in. Where a class's own first field
+		 * sits is decided by how many its base has, so a base laid out afterwards is a base that was
+		 * counted as empty.
+		 */
+		for (c in ordered(decls))
+			layout(c, decl(decls, c));
 	}
 
 	/**
-	 * Declares everything a class offers, without giving it a shape of its own.
+	 * @param decls The batch's declarations.
+	 * @return Its classes, each after whatever of the batch it extends.
+	 */
+	function ordered(decls:Array<ModuleDecl>):Array<ClassDecl> {
+		var pending:Array<ClassDecl> = [];
+
+		for (decl in decls) {
+			switch (decl.d) {
+				case DClass(c):
+					pending.push(c);
+				case _:
+			}
+		}
+
+		var done:StringMap<Bool> = new StringMap();
+		var out:Array<ClassDecl> = [];
+
+		while (pending.length > 0) {
+			var moved:Bool = false;
+			var left:Array<ClassDecl> = [];
+
+			for (c in pending) {
+				var base:Null<String> = bases.get(c.name);
+
+				if (base == null || done.exists(base)) {
+					done.set(c.name, true);
+					out.push(c);
+					moved = true;
+				} else {
+					left.push(c);
+				}
+			}
+
+			pending = left;
+
+			/** A cycle is not layable out; the world refuses it too, and this stops rather than spins. */
+			if (!moved) {
+				for (c in pending)
+					out.push(c);
+				break;
+			}
+		}
+
+		return out;
+	}
+
+	/** @return Where a class was written, for a refusal that has to say so. */
+	function decl(decls:Array<ModuleDecl>, c:ClassDecl):Position {
+		for (entry in decls) {
+			switch (entry.d) {
+				case DClass(other) if (other == c):
+					return entry.pos;
+				case _:
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Declares everything a class offers: what its names mean, and the shape of every body in it.
 	 *
-	 * **A class of the batch is not a type this module holds.** Its instances are the interpreter's,
-	 * made by the world and carrying everything a scripted instance carries, and what is written here
-	 * is only the bodies of its methods. So there are no fields to lay out and no protos to declare:
-	 * an instance method takes the instance as an ordinary dynamic first argument, exactly as a
-	 * function taking any other host value would.
+	 * **A class of the batch is a type this module holds**, and `layout` is what lays it out. What is
+	 * settled here is the part a body has to know before it can be written: which names are its
+	 * fields, which are its statics, which are properties, and what each of its methods looks like.
 	 *
-	 * That is what makes `super`, `is`, and an override reached from a base-typed reference mean the
-	 * same thing compiled as interpreted. A module that made its own objects could answer none of
-	 * those about the world's, because the two were never the same object.
+	 * A method takes its own class as its first argument rather than a dynamic, which is what lets a
+	 * field of it be an offset and a call to it go through the method table.
 	 *
 	 * A function that declares no return type still returns something, unless it is a constructor.
 	 * Reading it as `Void` would compile away the value it hands back.
@@ -321,10 +488,14 @@ class Emitter {
 		var statics:StringMap<Bool> = new StringMap();
 		var own:StringMap<Bool> = new StringMap();
 		var types:StringMap<Int> = new StringMap();
+		var closed:StringMap<Bool> = new StringMap();
 
 		for (f in c.fields) {
 			switch (f.kind) {
 				case KVar(v):
+					if (!isStatic(f) && v.get == 'null')
+						closed.set(f.name, true);
+
 					if (isStatic(f))
 						statics.set(f.name, true);
 					else if (!property(v))
@@ -344,6 +515,7 @@ class Emitter {
 
 		members.set(c.name, own);
 		props.set(c.name, accessors);
+		unreadable.set(c.name, closed);
 		owned.set(c.name, statics);
 		memberTypes.set(c.name, types);
 
@@ -366,7 +538,7 @@ class Emitter {
 			var args:Array<Int> = [];
 
 			if (!isStatic(f))
-				args.push(tDyn);
+				args.push(shapes.get(c.name));
 
 			/**
 			 * An argument that may be left out is typed dynamic whatever it was declared as, because
@@ -402,6 +574,357 @@ class Emitter {
 
 			signatures.set(c.name + (isStatic(f) ? '.' : '#') + f.name, sig);
 		}
+
+	}
+
+	/**
+	 * Lays a class out: what it extends, where each of its fields sits, and where each of its methods
+	 * sits in the table a virtual call goes through.
+	 *
+	 * A base of the batch is another entry here and needs nothing but its own numbers. A base the
+	 * world already has is a bare entry the loader points at the real class, and how many fields and
+	 * methods that class has is asked of the world, because nothing in a script says.
+	 *
+	 * @param c The class.
+	 * @param pos Where it was written.
+	 * @throws Unsupported If it extends something the world cannot be asked about.
+	 */
+	function layout(c:ClassDecl, pos:Position):Void {
+		var base:Null<String> = baseName(c.extend);
+		var inBatch:Null<String> = bases.get(c.name);
+		var host:Null<hl.Type> = null;
+
+		var inherited:Int = 0;
+		var table:Int = 0;
+		var baseType:Int = -1;
+
+		if (inBatch != null) {
+			inherited = widths.get(inBatch);
+			table = tables.get(inBatch);
+			baseType = shapes.get(inBatch);
+		} else if (base != null) {
+			host = hostShape(base, pos);
+			hosts.set(c.name, host);
+
+			baseType = module.reserveType();
+			module.defineType(baseType, TObj(module.stringId(base), [], [], -1, 0));
+			links.push({at: baseType, host: base});
+
+			inherited = Loader.fieldCount(host);
+			table = Loader.protoCount(host);
+
+			if (inherited < 0 || table < 0)
+				throw new Unsupported('extends ' + base + ', which the world could not be asked about', pos);
+		}
+
+		var fields:Array<Field> = [];
+		var index:StringMap<Int> = new StringMap();
+		var kinds:StringMap<Int> = new StringMap();
+		var at:Int = inherited;
+
+		for (f in c.fields) {
+			if (isStatic(f) || f.name == 'new')
+				continue;
+
+			switch (f.kind) {
+				case KVar(v):
+					/**
+					 * A name the base already has is the same field, not a second one. The
+					 * interpreter writes the base's when it sees this, and two fields of one name
+					 * would be two answers to every read of it.
+					 */
+					if (host != null && Loader.declares(host, f.name))
+						continue;
+
+					/**
+					 * A property whose reads and writes are both accessors has no storage of its
+					 * own, so nothing here holds one either. Laying a field out for it would make
+					 * reflection answer with the storage that is not supposed to exist, where the
+					 * interpreter answers with nothing. `@:isVar` says it does keep one after all,
+					 * which is the whole of what that metadata is for.
+					 */
+					if (property(v) && !stored(f))
+						continue;
+
+					fields.push({name: module.stringId(f.name), type: typeOf(v.type)});
+					index.set(f.name, at);
+					kinds.set(f.name, typeOf(v.type));
+					at++;
+
+				case KFunction(_):
+			}
+		}
+
+		var protos:Array<Proto> = [];
+		var entry:StringMap<Int> = new StringMap();
+		var methods:Map<String, Int> = new Map();
+
+		for (f in c.fields) {
+			if (isStatic(f) || f.name == 'new')
+				continue;
+
+			switch (f.kind) {
+				case KFunction(_):
+					var sig:Null<Signature> = signatures.get(c.name + '#' + f.name);
+					if (sig == null)
+						continue;
+
+					var seat:Int = inheritedEntry(inBatch, host, f.name);
+					if (seat < 0)
+						seat = table++;
+
+					protos.push({name: module.stringId(f.name), findex: sig.findex, pindex: seat});
+					entry.set(f.name, seat);
+					methods.set(f.name, sig.findex);
+
+				case KVar(_):
+			}
+		}
+
+		widths.set(c.name, at);
+		tables.set(c.name, table);
+		slots.set(c.name, index);
+		slotTypes.set(c.name, kinds);
+		entries.set(c.name, entry);
+
+		inherit(c, inBatch, host);
+
+		var global:Int = module.global(tDyn);
+		values.set(c.name, global);
+
+		module.defineType(shapes.get(c.name), TObj(module.stringId(pathOf(c.name)), fields, protos, baseType, global + 1));
+
+		emitted.push({
+			name: c.name,
+			path: pathOf(c.name),
+			type: shapes.get(c.name),
+			global: global,
+			construct: builderOf(c),
+			host: inBatch == null ? base : null,
+			base: inBatch,
+			methods: methods
+		});
+	}
+
+	/**
+	 * Gives a class that wrote no constructor one of its own.
+	 *
+	 * Its fields have starting values and something has to put them there, and a class with a base
+	 * inherits that base's constructor, so it takes what the base's takes and hands it straight on.
+	 * Taking the arguments one by one rather than collecting them is what lets it be called the same
+	 * way any other constructor is, by a script or by the world's own `Type.createInstance`.
+	 *
+	 * @param c The class.
+	 * @param inBatch The base of the batch it extends, or null.
+	 * @param host The base the world already has, or null.
+	 */
+	function inherit(c:ClassDecl, inBatch:Null<String>, host:Null<hl.Type>):Void {
+		if (signatures.exists(c.name + '#new'))
+			return;
+
+		var takes:Int = 0;
+
+		if (inBatch != null) {
+			var above:Null<Signature> = signatures.get(inBatch + '#new');
+			takes = above == null ? 0 : above.args.length - 1;
+		} else if (host != null) {
+			takes = hostArity(c.extend);
+		}
+
+		var args:Array<Int> = [shapes.get(c.name)];
+		for (i in 0...takes)
+			args.push(tDyn);
+
+		signatures.set(c.name + '#new', {
+			findex: module.reserve(),
+			args: args,
+			ret: tVoid,
+			type: module.typeId(TFun(args, tVoid)),
+			rest: false
+		});
+	}
+
+	/**
+	 * @param base A class the world already has, as the script wrote it.
+	 * @return How many arguments its constructor takes, not counting the instance, or 0 when it has
+	 *         no constructor at all.
+	 */
+	function hostArity(base:Null<CType>):Int {
+		var named:Null<String> = baseName(base);
+		var found:Dynamic = named == null ? null : world(named);
+
+		if (found == null)
+			return 0;
+
+		var builds:Dynamic = (cast found : hl.BaseType.Class).__constructor__;
+		if (builds == null)
+			return 0;
+
+		var taken:Int = hl.Type.getDynamic(builds).getArgsCount() - 1;
+		return taken < 0 ? 0 : taken;
+	}
+
+	/**
+	 * @param name A class the script extends that this batch did not declare.
+	 * @param pos Where the extending class was written.
+	 * @return The world's type for it.
+	 * @throws Unsupported If the world has no such class, or answers with a scripted one this batch
+	 *         cannot see, since either way there is nothing to lay the subclass out against.
+	 */
+	function hostShape(name:String, pos:Position):hl.Type {
+		var found:Dynamic = world(name);
+
+		if (found == null)
+			throw new Unsupported('extends ' + name + ', which nothing at runtime answers to', pos);
+
+		if (!(found is Class))
+			throw new Unsupported('extends ' + name + ', which is not a class this can extend', pos);
+
+		var known:Null<hl.Type> = (cast found : hl.BaseType).__type__;
+
+		if (known == null)
+			throw new Unsupported('extends ' + name + ', which is not laid out as a class', pos);
+
+		return known;
+	}
+
+	/**
+	 * @param inBatch The base of the batch, or null.
+	 * @param host The base the world already has, or null.
+	 * @param name A method name.
+	 * @return Where the base already keeps that method, or -1 when nothing up the chain has it.
+	 */
+	function inheritedEntry(inBatch:Null<String>, host:Null<hl.Type>, name:String):Int {
+		var at:Null<String> = inBatch;
+
+		while (at != null) {
+			var known:Null<StringMap<Int>> = entries.get(at);
+			if (known != null && known.exists(name))
+				return known.get(name);
+
+			at = bases.get(at);
+		}
+
+		var above:Null<hl.Type> = host != null ? host : rootHost(inBatch);
+		return above == null ? -1 : Loader.protoAt(above, name);
+	}
+
+	/** @return The base the world has at the end of a class's chain, or null when the chain ends here. */
+	function rootHost(cls:Null<String>):Null<hl.Type> {
+		var at:Null<String> = cls;
+
+		while (at != null) {
+			if (hosts.exists(at))
+				return hosts.get(at);
+
+			at = bases.get(at);
+		}
+
+		return null;
+	}
+
+	/** @return The index of the function that fills a new instance of a class. */
+	function builderOf(c:ClassDecl):Int {
+		var sig:Null<Signature> = signatures.get(c.name + '#new');
+		return sig == null ? -1 : sig.findex;
+	}
+
+	/** @return A class of the batch written the way the world resolves it. */
+	function pathOf(cls:String):String {
+		return pack.length > 0 ? pack + '.' + cls : cls;
+	}
+
+	/**
+	 * @param e An expression.
+	 * @return The class of the batch it is held as, or null when its register is not one.
+	 */
+	function heldAs(e:Expr):Null<String> {
+		return owners.get(infer(e));
+	}
+
+	/**
+	 * Where a field of a class this batch laid out sits, and what it holds.
+	 *
+	 * Only a field the batch itself declared, and only when the receiver is held as the class that
+	 * declares it. Anything else keeps going through the world's own reader, because a field of a
+	 * base the world owns is at an offset only the world knows and a receiver held as a dynamic is
+	 * one whose class is not settled until it runs.
+	 *
+	 * @param obj What is being read from.
+	 * @param name The field.
+	 * @return Its position and register type, or null when this is not that.
+	 */
+	function laidOut(obj:Expr, name:String):Null<{at:Int, of:Int}> {
+		var cls:Null<String> = heldAs(obj);
+		if (cls == null)
+			return null;
+
+		var at:Null<String> = cls;
+
+		while (at != null) {
+			/** A property is not a field, whatever storage stands behind it: reading one is a call. */
+			var accessors:Null<StringMap<{get:String, set:String}>> = props.get(at);
+			if (!initialising && accessors != null && accessors.exists(name))
+				return null;
+
+			var here:Null<StringMap<Int>> = slots.get(at);
+			if (here != null && here.exists(name))
+				return {at: here.get(name), of: slotTypes.get(at).get(name)};
+
+			at = bases.get(at);
+		}
+
+		return null;
+	}
+
+	/**
+	 * @param obj What is being read from.
+	 * @param name The field.
+	 * @return What that field holds, or null when this batch did not lay it out.
+	 */
+	function fieldType(obj:Expr, name:String):Null<Int> {
+		var here:Null<{at:Int, of:Int}> = laidOut(obj, name);
+		return here == null ? null : here.of;
+	}
+
+	/**
+	 * Where a method of a class this batch laid out sits in the table a virtual call goes through.
+	 *
+	 * @param cls The class it is called on.
+	 * @param name The method.
+	 * @return Its position, or null when nothing of the batch declares it.
+	 */
+	function seatOf(cls:String, name:String):Null<Int> {
+		var at:Null<String> = cls;
+
+		while (at != null) {
+			var here:Null<StringMap<Int>> = entries.get(at);
+			if (here != null && here.exists(name))
+				return here.get(name);
+
+			at = bases.get(at);
+		}
+
+		return null;
+	}
+
+	/**
+	 * @param cls A class of the batch.
+	 * @param name A method.
+	 * @return Its shape, taken from whichever class up the chain declares it.
+	 */
+	function methodOf(cls:String, name:String):Null<Signature> {
+		var at:Null<String> = cls;
+
+		while (at != null) {
+			var sig:Null<Signature> = signatures.get(at + '#' + name);
+			if (sig != null)
+				return sig;
+
+			at = bases.get(at);
+		}
+
+		return null;
 	}
 
 	/**
@@ -419,6 +942,8 @@ class Emitter {
 			switch (decl.d) {
 				case DClass(c):
 					owning = c.name;
+					var wrote:Bool = false;
+
 					for (f in c.fields) {
 						switch (f.kind) {
 							case KFunction(fn):
@@ -426,11 +951,24 @@ class Emitter {
 								var sig:Null<Signature> = signatures.get(key);
 								if (sig == null)
 									throw new Unsupported(key + ', whose signature this cannot express', decl.pos);
-								emitFunction(sig, fn, decl.pos, isStatic(f) ? null : c.name);
+
+								writing = f.name;
+
+								if (f.name == 'new') {
+									wrote = true;
+									emitFunction(sig, fn, decl.pos, c.name, starting(c));
+								} else {
+									emitFunction(sig, fn, decl.pos, isStatic(f) ? null : c.name);
+								}
+
+								writing = null;
 
 							case KVar(_):
 						}
 					}
+
+					if (!wrote)
+						emitInherited(c, decl.pos);
 
 				case DPackage(_) | DImport(_, _) | DUsing(_) | DEnum(_) | DAbstract(_) | DInterface(_) | DTypedef(_) | DField(_):
 
@@ -443,6 +981,101 @@ class Emitter {
 	/** @return The module, once every body has been written. */
 	public function finish():Bytecode {
 		return module;
+	}
+
+	/**
+	 * @param c A class.
+	 * @return Its own fields that were written with a starting value, in the order they were written.
+	 */
+	function starting(c:ClassDecl):Array<{name:String, value:Expr}> {
+		var found:Array<{name:String, value:Expr}> = [];
+
+		for (f in c.fields) {
+			if (isStatic(f) || f.name == 'new')
+				continue;
+
+			switch (f.kind) {
+				case KVar(v) if (v.expr != null):
+					found.push({name: f.name, value: v.expr});
+				case _:
+			}
+		}
+
+		return found;
+	}
+
+	/**
+	 * Writes the constructor of a class that did not declare one.
+	 *
+	 * It puts the class's own fields where their declarations said, then hands everything it was
+	 * called with to the base, which is what the interpreter does when it finds no `new`: a class
+	 * with a base inherits the base's constructor, and one without has nothing left to do.
+	 *
+	 * @param c The class.
+	 * @param pos Where it was written.
+	 */
+	function emitInherited(c:ClassDecl, pos:Position):Void {
+		var sig:Null<Signature> = signatures.get(c.name + '#new');
+		if (sig == null)
+			return;
+
+		ops = [];
+		regs = [];
+		scopes = [];
+		breaks = [];
+		continues = [];
+		returns = sig.ret;
+		inside = c.name;
+		traps = 0;
+
+		push();
+
+		regs.push(sig.args[0]);
+		scopes[scopes.length - 1].set('this', 0);
+
+		for (i in 1...sig.args.length)
+			regs.push(sig.args[i]);
+
+		fillFields(starting(c), pos);
+
+		if (c.extend != null) {
+			var given:Int = reg(tDyn);
+			callSupport('array', [], given);
+
+			for (i in 1...sig.args.length)
+				callSupport('push', [given, i], reg(tDyn));
+
+			callSupport('superNew', [dynOf(thisExpr(pos)), named(owningPath()), given], reg(tVoid));
+		}
+
+		var empty:Int = reg(tVoid);
+		ops.push({op: ORet, args: [empty]});
+
+		pop();
+
+		module.add({type: sig.type, findex: sig.findex, regs: regs, ops: ops});
+	}
+
+	/**
+	 * Writes a class's own field initialisers.
+	 *
+	 * Straight into the field even when a setter stands in front of it, because a declaration's
+	 * starting value is storage rather than an assignment, which is what Haxe does with the same
+	 * line and what the interpreter does when it binds the slot.
+	 *
+	 * @param inits The fields and what they start as.
+	 * @param pos Where the class was written.
+	 */
+	function fillFields(inits:Array<{name:String, value:Expr}>, pos:Position):Void {
+		if (inits.length == 0)
+			return;
+
+		initialising = true;
+
+		for (init in inits)
+			setField(thisExpr(pos), init.name, Accessors.apply(init.value), pos);
+
+		initialising = false;
 	}
 
 	/** @return The reserved index of a batch function, or null when there is none. */
@@ -557,8 +1190,9 @@ class Emitter {
 	 * @param fn Its declaration.
 	 * @param pos Where it appears.
 	 * @param host The class it belongs to, or null when it is a static.
+	 * @param inits Fields to put their starting values in first, for a constructor.
 	 */
-	function emitFunction(sig:Signature, fn:FunctionDecl, pos:Position, ?host:String):Void {
+	function emitFunction(sig:Signature, fn:FunctionDecl, pos:Position, ?host:String, ?inits:Array<{name:String, value:Expr}>):Void {
 		ops = [];
 		regs = [];
 		scopes = [];
@@ -602,6 +1236,9 @@ class Emitter {
 		 * The accessor rewrite runs before the capture pass and not inside the emitter, because an
 		 * accessor that names its own property captures it, which leaves no identifier to rewrite.
 		 */
+		if (inits != null)
+			fillFields(inits, pos);
+
 		var boxing = Capture.transform(fn.args, Accessors.apply(fn.expr));
 		for (name in boxing.boxedArgs) {
 			var cell:Int = lookup(name);
@@ -1459,11 +2096,35 @@ class Emitter {
 				callSupport('superNew', [dynOf(thisExpr(pos)), named(owningPath()), gathered(params)], slot);
 				return;
 
+			/**
+			 * A method of a class this batch laid out goes through the method table, which is one
+			 * indirect call rather than a lookup by name and an argument array to unpack.
+			 */
+			case EField(obj, name, _):
+				var cls:Null<String> = heldAs(obj);
+				var seat:Null<Int> = cls == null ? null : seatOf(cls, name);
+				var sig:Null<Signature> = cls == null ? null : methodOf(cls, name);
+
+				if (seat != null && sig != null && fits(sig, params, true)) {
+					var held:Int = reg(infer(obj));
+					into(obj, held);
+					emitDeclared(sig, held, params, slot, pos, seat);
+					return;
+				}
+
 			case _:
 		}
 
 		var own:Null<String> = selfCall(callee);
 		if (own != null) {
+			var here:Null<Int> = inside == null ? null : seatOf(inside, own);
+			var mine:Null<Signature> = inside == null ? null : methodOf(inside, own);
+
+			if (here != null && mine != null && fits(mine, params, true)) {
+				emitDeclared(mine, -1, params, slot, pos, here);
+				return;
+			}
+
 			callSupport('dispatch', [dynOf(thisExpr(pos)), named(own), gathered(params), siteSlot()], slot);
 			return;
 		}
@@ -1498,50 +2159,74 @@ class Emitter {
 			return;
 		}
 
+		emitDeclared(sig, -1, params, slot, pos);
+	}
+
+	/**
+	 * Writes a call to a function this batch declared, by index.
+	 *
+	 * @param sig What it looks like.
+	 * @param receiver A register holding the instance, or -1 when it takes none.
+	 * @param params The arguments as written, not counting the receiver.
+	 * @param slot Where to leave the result.
+	 * @param pos Where the call was written.
+	 * @throws Unsupported If it was given more arguments than it declares.
+	 */
+	function emitDeclared(sig:Signature, receiver:Int, params:Array<Expr>, slot:Int, pos:Position, seat:Int = -1):Void {
+		var first:Int = receiver >= 0 ? 1 : 0;
+		var taken:Int = sig.args.length - first;
+
 		/**
 		 * Everything past the last declared argument is gathered into it, when that argument is the
 		 * one that collects. `total(1, 2, 3)` against `total(...rest:Int)` is one call with one
 		 * argument holding three values, and without this it read as three arguments to a function
 		 * that takes one and refused the module.
 		 */
-		var gathered:Int = sig.rest ? gatherArgs(params, sig.args.length - 1) : -1;
+		var gathered:Int = sig.rest ? gatherArgs(params, taken - 1) : -1;
 
-		if (gathered < 0 && params.length > sig.args.length)
-			throw new Unsupported('a call given ' + params.length + ' of its ' + sig.args.length + ' arguments', pos);
+		if (gathered < 0 && params.length > taken)
+			throw new Unsupported('a call given ' + params.length + ' of its ' + taken + ' arguments', pos);
 
 		var landed:Int = regs[slot] == sig.ret ? slot : reg(sig.ret);
-		var args:Array<Int> = [landed, sig.findex];
+		var given:Array<Int> = [];
 
-		var fixed:Int = gathered >= 0 ? sig.args.length - 1 : params.length;
+		var fixed:Int = gathered >= 0 ? taken - 1 : params.length;
 
 		for (i in 0...fixed) {
-			var holder:Int = reg(sig.args[i]);
+			var holder:Int = reg(sig.args[i + first]);
 			into(params[i], holder);
-			args.push(holder);
+			given.push(holder);
 		}
 
 		if (gathered >= 0) {
-			args.push(gathered);
-			ops.push({op: callFor(sig.args.length), args: args});
-
-			if (landed != slot)
-				move(landed, slot);
-
-			return;
+			given.push(gathered);
+		} else {
+			/**
+			 * A null for each argument the call left off, which is what an omitted optional is. Its
+			 * register is dynamic because `shape` made it one for exactly this, so there is somewhere
+			 * for the null to go, and the body turns it into the declared default if it has one.
+			 */
+			for (i in params.length...taken) {
+				var empty:Int = reg(sig.args[i + first]);
+				ops.push({op: ONull, args: [empty]});
+				given.push(empty);
+			}
 		}
 
 		/**
-		 * A null for each argument the call left off, which is what an omitted optional is. Its
-		 * register is dynamic because `shape` made it one for exactly this, so there is somewhere for
-		 * the null to go, and the body turns it into the declared default if it has one.
+		 * Through the method table when the class has one for it, which is what makes an override
+		 * reached through a base-typed reference run the override. By index otherwise, which is
+		 * every static and every constructor, none of which is virtual.
 		 */
-		for (i in params.length...sig.args.length) {
-			var empty:Int = reg(sig.args[i]);
-			ops.push({op: ONull, args: [empty]});
-			args.push(empty);
-		}
+		var args:Array<Int> = [landed, seat >= 0 ? seat : sig.findex];
 
-		ops.push({op: callFor(sig.args.length), args: args});
+		if (receiver >= 0)
+			args.push(receiver);
+
+		for (g in given)
+			args.push(g);
+
+		ops.push({op: seat < 0 ? callFor(sig.args.length) : (receiver >= 0 ? OCallMethod : OCallThis), args: args});
 
 		if (landed != slot)
 			move(landed, slot);
@@ -1876,6 +2561,23 @@ class Emitter {
 			return;
 		}
 
+		/**
+		 * A class of the batch is allocated here rather than asked of the world, because this module
+		 * holds its layout. Every one of them has a constructor, synthesised when the script wrote
+		 * none, so the field initialisers run either way.
+		 */
+		if (shapes.exists(cls)) {
+			var sig:Null<Signature> = signatures.get(cls + '#new');
+
+			if (sig != null && fits(sig, params, true)) {
+				var made:Int = reg(shapes.get(cls));
+				ops.push({op: ONew, args: [made]});
+				emitDeclared(sig, made, params, reg(tVoid), pos);
+				move(made, slot);
+				return;
+			}
+		}
+
 		var given:Int = reg(tDyn);
 		callSupport('array', [], given);
 		for (p in params)
@@ -1966,14 +2668,44 @@ class Emitter {
 	}
 
 	function getField(obj:Expr, name:String, slot:Int, pos:Position):Void {
-		var cls:Null<String> = ownerNamed(obj);
-		var reader:Null<{get:String, set:String}> = propertyOf(cls, name);
+		var cls:Null<String> = ownerNamed(obj) ?? heldAs(obj);
+
+		/**
+		 * A member written `var x(null, ...)` is unreadable, and the interpreter says so by looking
+		 * for an accessor named `null` and not finding one. Compiled code raises the same thing
+		 * rather than reading the storage, which is what cppia does with the same declaration.
+		 */
+		if (restricted(cls, name)) {
+			callSupport('raise', [named('This expression cannot be accessed for reading')], landing(slot));
+			return;
+		}
+
+		var reader:Null<{get:String, set:String}> = writing == 'get_' + name ? null : propertyOf(cls, name);
 
 		if (reader != null) {
 			if (reader.get != 'get')
 				throw new Unsupported('reading ' + name + ', which is declared ' + reader.get, pos);
 
 			emitCall({e: EField(obj, 'get_' + name, false), pos: pos}, [], slot, pos);
+			return;
+		}
+
+		/**
+		 * A field of a class this batch laid out is one instruction, because where it sits was
+		 * decided when the class was written rather than being asked for at every read.
+		 */
+		var here:Null<{at:Int, of:Int}> = laidOut(obj, name);
+
+		if (here != null) {
+			var held:Int = reg(infer(obj));
+			into(obj, held);
+
+			var got:Int = regs[slot] == here.of ? slot : reg(here.of);
+			ops.push({op: OField, args: [got, held, here.at]});
+
+			if (got != slot)
+				move(got, slot);
+
 			return;
 		}
 
@@ -2004,8 +2736,8 @@ class Emitter {
 
 	/** Writes a field write, by name and through the world, for the reasons `getField` gives. */
 	function setField(obj:Expr, name:String, value:Expr, pos:Position):Void {
-		var cls:Null<String> = ownerNamed(obj);
-		var writer:Null<{get:String, set:String}> = propertyOf(cls, name);
+		var cls:Null<String> = ownerNamed(obj) ?? heldAs(obj);
+		var writer:Null<{get:String, set:String}> = (initialising || writing == 'set_' + name) ? null : propertyOf(cls, name);
 
 		if (writer != null) {
 			if (writer.set != 'set')
@@ -2013,6 +2745,20 @@ class Emitter {
 
 			var discard:Int = reg(tDyn);
 			emitCall({e: EField(obj, 'set_' + name, false), pos: pos}, [value], discard, pos);
+			return;
+		}
+
+		/** The same instruction the read is, for the same reason. */
+		var here:Null<{at:Int, of:Int}> = laidOut(obj, name);
+
+		if (here != null) {
+			var into:Int = reg(infer(obj));
+			this.into(obj, into);
+
+			var written:Int = reg(here.of);
+			this.into(value, written);
+
+			ops.push({op: OSetField, args: [into, here.at, written]});
 			return;
 		}
 
@@ -2295,6 +3041,15 @@ class Emitter {
 			return;
 		}
 
+		/**
+		 * A class of the batch held as one of its bases is the same pointer, so it moves. The other
+		 * way is a real question and is asked, which is what `cast` means.
+		 */
+		if (instance(a) && instance(b)) {
+			ops.push({op: derives(owners.get(a), owners.get(b)) ? OMov : OSafeCast, args: [to, from]});
+			return;
+		}
+
 		if (a == tDyn) {
 			if (b == tI32)
 				callSupport('toInt', [from], to);
@@ -2449,7 +3204,18 @@ class Emitter {
 		if (from == to)
 			return;
 
-		ops.push({op: regs[from] == regs[to] ? OMov : OSafeCast, args: [to, from]});
+		if (regs[from] == regs[to]) {
+			ops.push({op: OMov, args: [to, from]});
+			return;
+		}
+
+		/** An instance is a pointer the VM already carries as a dynamic, so it moves rather than casts. */
+		if (instance(regs[from]) && regs[to] == tDyn) {
+			ops.push({op: OMov, args: [to, from]});
+			return;
+		}
+
+		ops.push({op: OSafeCast, args: [to, from]});
 	}
 
 	/** @return A fresh register of the given type. */
@@ -2561,16 +3327,19 @@ class Emitter {
 			case EBinop(_, a, b):
 				var l:Int = infer(a);
 				var r:Int = infer(b);
-				(l == tDyn || r == tDyn) ? tDyn : widest(l, r);
+				(l == tDyn || r == tDyn || instance(l) || instance(r)) ? tDyn : widest(l, r);
 
 			case ETernary(_, yes, no):
 				var l:Int = infer(yes);
 				var r:Int = infer(no);
 				l == r ? l : ((l == tI32 && r == tF64) || (l == tF64 && r == tI32) ? tF64 : tDyn);
 
+			case ENew(cls, _) if (shapes.exists(cls)): shapes.get(cls);
 			case ENew(_, _): tDyn;
 
-			case EField(_, _, _): tDyn;
+			case EField(obj, name, _):
+				var held:Null<Int> = fieldType(obj, name);
+				held == null ? tDyn : held;
 
 			case ECall(callee, _):
 				if (selfCall(callee) != null) {
@@ -2632,8 +3401,39 @@ class Emitter {
 			case CTPath(['Bool'], _): tBool;
 			case CTPath(['Void'], _): tVoid;
 			case CTParent(inner): typeOf(inner);
+
+			/**
+			 * A class of the batch is a type this module holds, so something annotated with one is
+			 * held as that class rather than as a dynamic. That is what turns a field of it into an
+			 * offset and a call on it into one through the method table.
+			 */
+			case CTPath(parts, _) if (shapes.exists(parts[parts.length - 1])): shapes.get(parts[parts.length - 1]);
+
 			case _: tDyn;
 		}
+	}
+
+	/** @return Whether a register type is one of the batch's own classes. */
+	inline function instance(t:Int):Bool {
+		return owners.exists(t);
+	}
+
+	/**
+	 * @param from A class of the batch.
+	 * @param to Another.
+	 * @return Whether the first is the second, or extends it.
+	 */
+	function derives(from:String, to:String):Bool {
+		var at:Null<String> = from;
+
+		while (at != null) {
+			if (at == to)
+				return true;
+
+			at = bases.get(at);
+		}
+
+		return false;
 	}
 
 	/**
@@ -2770,6 +3570,16 @@ class Emitter {
 		}
 	}
 
+	/**
+	 * @param sig A declared shape.
+	 * @param params The arguments a call was written with.
+	 * @param member Whether the shape takes an instance first.
+	 * @return Whether the call can be made against it.
+	 */
+	function fits(sig:Signature, params:Array<Expr>, member:Bool):Bool {
+		return sig.rest || params.length <= sig.args.length - (member ? 1 : 0);
+	}
+
 	/** @return Whether the enclosing class or one of its bases declares `name` as an instance method. */
 	function isMethodOf(name:String):Bool {
 		var at:Null<String> = inside;
@@ -2850,6 +3660,38 @@ class Emitter {
 	 * One with `default` or `null` on either side does store, and is a field that happens to be
 	 * announced.
 	 */
+	/**
+	 * @param cls A class of the batch, or null.
+	 * @param name A field name.
+	 * @return Whether that class or one of its bases declared it `var name(null, ...)`.
+	 */
+	function restricted(cls:Null<String>, name:String):Bool {
+		var at:Null<String> = cls;
+
+		while (at != null) {
+			var closed:Null<StringMap<Bool>> = unreadable.get(at);
+			if (closed != null && closed.exists(name))
+				return true;
+
+			at = bases.get(at);
+		}
+
+		return false;
+	}
+
+	/** @return Whether a property was declared to keep storage behind its accessors anyway. */
+	function stored(f:FieldDecl):Bool {
+		if (f.meta == null)
+			return false;
+
+		for (m in f.meta) {
+			if (m.name == ':isVar')
+				return true;
+		}
+
+		return false;
+	}
+
 	function property(v:VarDecl):Bool {
 		if (v.get == null && v.set == null)
 			return false;
@@ -3088,7 +3930,7 @@ class Emitter {
 		var fields:Array<Field> = [for (n in seen) {name: module.stringId(n), type: tDyn}];
 
 		var envType:Int = module.reserveType();
-		module.defineType(envType, TObj(module.stringId('captured' + envType), fields, []));
+		module.defineType(envType, TObj(module.stringId('captured' + envType), fields, [], -1, 0));
 
 		var built:Int = reg(envType);
 		ops.push({op: ONew, args: [built]});
