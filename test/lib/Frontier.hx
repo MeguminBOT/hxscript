@@ -149,14 +149,16 @@ class Frontier {
 			framework is: `h3d.Vector`, `h3d.Matrix` and `h2d.col.Point` are all this shape, and between
 			them they are what every position, transform and bounds test is written in.
 
-			None of these passes. The constructor assigns to `this`, so it has nowhere to live as a
-			method, and Haxe emits it as a static `_new` on the implementation class; the generated
-			wrapper's own constructor boxes one value instead, and a script is told it cannot make a
-			`HostVec` out of a `3`.
+			All of these pass interpreted, on all three interpreters. The constructor assigns to
+			`this`, so it has nowhere to live as a method and Haxe emits it as a static `_new` on the
+			implementation class, which is what the wrapper now names and `AbstractTools` now calls.
 
-			Reaching `_new` is what the fix looks like and it is written down here rather than done,
-			because doing it took cppia's process down and answered wrong on HashLink while passing
-			every one of these interpreted. The fixture is the test bed for whoever finishes it.
+			Both compilers decline a module that constructs one, so these read as refusals rather than
+			as answers. Construction is not what is missing: a bare `@:forward` generates no member per
+			forwarded field, so `v.x` is a question asked at access time, and compiled code resolves an
+			offset and finds nothing there. Reaching a forwarded member from compiled code is what
+			would let these compile, and until then declining is what keeps them from answering 0 where
+			the interpreter answers 7.
 		*/
 		probe('a host abstract constructed', 'var v = new HostVec(3, 4); return Std.string(v);', null, 'import HostVec;');
 		probe('a host abstract property', 'var v = new HostVec(3, 4); return Std.string(v.length);', null, 'import HostVec;');
@@ -165,8 +167,9 @@ class Frontier {
 		probe('a host abstract in an array', 'var all = [new HostVec(1, 1), new HostVec(2, 2)]; return Std.string(all[1]);', null,
 			'import HostVec;');
 
-		// An operator on a value bound as a parameter rather than declared as a local, which is a
-		// second gap behind the first: it fails the same way once construction is made to work.
+		// An operator on a value bound as a parameter rather than declared as a local, which was put
+		// down as a second gap behind the first and was not one: binding keeps the wrapper, so making
+		// construction work made these work with it.
 		probe('an abstract operator on a parameter', 'return Std.string(twice(new HostVec(1, 2)));',
 			'static function twice(v:HostVec):HostVec { return v * 2; }', 'import HostVec;');
 		probe('an abstract method taking its own abstract', 'var a = new HostVec(1, 2); return Std.string(a.plus(a));', null, 'import HostVec;');

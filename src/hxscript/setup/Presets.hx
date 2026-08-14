@@ -258,10 +258,14 @@ class Presets {
 			'h3d.col.Bounds'
 		],
 		/**
-		 * `h3d.scene.Object` is deliberately not here. Its constructor inlines an abstract's own
-		 * constructor, which assigns to `this`, and a bridge has to re-emit the constructor it
-		 * extends. Scripts reach 3D by building into the scene rather than by being part of it,
-		 * which is what `world()` is for.
+		 * `h3d.scene.Object` is deliberately not here, and putting it here is answered rather than
+		 * left to fail: the build stops with the reason and the remedy, which was checked by doing it.
+		 *
+		 * A bridge re-emits the constructor of the class it extends rather than calling it, and this
+		 * one inlines an abstract's constructor, which assigns to `this` and means nothing outside
+		 * that abstract. Making it work is a change to how a bridge rebuilds a base, not a name that
+		 * can be added here. Scripts reach 3D by building into the scene rather than by being part of
+		 * it, which is what `world()` is for.
 		 */
 		bases: ['h2d.Object'],
 		abstractPackages: [],
