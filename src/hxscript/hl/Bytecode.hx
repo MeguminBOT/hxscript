@@ -201,7 +201,7 @@ class Bytecode {
 		return switch (t) {
 			case TPrim(kind): 'p' + (kind : Int);
 			case TFun(args, ret): 'f' + args.join(',') + '>' + ret;
-			case TObj(name, _, _): 'o' + name;
+			case TObj(name, _, _, _, _): 'o' + name;
 		}
 	}
 
@@ -311,11 +311,11 @@ class Bytecode {
 					w.index(a);
 				w.index(ret);
 
-			case TObj(name, fields, protos):
+			case TObj(name, fields, protos, base, global):
 				w.byte(HObj);
 				w.index(name);
-				w.index(-1);
-				w.uindex(0);
+				w.index(base);
+				w.uindex(global);
 				w.uindex(fields.length);
 				w.uindex(protos.length);
 				w.uindex(0);
@@ -328,7 +328,7 @@ class Bytecode {
 				for (p in protos) {
 					w.index(p.name);
 					w.uindex(p.findex);
-					w.index(-1);
+					w.index(p.pindex);
 				}
 		}
 	}

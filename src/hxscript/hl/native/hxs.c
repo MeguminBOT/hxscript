@@ -890,8 +890,129 @@ static bool hxs_layouts_agree( void ) {
 	return true;
 }
 
+/**
+	Points classes a module declares at bases the world already has.
+
+	Done between reading and linking, and it has to be: the jit reads a field's offset and a method's
+	table position out of the runtime object libhl builds from the whole chain, and a class whose base
+	arrives after that has every one of them wrong.
+
+	The base is the host's own hl_type, never a copy of it. Sharing the hl_type_obj instead would put
+	the host's class in this module's table, and hl_module_init writes a module context into every
+	entry there.
+*/
+static void hxs_link_bases( hl_code *code, varray *at, varray *bases ) {
+	int i, n;
+
+	if( at == NULL || bases == NULL )
+		return;
+
+	n = at->size < bases->size ? at->size : bases->size;
+
+	for(i=0;i<n;i++) {
+		int index = hl_aptr(at,int)[i];
+		hl_type *base = hl_aptr(bases,hl_type*)[i];
+
+		if( index < 0 || index >= code->ntypes || base == NULL )
+			continue;
+		if( code->types[index].kind != HOBJ || base->kind != HOBJ )
+			continue;
+
+		code->types[index].obj->super = base;
+	}
+}
+
+/** @return One of a loaded module's types, which is how the world makes a class value for it. */
+HL_PRIM hl_type *HL_NAME(type_of)( hxs_module *h, int index ) {
+	if( h == NULL || index < 0 || index >= h->code->ntypes )
+		return NULL;
+
+	return h->code->types + index;
+}
+
+/** @return How many entries a class's method table holds, which is where a method it does not have goes. */
+HL_PRIM int HL_NAME(proto_count)( hl_type *t ) {
+	if( t == NULL || t->kind != HOBJ )
+		return -1;
+
+	return hl_get_obj_rt(t)->nproto;
+}
+
+/** @return How many fields a class has, counting the ones it inherits, which is where a new one goes. */
+HL_PRIM int HL_NAME(field_count)( hl_type *t ) {
+	if( t == NULL || t->kind != HOBJ )
+		return -1;
+
+	return hl_get_obj_rt(t)->nfields;
+}
+
+/** @return Where a class keeps a method in its table, or -1 when nothing up its chain declares one. */
+HL_PRIM int HL_NAME(proto_index)( hl_type *t, vbyte *name ) {
+	hl_type_obj *o;
+	int hash;
+
+	if( t == NULL || t->kind != HOBJ )
+		return -1;
+
+	hash = hl_hash_gen((uchar*)name,true);
+
+	for(o = t->obj; o; o = o->super ? o->super->obj : NULL) {
+		int i;
+		for(i=0;i<o->nproto;i++)
+			if( o->proto[i].hashed_name == hash )
+				return o->proto[i].pindex;
+	}
+
+	return -1;
+}
+
+/**
+	@return A base's own version of a method, bound to an instance, or NULL when it has none.
+
+	What `super.method()` means: the class the script extends answers, not whatever the instance's own
+	table now points at, which is the script's override and would call itself forever.
+*/
+HL_PRIM vdynamic *HL_NAME(super_method)( hl_type *base, vdynamic *obj, vbyte *name ) {
+	hl_runtime_obj *all, *rt;
+	int hash;
+
+	if( base == NULL || base->kind != HOBJ || obj == NULL )
+		return NULL;
+
+	hash = hl_hash_gen((uchar*)name,true);
+	all = hl_get_obj_proto(base);
+
+	for(rt = all; rt; rt = rt->parent) {
+		hl_field_lookup *f = hl_lookup_find(rt->lookup,rt->nlookup,hash);
+
+		if( f && f->field_index < 0 ) {
+			void *fptr = all->methods[-f->field_index-1];
+			return fptr == NULL ? NULL : (vdynamic*)hl_alloc_closure_ptr(f->t, fptr, obj);
+		}
+	}
+
+	return NULL;
+}
+
+/** @return Whether a class up the chain declares a field of that name, which a script may not shadow. */
+HL_PRIM bool HL_NAME(has_field)( hl_type *t, vbyte *name ) {
+	hl_runtime_obj *rt;
+	int hash;
+
+	if( t == NULL || t->kind != HOBJ )
+		return false;
+
+	hash = hl_hash_gen((uchar*)name,true);
+
+	for(rt = hl_get_obj_rt(t); rt; rt = rt->parent)
+		if( hl_lookup_find(rt->lookup,rt->nlookup,hash) )
+			return true;
+
+	return false;
+}
+
 /** @return A handle on the read, linked and jitted module, or NULL; `last_error` says why. */
-HL_PRIM hxs_module *HL_NAME(load)( vbyte *data, int size ) {
+HL_PRIM hxs_module *HL_NAME(load)( vbyte *data, int size, varray *at, varray *bases ) {
 	hl_code *code;
 	hl_module *m;
 	hxs_module *h;
@@ -901,6 +1022,8 @@ HL_PRIM hxs_module *HL_NAME(load)( vbyte *data, int size ) {
 	code = hl_code_read((const unsigned char *)data, size, &hxs_last_error);
 	if( code == NULL )
 		return NULL;
+
+	hxs_link_bases(code, at, bases);
 
 	m = hl_module_alloc(code);
 	if( m == NULL ) {
@@ -986,7 +1109,31 @@ typedef struct {
 	void (*finalize)(void *);
 } hxs_module;
 
-HL_PRIM hxs_module *HL_NAME(load)( vbyte *data, int size ) {
+HL_PRIM hxs_module *HL_NAME(load)( vbyte *data, int size, varray *at, varray *bases ) {
+	return NULL;
+}
+
+HL_PRIM hl_type *HL_NAME(type_of)( hxs_module *h, int index ) {
+	return NULL;
+}
+
+HL_PRIM int HL_NAME(proto_count)( hl_type *t ) {
+	return -1;
+}
+
+HL_PRIM int HL_NAME(field_count)( hl_type *t ) {
+	return -1;
+}
+
+HL_PRIM int HL_NAME(proto_index)( hl_type *t, vbyte *name ) {
+	return -1;
+}
+
+HL_PRIM bool HL_NAME(has_field)( hl_type *t, vbyte *name ) {
+	return false;
+}
+
+HL_PRIM vdynamic *HL_NAME(super_method)( hl_type *base, vdynamic *obj, vbyte *name ) {
 	return NULL;
 }
 
@@ -1050,6 +1197,12 @@ DEFINE_PRIM(_I32, site, _I32);
 DEFINE_PRIM(_VOID, fallback, _ARR);
 DEFINE_PRIM(_I32, hash, _BYTES);
 DEFINE_PRIM(_VOID, set_global, _ABSTRACT(hxs_module) _I32 _DYN);
-DEFINE_PRIM(_ABSTRACT(hxs_module), load, _BYTES _I32);
+DEFINE_PRIM(_ABSTRACT(hxs_module), load, _BYTES _I32 _ARR _ARR);
+DEFINE_PRIM(_TYPE, type_of, _ABSTRACT(hxs_module) _I32);
+DEFINE_PRIM(_I32, proto_count, _TYPE);
+DEFINE_PRIM(_I32, field_count, _TYPE);
+DEFINE_PRIM(_I32, proto_index, _TYPE _BYTES);
+DEFINE_PRIM(_BOOL, has_field, _TYPE _BYTES);
+DEFINE_PRIM(_DYN, super_method, _TYPE _DYN _BYTES);
 DEFINE_PRIM(_I32, entry_index, _ABSTRACT(hxs_module));
 DEFINE_PRIM(_DYN, closure, _ABSTRACT(hxs_module) _I32);

@@ -160,9 +160,11 @@ class Loader {
 	 * Reads, links and jits a module.
 	 *
 	 * @param bytes The module.
+	 * @param at Which of its types stand for a class the world already has, by index.
+	 * @param bases What each of those is, in the same order.
 	 * @return It, or null when it could not be read; `error` then says why.
 	 */
-	public static function load(bytes:Bytes):Null<Loaded> {
+	public static function load(bytes:Bytes, ?at:Array<Int>, ?bases:Array<hl.Type>):Null<Loaded> {
 		if (!wired) {
 			wired = true;
 			try {
@@ -182,7 +184,69 @@ class Loader {
 			} catch (e:Dynamic) {}
 		}
 
-		return read(@:privateAccess bytes.b, bytes.length);
+		var count:Int = (at == null || bases == null) ? 0 : (at.length < bases.length ? at.length : bases.length);
+		var indexes:hl.NativeArray<Int> = new hl.NativeArray<Int>(count);
+		var supers:hl.NativeArray<hl.Type> = new hl.NativeArray<hl.Type>(count);
+
+		for (i in 0...count) {
+			indexes[i] = at[i];
+			supers[i] = bases[i];
+		}
+
+		return read(@:privateAccess bytes.b, bytes.length, indexes, supers);
+	}
+
+	/**
+	 * @param module A loaded module.
+	 * @param index One of its type-table entries.
+	 * @return That type, which is what a class value is made against.
+	 */
+	public static function typeAt(module:Loaded, index:Int):Null<hl.Type> {
+		return typeOf(module, index);
+	}
+
+	/**
+	 * @param base A class the world already has.
+	 * @return How many entries its method table holds, which is where one it does not have goes.
+	 */
+	public static function protoCount(base:hl.Type):Int {
+		return protos(base);
+	}
+
+	/**
+	 * @param base A class the world already has.
+	 * @return How many fields it has, counting the ones it inherits, which is where a new one goes.
+	 */
+	public static function fieldCount(base:hl.Type):Int {
+		return fields(base);
+	}
+
+	/**
+	 * @param base A class the world already has.
+	 * @param name A method name.
+	 * @return Where it sits in that class's method table, or -1 when nothing up its chain declares it.
+	 */
+	public static function protoAt(base:hl.Type, name:String):Int {
+		return protoOf(base, @:privateAccess name.bytes);
+	}
+
+	/**
+	 * @param base A class the world already has.
+	 * @param name A field name.
+	 * @return Whether that class, or anything it extends, already declares it.
+	 */
+	public static function declares(base:hl.Type, name:String):Bool {
+		return hasField(base, @:privateAccess name.bytes);
+	}
+
+	/**
+	 * @param base A class the world already has.
+	 * @param self An instance of something that extends it.
+	 * @param name A method name.
+	 * @return That base's own version of the method, bound to the instance, or null when it has none.
+	 */
+	public static function superMethod(base:hl.Type, self:Dynamic, name:String):Dynamic {
+		return above(base, self, @:privateAccess name.bytes);
 	}
 
 	/** Whether the runtime has been given the world's reader and writer for what it cannot resolve. */
@@ -258,7 +322,32 @@ class Loader {
 		return raw == null ? null : @:privateAccess String.fromUTF8(raw);
 	}
 
-	@:hlNative("?hxscript", "load") static function read(data:hl.Bytes, size:Int):Loaded {
+	@:hlNative("?hxscript", "load")
+	static function read(data:hl.Bytes, size:Int, at:hl.NativeArray<Int>, bases:hl.NativeArray<hl.Type>):Loaded {
+		return null;
+	}
+
+	@:hlNative("?hxscript", "type_of") static function typeOf(module:Loaded, index:Int):hl.Type {
+		return null;
+	}
+
+	@:hlNative("?hxscript", "proto_count") static function protos(base:hl.Type):Int {
+		return -1;
+	}
+
+	@:hlNative("?hxscript", "field_count") static function fields(base:hl.Type):Int {
+		return -1;
+	}
+
+	@:hlNative("?hxscript", "proto_index") static function protoOf(base:hl.Type, name:hl.Bytes):Int {
+		return -1;
+	}
+
+	@:hlNative("?hxscript", "has_field") static function hasField(base:hl.Type, name:hl.Bytes):Bool {
+		return false;
+	}
+
+	@:hlNative("?hxscript", "super_method") static function above(base:hl.Type, self:Dynamic, name:hl.Bytes):Dynamic {
 		return null;
 	}
 
