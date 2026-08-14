@@ -2,17 +2,17 @@
 # Collects one conformance column per execution mode, surviving cases that end the process.
 #
 #   sh test/lib/conformance.sh                   every mode
-#   sh test/lib/conformance.sh cppia cppia-jit   just those
-#   NOBUILD=1 sh test/lib/conformance.sh cppia   run what is already built
+#   sh test/lib/conformance.sh hxcpp-cppia hxcpp-cppia-jit   just those
+#   NOBUILD=1 sh test/lib/conformance.sh hxcpp-cppia   run what is already built
 #
 # The modes, and what each one actually is:
 #
 #   eval-interp  the tree-walking interpreter on eval, for iterating on the interpreter
-#   cpp-interp   the tree-walking interpreter on hxcpp, which is what cppia is compared against
-#   cppia        hxcpp bytecode, the JIT off
-#   cppia-jit    the same bytecode with the JIT on
-#   hlc-interp   the tree-walking interpreter inside an HL/C binary, with no loader linked
-#   hlc-jit      HashLink bytecode inside an HL/C binary, loaded and jitted
+#   hxcpp-interp   the tree-walking interpreter on hxcpp, which is what hxcpp-cppia is compared against
+#   hxcpp-cppia        hxcpp bytecode, the JIT off
+#   hxcpp-cppia-jit    the same bytecode with the JIT on
+#   hl-interp   the tree-walking interpreter inside an HL/C binary, with no loader linked
+#   hl-bytecode      HashLink bytecode inside an HL/C binary, loaded and jitted
 #
 # A column is a file of tab-separated rows under bin_test/conformance. Nothing here compares them:
 # `Table` does that, because a runner that decided what agreement meant would have to be built into
@@ -43,10 +43,10 @@ KEEP="--macro hxscript.macro.Keep.run() --macro hxscript.setup.Autowire.run() -D
 cd "$ROOT"
 mkdir -p "$OUT"
 
-# Whether this run has already built the binary cppia and cppia-jit share.
+# Whether this run has already built the binary hxcpp-cppia and hxcpp-cppia-jit share.
 CPPIA_BUILT=0
 
-ALL="eval-interp cpp-interp cppia cppia-jit hlc-interp hlc-jit"
+ALL="eval-interp hxcpp-interp hxcpp-cppia hxcpp-cppia-jit hl-interp hl-bytecode"
 MODES=${*:-$ALL}
 
 # Builds a mode, unless it shares a binary with one already built.
@@ -57,30 +57,30 @@ build() {
 		eval-interp)
 			return 0
 			;;
-		cpp-interp)
-			# The same build as `cppia` apart from the emitter, and that matters more than it looks.
+		hxcpp-interp)
+			# The same build as `hxcpp-cppia` apart from the emitter, and that matters more than it looks.
 			# Built without `-dce no` this column loses the standard-library members a script reaches
 			# by reflection, and then every row where compiled code linked one directly reads as the
 			# compiler disagreeing with the interpreter. Three rows were that and nothing else.
-			haxe $CP $KEEP -D scriptable -dce no -main ConformanceProbe -cpp "$OUT/cpp-interp"
+			haxe $CP $KEEP -D scriptable -dce no -main ConformanceProbe -cpp "$OUT/hxcpp-interp"
 			;;
-		cppia|cppia-jit)
+		hxcpp-cppia|hxcpp-cppia-jit)
 			# Built once for the two modes that share it, and once per RUN rather than once ever.
 			# Testing for the binary alone skipped the build whenever a previous run had left one,
 			# so both columns were collected from whatever the branch looked like then: the first
 			# reading taken this way was 38 rows out, every one of them a case shifted by one
 			# because the stale binary had a shorter list.
 			[ "$CPPIA_BUILT" = "1" ] && return 0
-			rm -rf "$OUT/cppia"
-			haxe $CP $KEEP -D scriptable -D hxscript_cppia -dce no -main ConformanceProbe -cpp "$OUT/cppia"
+			rm -rf "$OUT/hxcpp-cppia"
+			haxe $CP $KEEP -D scriptable -D hxscript_cppia -dce no -main ConformanceProbe -cpp "$OUT/hxcpp-cppia"
 			CPPIA_BUILT=1
 			;;
-		hlc-interp)
+		hl-interp)
 			# One argument, split on the way in. Passed as two it arrives as `-D` alone, the define
 			# is dropped, and what builds is a program with no main that prints nothing.
 			hlc "$1" "-D hxscript_no_jit"
 			;;
-		hlc-jit)
+		hl-bytecode)
 			hlc "$1"
 			;;
 		*)
@@ -119,19 +119,19 @@ hlc() {
 where() {
 	case "$1" in
 		eval-interp) echo "$ROOT" ;;
-		cpp-interp) echo "$OUT/cpp-interp" ;;
-		cppia|cppia-jit) echo "$OUT/cppia" ;;
-		hlc-interp|hlc-jit) echo "$OUT/$1" ;;
+		hxcpp-interp) echo "$OUT/hxcpp-interp" ;;
+		hxcpp-cppia|hxcpp-cppia-jit) echo "$OUT/hxcpp-cppia" ;;
+		hl-interp|hl-bytecode) echo "$OUT/$1" ;;
 	esac
 }
 
 runner() {
 	case "$1" in
 		eval-interp) echo "haxe $CP $KEEP -main ConformanceProbe --interp" ;;
-		cpp-interp) echo "./ConformanceProbe.exe" ;;
-		cppia) echo "./ConformanceProbe.exe --nojit" ;;
-		cppia-jit) echo "./ConformanceProbe.exe" ;;
-		hlc-interp|hlc-jit) echo "./main.exe" ;;
+		hxcpp-interp) echo "./ConformanceProbe.exe" ;;
+		hxcpp-cppia) echo "./ConformanceProbe.exe --nojit" ;;
+		hxcpp-cppia-jit) echo "./ConformanceProbe.exe" ;;
+		hl-interp|hl-bytecode) echo "./main.exe" ;;
 	esac
 }
 

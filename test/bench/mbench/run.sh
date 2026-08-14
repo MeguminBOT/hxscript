@@ -8,7 +8,7 @@
 # one process per case was already the rule here for the same reason the cross-library suite has it.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
-ROOT=$(cd "$HERE/../.." && pwd)
+ROOT=$(cd "$HERE/../../.." && pwd)
 BIN=${BIN:-"$ROOT/bin_mbench"}
 OUT="$BIN/results.txt"
 EXE="$BIN/MBench.exe"

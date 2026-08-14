@@ -33,14 +33,14 @@ class Conformance {
 	 *
 	 * @param ask What to do with one.
 	 */
-	public static function run(ask:Ask):Void {
+	public static function run(ask:Ask, ?section:String -> Void):Void {
 		Corpus.run(function(label:String, body:String, want:String, ?extra:String, ?before:String):Void {
 			ask(label, body, want, extra, before);
-		});
+		}, section);
 
 		Frontier.run(function(label:String, body:String, ?extra:String, ?before:String):Void {
 			ask(label, body, null, extra, before);
-		});
+		}, section);
 	}
 
 	/**

@@ -7,8 +7,8 @@ import TestCase;
  * about a static target's build. Running them beside the portable suite would mean the other eight
  * targets could not build it at all.
  *
- * The manual tools next door are deliberately not here: `CppiaBench`, `CppiaHostBench` and
- * `SwitchProbe` are timings, `CppiaDump` and `CppiaOne` print bytecode for a human to read, and
+ * The manual tools are deliberately not here: the timings live in `test/bench/cpp` and `SwitchProbe`
+ * is one too, `CppiaDump` and `CppiaOne` print bytecode for a human to read, and
  * `FieldFormProbe` walks a directory named on the command line. None of them asserts anything a
  * runner could check, and folding a 200,000-iteration timing into the suite would make it slow for
  * no signal.

@@ -11,7 +11,7 @@
 # run would lose every case after the first one that dies.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
-ROOT=$(cd "$HERE/../.." && pwd)
+ROOT=$(cd "$HERE/../../.." && pwd)
 LIBS=${LIBS:-"$ROOT/../xbench-libs"}
 BIN=${BIN:-"$ROOT/bin_xbench"}
 OUT="$BIN/results.txt"

@@ -10,17 +10,55 @@ None. Every case with a written answer produced it in every column that ran it.
 
 ## Compiled against interpreted, per target
 
-**cppia** against `cpp-interp`: 309 agree, **0 differ**, 14 refused, 0 fell back to the interpreter, 0 killed the process.
+**hl-bytecode** against `hl-interp`: 314 agree, **0 differ**, 9 refused, 0 fell back to the interpreter, 0 killed the process.
 
-**cppia-jit** against `cpp-interp`: 309 agree, **0 differ**, 14 refused, 0 fell back to the interpreter, 0 killed the process.
+**hxcpp-cppia** against `hxcpp-interp`: 309 agree, **0 differ**, 14 refused, 0 fell back to the interpreter, 0 killed the process.
 
-**hlc-jit** against `hlc-interp`: 314 agree, **0 differ**, 9 refused, 0 fell back to the interpreter, 0 killed the process.
+**hxcpp-cppia-jit** against `hxcpp-interp`: 309 agree, **0 differ**, 14 refused, 0 fell back to the interpreter, 0 killed the process.
+
+## What works, by part and by mode
+
+Each column is one target running a script one way:
+
+| column | target | how the script runs |
+| --- | --- | --- |
+| `eval-interp` | Haxe eval | tree-walking interpreter |
+| `hxcpp-interp` | hxcpp | tree-walking interpreter |
+| `hxcpp-cppia` | hxcpp | cppia bytecode, JIT off |
+| `hxcpp-cppia-jit` | hxcpp | cppia bytecode, JIT on |
+| `hl-interp` | HashLink (HL/C binary) | tree-walking interpreter |
+| `hl-bytecode` | HashLink (HL/C binary) | HashLink bytecode, jitted |
+
+`n/m` is how many of that part's cases the mode got right, and `+3r` beside it means three
+of them were refused: the module was declined and interpreted instead, which costs speed
+rather than correctness. **Bold** marks a part where something is actually wrong.
+
+| part | cases | eval-interp | hxcpp-interp | hxcpp-cppia | hxcpp-cppia-jit | hl-interp | hl-bytecode |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| basics | 23 | 23/23 | 23/23 | 23/23 | 23/23 | 23/23 | 23/23 |
+| closures | 13 | 13/13 | 13/13 | 13/13 | 13/13 | 13/13 | 13/13 |
+| enums | 22 | 22/22 | 22/22 | 22/22 | 22/22 | 22/22 | 22/22 |
+| abstracts | 11 | 11/11 | 11/11 | 11/11 | 11/11 | 11/11 | 11/11 |
+| modules | 9 | 9/9 | 9/9 | 9/9 | 9/9 | 9/9 | 9/9 |
+| fields | 13 | 13/13 | 13/13 | 13/13 | 13/13 | 13/13 | 13/13 |
+| collections | 19 | 19/19 | 19/19 | 19/19 | 19/19 | 19/19 | 19/19 |
+| stdlib | 33 | 33/33 | 33/33 | 33/33 | 33/33 | 33/33 | 33/33 |
+| matching | 8 | 8/8 | 8/8 | 8/8 | 8/8 | 8/8 | 8/8 |
+| controlflow | 13 | 13/13 | 13/13 | 13/13 | 13/13 | 13/13 | 13/13 |
+| numbers | 14 | 14/14 | 14/14 | 14/14 | 14/14 | 14/14 | 14/14 |
+| syntax | 36 | 36/36 | 36/36 | 36/36 | 36/36 | 36/36 | 36/36 |
+| inheritance | 9 | 9/9 | 9/9 | 9/9 | 9/9 | 9/9 | 9/9 |
+| shapes | 25 | 25/25 | 25/25 | 25/25 | 25/25 | 25/25 | 25/25 |
+| arguments | 6 | 6/6 | 6/6 | 6/6 | 6/6 | 6/6 | 6/6 |
+| reflection | 14 | 14/14 | 14/14 | 14/14 | 14/14 | 14/14 | 14/14 |
+| refusals | 25 | 25/25 | 25/25 | 25/25 | 25/25 | 25/25 | 25/25 |
+| host | 30 | **29/30** | 30/30 | 30/30 +14r | 30/30 +14r | 30/30 | 30/30 +9r |
 
 ## Where the interpreter itself reads differently per target
 
 2 of 323 cases. This is reachability, not semantics.
 
-| case | eval-interp | cpp-interp | hlc-interp |
+| case | eval-interp | hxcpp-interp | hl-interp |
 | --- | --- | --- | --- |
 | a host enum constructor bare after an import | None | 0 | None |
 | an abstract Map through its alias | **killed** | 1 | 1 |
@@ -28,7 +66,7 @@ None. Every case with a written answer produced it in every column that ran it.
 <details>
 <summary>Every case, every column</summary>
 
-| # | case | eval-interp | cpp-interp | cppia | cppia-jit | hlc-interp | hlc-jit |
+| # | case | eval-interp | hxcpp-interp | hxcpp-cppia | hxcpp-cppia-jit | hl-interp | hl-bytecode |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 0 | int literal | 7 | 7 | 7 | 7 | 7 | 7 |
 | 1 | arithmetic | 40 | 40 | 40 | 40 | 40 | 40 |

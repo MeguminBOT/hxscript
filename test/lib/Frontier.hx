@@ -37,13 +37,22 @@ class Frontier {
 	 *
 	 * @param probe What to do with one.
 	 */
-	public static function run(probe:Probe):Void {
+	public static function run(probe:Probe, ?section:String -> Void):Void {
+		var at:String -> Void = section == null ? function(_:String):Void {} : section;
+
+		at('numbers');
 		wholeNumbers(probe);
+		at('reflection');
 		reflection(probe);
+		at('refusals');
 		refusals(probe);
+		at('host');
 		hostReach(probe);
+		at('stdlib');
 		library(probe);
+		at('syntax');
 		language(probe);
+		at('shapes');
 		shapes(probe);
 	}
 

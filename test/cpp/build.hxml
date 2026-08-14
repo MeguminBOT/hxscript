@@ -13,6 +13,13 @@
 # configuration no consumer builds: under the default -dce std the standard-library members a
 # script reaches by reflection are stripped, and EReg loses its methods.
 --macro hxscript.macro.Keep.run()
+# The bridged base and the kept fixtures, exactly as `test/lib/conformance.sh` sets them. Without
+# them the corpus's host-property cases cannot resolve `HostBase` and report `Type not found`,
+# which is a fact about this build rather than about the library. They were added to the corpus
+# and not here, and nothing ran the whole matrix afterwards, so five cases sat failing.
+--macro hxscript.setup.Autowire.run()
+-D hxscript_bridge_types=HostBase,HostQuirk
+-D hxscript_keep=haxe.Json,haxe.ds.Option,HostVec,HostVecImpl,HostFlag,HostDial
 
 -main AllCommon
 -cpp bin_test/cpp/common
@@ -30,6 +37,13 @@
 -D hxscript_cppia
 -dce no
 --macro hxscript.macro.Keep.run()
+# The bridged base and the kept fixtures, exactly as `test/lib/conformance.sh` sets them. Without
+# them the corpus's host-property cases cannot resolve `HostBase` and report `Type not found`,
+# which is a fact about this build rather than about the library. They were added to the corpus
+# and not here, and nothing ran the whole matrix afterwards, so five cases sat failing.
+--macro hxscript.setup.Autowire.run()
+-D hxscript_bridge_types=HostBase,HostQuirk
+-D hxscript_keep=haxe.Json,haxe.ds.Option,HostVec,HostVecImpl,HostFlag,HostDial
 
 -main AllCpp
 -cpp bin_test/cpp/cppia
@@ -46,6 +60,13 @@
 -D hxscript_cppia
 -dce no
 --macro hxscript.macro.Keep.run()
+# The bridged base and the kept fixtures, exactly as `test/lib/conformance.sh` sets them. Without
+# them the corpus's host-property cases cannot resolve `HostBase` and report `Type not found`,
+# which is a fact about this build rather than about the library. They were added to the corpus
+# and not here, and nothing ran the whole matrix afterwards, so five cases sat failing.
+--macro hxscript.setup.Autowire.run()
+-D hxscript_bridge_types=HostBase,HostQuirk
+-D hxscript_keep=haxe.Json,haxe.ds.Option,HostVec,HostVecImpl,HostFlag,HostDial
 
 -main FrontierTest
 -cpp bin_test/cppia

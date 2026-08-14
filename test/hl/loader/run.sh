@@ -45,7 +45,7 @@ haxe -cp test/hl/loader -main Guest -hl "$OUT/guest.hl"
 haxe -cp src -cp test/hl/loader -D hxscript_hl -main LoadProbe -hl "$OUT/probe.hl"
 haxe -cp src -cp test/hl/loader -D hxscript_hl -main WriterProbe -hl "$OUT/writer.hl"
 haxe -cp src -cp test/hl/loader -D hxscript_hl -main EmitProbe -hl "$OUT/emit.hl"
-[ "$BENCH" = "1" ] && haxe -cp src -cp test/hl/loader -D hxscript_hl -main FieldBench -hl "$OUT/bench.hl"
+[ "$BENCH" = "1" ] && haxe -cp src -cp test/bench/hl -D hxscript_hl -main LoaderFieldBench -hl "$OUT/bench.hl"
 
 cd "$OUT"
 
