@@ -2592,7 +2592,14 @@ class Emitter {
 			var here:Null<Int> = inside == null ? null : seatOf(inside, own);
 			var mine:Null<Signature> = inside == null ? null : methodOf(inside, own);
 
-			if (here != null && mine != null && fits(mine, params, true)) {
+			/**
+			 * Through the method table only when the receiver really is the first register, which is
+			 * what a call with no receiver of its own takes. Inside a lambda it is not: register zero
+			 * there holds the captured values, and calling a method with that as its instance reads
+			 * one object as another. The instance is captured under its own name instead, so the
+			 * dispatch below finds it and resolves the method against what it actually is.
+			 */
+			if (here != null && mine != null && lookup('this') == 0 && fits(mine, params, true)) {
 				emitDeclared(mine, -1, params, slot, pos, here);
 				return;
 			}
@@ -4926,6 +4933,14 @@ class Emitter {
 			scopes[0].set(seen[i], held);
 		}
 
+		/**
+		 * The class around it is in scope again once its instance is, and only then. A lambda in a
+		 * static has no receiver to resolve a member against, and saying it had one would turn a
+		 * misspelled name into a field read on nothing.
+		 */
+		if (seen.indexOf('this') >= 0)
+			inside = heldInside;
+
 		statement(body);
 
 		if (ops.length == 0 || ops[ops.length - 1].op != ORet) {
@@ -4977,8 +4992,50 @@ class Emitter {
 				out.push(n);
 		}
 
+		/**
+		 * The instance itself, when the body names something that belongs to it.
+		 *
+		 * A lambda captures the locals it mentions, and a member is not a local: `function() press()`
+		 * mentions `press`, which is a method of the class around it, and nothing above puts anything
+		 * in the closure for it. So the body was written with no receiver and the name resolved to
+		 * nothing, which refused the module. That is the most ordinary line an interface contains,
+		 * since every event handler is one.
+		 */
+		if (lookup('this') != null && out.indexOf('this') < 0 && reachesSelf(mentioned, args))
+			out.push('this');
+
 		out.sort(Reflect.compare);
 		return out;
+	}
+
+	/**
+	 * @param mentioned Every name a lambda's body used.
+	 * @param args Its own arguments, which are not captured.
+	 * @return Whether any of them belongs to the instance around it.
+	 */
+	function reachesSelf(mentioned:StringMap<Bool>, args:Array<Argument>):Bool {
+		for (n in mentioned.keys()) {
+			if (lookup(n) != null)
+				continue;
+
+			var own:Bool = false;
+
+			for (a in args)
+				if (a.name == n)
+					own = true;
+
+			if (own)
+				continue;
+
+			/** A method as much as a field: a handler calling one is the case this exists for. */
+			if (isMemberOf(n) || propertyOf(inside, n) != null)
+				return true;
+
+			if (inside != null && seatOf(inside, n) != null)
+				return true;
+		}
+
+		return false;
 	}
 
 	/** Collects every name an expression mentions. */
