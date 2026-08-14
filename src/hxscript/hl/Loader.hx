@@ -249,6 +249,17 @@ class Loader {
 		return above(base, self, @:privateAccess name.bytes);
 	}
 
+	/**
+	 * @param base A class the world already has.
+	 * @param name A method name.
+	 * @return The shape it keeps that method in, as [nargs, return, each argument] by type kind and
+	 *         counting the receiver, or null when nothing up its chain declares it.
+	 */
+	public static function protoShape(base:hl.Type, name:String):Null<Array<Int>> {
+		var found:hl.NativeArray<Int> = shapeOf(base, @:privateAccess name.bytes);
+		return found == null ? null : [for (i in 0...found.length) found[i]];
+	}
+
 	/** Whether the runtime has been given the world's reader and writer for what it cannot resolve. */
 	static var wired:Bool = false;
 
@@ -348,6 +359,10 @@ class Loader {
 	}
 
 	@:hlNative("?hxscript", "super_method") static function above(base:hl.Type, self:Dynamic, name:hl.Bytes):Dynamic {
+		return null;
+	}
+
+	@:hlNative("?hxscript", "proto_shape") static function shapeOf(base:hl.Type, name:hl.Bytes):hl.NativeArray<Int> {
 		return null;
 	}
 

@@ -967,6 +967,46 @@ HL_PRIM int HL_NAME(proto_index)( hl_type *t, vbyte *name ) {
 }
 
 /**
+	@return What shape a class keeps a method in, as [nargs, return, each argument] by type kind, or
+	NULL when nothing up its chain declares one.
+
+	A script overriding a host method has to be written with the shape the host's own callers use,
+	because taking that class's place in the method table means those callers reach it directly. The
+	receiver counts as the first argument, the way it does everywhere else here.
+*/
+HL_PRIM varray *HL_NAME(proto_shape)( hl_type *base, vbyte *name ) {
+	hl_runtime_obj *rt;
+	int hash, i;
+
+	if( base == NULL || base->kind != HOBJ )
+		return NULL;
+
+	hash = hl_hash_gen((uchar*)name,true);
+
+	for(rt = hl_get_obj_rt(base); rt; rt = rt->parent) {
+		hl_field_lookup *f = hl_lookup_find(rt->lookup,rt->nlookup,hash);
+		varray *out;
+		int *at;
+
+		if( f == NULL || f->field_index >= 0 || f->t == NULL || f->t->kind != HFUN )
+			continue;
+
+		out = hl_alloc_array(&hlt_i32, f->t->fun->nargs + 2);
+		at = hl_aptr(out,int);
+
+		at[0] = f->t->fun->nargs;
+		at[1] = f->t->fun->ret->kind;
+
+		for(i=0;i<f->t->fun->nargs;i++)
+			at[i + 2] = f->t->fun->args[i]->kind;
+
+		return out;
+	}
+
+	return NULL;
+}
+
+/**
 	@return A base's own version of a method, bound to an instance, or NULL when it has none.
 
 	What `super.method()` means: the class the script extends answers, not whatever the instance's own
@@ -1137,6 +1177,10 @@ HL_PRIM vdynamic *HL_NAME(super_method)( hl_type *base, vdynamic *obj, vbyte *na
 	return NULL;
 }
 
+HL_PRIM varray *HL_NAME(proto_shape)( hl_type *base, vbyte *name ) {
+	return NULL;
+}
+
 /** No bytecode can be loaded here, so no cache is ever read. */
 HL_PRIM int HL_NAME(site)( int hash ) {
 	return -1;
@@ -1204,5 +1248,6 @@ DEFINE_PRIM(_I32, field_count, _TYPE);
 DEFINE_PRIM(_I32, proto_index, _TYPE _BYTES);
 DEFINE_PRIM(_BOOL, has_field, _TYPE _BYTES);
 DEFINE_PRIM(_DYN, super_method, _TYPE _DYN _BYTES);
+DEFINE_PRIM(_ARR, proto_shape, _TYPE _BYTES);
 DEFINE_PRIM(_I32, entry_index, _ABSTRACT(hxs_module));
 DEFINE_PRIM(_DYN, closure, _ABSTRACT(hxs_module) _I32);

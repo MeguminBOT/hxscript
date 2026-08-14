@@ -41,6 +41,7 @@ class Scripted {
 		'__func',
 		'__fields',
 		'__vars',
+		'__slots',
 		'instanceFields',
 		'inlinedFields',
 		'unexposedFields',
@@ -1341,14 +1342,24 @@ class Scripted {
 				name: 'reflectListFields',
 				kind: FFun({
 					args: [],
+					/**
+						A method is not a field. `Reflect.fields` answers with what an instance
+						stores, and the slots carry a class's methods beside its variables, so
+						listing every slot named methods that no other spelling of the same question
+						has ever listed. A backend that replaces the class agrees with `Reflect`
+						rather than with the slots, which is how this was found.
+					**/
 					expr: macro {
 						var fields = [
 							for (f in Reflect.fields(this))
 								if (!hxscript.macro.Scripted.ignoreFields.contains(f)) f
 						];
 						for (f in __vars.keys()) {
-							if (!hxscript.macro.Scripted.ignoreFields.contains(f) && !fields.contains(f))
-								fields.push(f);
+							if (hxscript.macro.Scripted.ignoreFields.contains(f) || fields.contains(f))
+								continue;
+							if (__base != null && __base.declaresMethod(f))
+								continue;
+							fields.push(f);
 						}
 						return fields;
 					},

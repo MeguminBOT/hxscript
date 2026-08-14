@@ -374,6 +374,27 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 	}
 
 	/**
+	 * Whether a name is one of this class's methods rather than one of its variables.
+	 *
+	 * An instance keeps both in the same slots, so nothing about a slot says which it is. Reflection
+	 * has to know: `Reflect.fields` answers with what an instance stores, and a method is not that.
+	 *
+	 * @param field The name.
+	 * @return Whether this class or one it extends declares it as a function.
+	 */
+	public function declaresMethod(field:String):Bool {
+		for (f in decl.fields) {
+			if (f.name != field || f.access.contains(AStatic))
+				continue;
+
+			return f.kind.match(KFunction(_));
+		}
+
+		var ext:Dynamic = extending;
+		return (ext is ScriptedClass) ? cast(ext, ScriptedClass).declaresMethod(field) : false;
+	}
+
+	/**
 	 * The class that declares `field` as private, or null if no class in the chain does.
 	 *
 	 * @param field The field name.

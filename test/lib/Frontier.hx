@@ -71,7 +71,12 @@ class Frontier {
 		probe('Reflect.fields of a structure', 'var o = {a: 1, b: 2}; var f = Reflect.fields(o); f.sort(function(x, y) return x < y ? -1 : 1); return f.join(",");');
 		probe('Reflect.hasField', 'var o = {a: 1}; return Std.string(Reflect.hasField(o, "a")) + "/" + Std.string(Reflect.hasField(o, "z"));');
 		probe('Reflect.callMethod on a scripted static', 'return Std.string(Reflect.callMethod(null, twice, [21]));', 'static function twice(n:Int):Int return n * 2;');
+		probe('Reflect.fields of a scripted instance',
+			'var f = Reflect.fields(new T()); f.sort(function(x, y) return x < y ? -1 : 1); return f.join(",");',
+			'public var a:Int = 1; public var b:String = "x"; public function new() {} public function m():Int return 2;');
 		probe('Std.string of a scripted instance', 'return Std.string(new T()).length > 0 ? "something" : "nothing";', 'public function new() {}');
+		probe('a scripted toString is what renders it', 'return Std.string(new T());',
+			'public var n:Int = 3; public function new() {} public function toString():String return "T(" + n + ")";');
 		probe('Std.string of an enum value', 'return Std.string(One);', null, 'enum E { One; Two(n:Int); }');
 	}
 

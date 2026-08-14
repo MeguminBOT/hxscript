@@ -60,6 +60,13 @@ class Signature {
 	 * is three values to gather into the array first.
 	 */
 	public var rest:Bool = false;
+
+	/**
+	 * Whether the shape is the world's rather than the script's, because it overrides a method the
+	 * world declared. An argument the world always supplies has no default to fill in, and a typed
+	 * register has nowhere to put the null that would say it was left out.
+	 */
+	public var hosted:Bool = false;
 }
 
 /**
@@ -422,6 +429,37 @@ class Emitter {
 			}
 		}
 
+		/**
+		 * Which class extends which, before anything else, because everything after this walks that
+		 * chain and a subclass may be written above its base.
+		 */
+		for (decl in decls) {
+			switch (decl.d) {
+				case DClass(c):
+					var base:Null<String> = baseName(c.extend);
+
+					if (base == null)
+						continue;
+
+					if (classes.exists(base))
+						bases.set(c.name, base);
+					else
+						opened.set(c.name, true);
+				case _:
+			}
+		}
+
+		/**
+		 * Then the bases the world already has, base first, because a method overriding one of the
+		 * world's has to be shaped the way the world shaped it and the answer is up the chain.
+		 */
+		for (c in ordered(decls)) {
+			if (bases.exists(c.name) || c.extend == null)
+				continue;
+
+			hosts.set(c.name, hostShape(baseName(c.extend), decl(decls, c)));
+		}
+
 		for (decl in decls) {
 			switch (decl.d) {
 				case DClass(c):
@@ -554,14 +592,6 @@ class Emitter {
 		owned.set(c.name, statics);
 		memberTypes.set(c.name, types);
 
-		var base:Null<String> = baseName(c.extend);
-		if (base != null) {
-			if (classes.exists(base))
-				bases.set(c.name, base);
-			else
-				opened.set(c.name, true);
-		}
-
 		for (f in c.fields) {
 			var fn:Null<FunctionDecl> = switch (f.kind) {
 				case KFunction(d): d;
@@ -569,6 +599,20 @@ class Emitter {
 			}
 			if (fn == null)
 				continue;
+
+			/**
+			 * A method the world already declares is shaped the way the world shaped it, whatever
+			 * the script wrote, because taking that class's place in the method table means the
+			 * world's own callers reach it directly and they pass what they always passed.
+			 */
+			if (!isStatic(f) && f.name != 'new') {
+				var above:Null<Signature> = overriding(c, f, fn);
+
+				if (above != null) {
+					signatures.set(c.name + '#' + f.name, above);
+					continue;
+				}
+			}
 
 			var args:Array<Int> = [];
 
@@ -715,6 +759,31 @@ class Emitter {
 			}
 		}
 
+		/**
+		 * A class that says how it renders carries the method HashLink asks for beside it. `Std.string`
+		 * looks for `__string` and falls back to the class's name when there is none, so a scripted
+		 * `toString` was written and never reached.
+		 */
+		if (signatures.exists(c.name + '#toString')) {
+			var args:Array<Int> = [shapes.get(c.name)];
+			var sig:Signature = {
+				findex: module.reserve(),
+				args: args,
+				ret: module.prim(HBytes),
+				type: module.typeId(TFun(args, module.prim(HBytes))),
+				rest: false
+			};
+
+			signatures.set(c.name + '#__string', sig);
+
+			var seat:Int = inheritedEntry(inBatch, host, '__string');
+			if (seat < 0)
+				seat = table++;
+
+			protos.push({name: module.stringId('__string'), findex: sig.findex, pindex: seat});
+			entry.set('__string', seat);
+		}
+
 		widths.set(c.name, at);
 		tables.set(c.name, table);
 		slots.set(c.name, index);
@@ -799,6 +868,77 @@ class Emitter {
 		staticTypes.set(c.name, kinds);
 
 		return kept;
+	}
+
+	/**
+	 * The shape a method has to be written in because the world already declared it.
+	 *
+	 * **This is not an optimisation, it is what stops a crash.** An override takes the position the
+	 * base keeps that method in, so the world's own callers reach it through their own signature: a
+	 * script writing `function step(dt)` against a base declaring `step(Float):Float` produced a
+	 * function taking a pointer, and the first caller passed a double into it.
+	 *
+	 * @param c The class.
+	 * @param f The field.
+	 * @param fn Its declaration.
+	 * @return The shape to write it in, or null when nothing above declares it.
+	 * @throws Unsupported If the world's shape cannot be expressed here, or the script wrote more
+	 *         arguments than it has room for.
+	 */
+	function overriding(c:ClassDecl, f:FieldDecl, fn:FunctionDecl):Null<Signature> {
+		var above:Null<hl.Type> = rootHost(c.name);
+		if (above == null)
+			return null;
+
+		var shape:Null<Array<Int>> = Loader.protoShape(above, f.name);
+		if (shape == null)
+			return null;
+
+		var args:Array<Int> = [shapes.get(c.name)];
+
+		for (i in 1...shape[0]) {
+			var held:Int = fromKind(shape[i + 2]);
+
+			if (held < 0)
+				throw new Unsupported('overrides ' + f.name + ', whose arguments this cannot express', null);
+
+			args.push(held);
+		}
+
+		if (fn.args.length > args.length - 1)
+			throw new Unsupported('overrides ' + f.name + ' with more arguments than it takes', null);
+
+		var ret:Int = fromKind(shape[1]);
+		if (ret < 0)
+			throw new Unsupported('overrides ' + f.name + ', whose result this cannot express', null);
+
+		return {
+			findex: module.reserve(),
+			args: args,
+			ret: ret,
+			type: module.typeId(TFun(args, ret)),
+			rest: false,
+			hosted: true
+		};
+	}
+
+	/**
+	 * @param kind One of HashLink's type kinds.
+	 * @return The register type that is laid out and passed the same way, or -1 when none is.
+	 *
+	 * Every pointer kind is a pointer, so a dynamic register holds one and is passed in the same
+	 * place. A narrower integer or a single-precision float is neither, and there is nothing here
+	 * that would arrive where the world put it.
+	 */
+	function fromKind(kind:Int):Int {
+		return switch (kind) {
+			case 0: tVoid;
+			case 3: tI32;
+			case 6: tF64;
+			case 7: tBool;
+			case 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19: tDyn;
+			case _: -1;
+		}
 	}
 
 	/**
@@ -1068,6 +1208,8 @@ class Emitter {
 					if (!wrote)
 						emitInherited(c, decl.pos);
 
+					emitRendering(c, decl.pos);
+
 				case DPackage(_) | DImport(_, _) | DUsing(_) | DEnum(_) | DAbstract(_) | DInterface(_) | DTypedef(_) | DField(_):
 
 				case _:
@@ -1148,6 +1290,52 @@ class Emitter {
 
 		var empty:Int = reg(tVoid);
 		ops.push({op: ORet, args: [empty]});
+
+		pop();
+
+		module.add({type: sig.type, findex: sig.findex, regs: regs, ops: ops});
+	}
+
+	/**
+	 * Writes the method HashLink asks a class for when something renders one of its instances.
+	 *
+	 * It calls the class's own `toString` by index rather than through the method table, because a
+	 * subclass that overrides `toString` carries its own `__string` at the same position and a
+	 * subclass that does not inherits both.
+	 *
+	 * @param c The class.
+	 * @param pos Where it was written.
+	 */
+	function emitRendering(c:ClassDecl, pos:Position):Void {
+		var sig:Null<Signature> = signatures.get(c.name + '#__string');
+		var renders:Null<Signature> = signatures.get(c.name + '#toString');
+
+		if (sig == null || renders == null)
+			return;
+
+		ops = [];
+		regs = [];
+		scopes = [];
+		breaks = [];
+		continues = [];
+		returns = sig.ret;
+		inside = c.name;
+		traps = 0;
+
+		push();
+
+		regs.push(sig.args[0]);
+		scopes[scopes.length - 1].set('this', 0);
+
+		var said:Int = reg(renders.ret);
+		ops.push({op: OCall1, args: [said, renders.findex, 0]});
+
+		var held:Int = reg(tDyn);
+		move(said, held);
+
+		var out:Int = reg(sig.ret);
+		callSupport('text', [held], out);
+		ops.push({op: ORet, args: [out]});
 
 		pop();
 
@@ -1325,6 +1513,10 @@ class Emitter {
 				continue;
 
 			var here:Int = i + first;
+
+			/** Only a register that can hold the null which says an argument was left out. */
+			if (regs[here] != tDyn)
+				continue;
 			var over:Int = jump(OJNotNull, [here]);
 			into(arg.value, here);
 			land([over]);
@@ -3271,7 +3463,7 @@ class Emitter {
 		'object' => 'd', 'setField' => 'dddv', 'put' => 'dddd', 'range' => 'ddd',
 		'iterator' => 'dd', 'pairs' => 'dd', 'step' => 'db', 'take' => 'dd',
 		'args0' => 'd', 'args1' => 'dd', 'args2' => 'ddd', 'args3' => 'dddd', 'dispatch' => 'ddddd',
-		'call' => 'ddd',
+		'call' => 'ddd', 'text' => 'dy',
 		'has' => 'ddb', 'sized' => 'ddb', 'ctor' => 'dd', 'params' => 'dd',
 		'isOfType' => 'ddb', 'catches' => 'ddb', 'enumOf' => 'dddd', 'regex' => 'ddd',
 		'superCall' => 'dddd', 'superGet' => 'dddd', 'superNew' => 'dddv'
@@ -3287,6 +3479,7 @@ class Emitter {
 			case 'f': tF64;
 			case 'b': tBool;
 			case 'v': tVoid;
+			case 'y': module.prim(HBytes);
 			default: tDyn;
 		}
 	}

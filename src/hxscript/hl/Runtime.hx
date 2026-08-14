@@ -648,6 +648,19 @@ class Runtime {
 			Reflect.callMethod(self, built, args);
 	}
 
+	/**
+	 * @param v What a class's own `toString` answered.
+	 * @return It as the characters HashLink asks a class for.
+	 *
+	 * `Std.string` on an object looks for a `__string` method on its class and falls back to the
+	 * class's name when there is none, which is what a scripted `toString` was getting. A class that
+	 * declares one now carries a `__string` beside it, and this is the half of that which has to know
+	 * what a `String` is made of.
+	 */
+	public static function text(v:Dynamic):hl.Bytes {
+		return v == null ? null : @:privateAccess Std.string(v).bytes;
+	}
+
 	/** @return A value as a `Float`, opening an abstract to what it wraps first. */
 	public static function toFloat(v:Dynamic):Float {
 		if (v is AbstractValue)
