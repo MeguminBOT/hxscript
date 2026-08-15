@@ -22,14 +22,40 @@ import hxscript.error.Sink;
  */
 class JitProbe {
 	/**
-	 * Loads a project and offers a batch of its modules to the compiler.
+	 * Loads a project and offers a batch of its modules to the compiler, once or several times.
 	 *
-	 * @param name The project folder's name.
-	 * @param only Comma-separated module names to keep, or null for all of them.
+	 * `--probe sonic2,sonic2` loads and compiles it twice in one process, which is what a host does
+	 * every time it switches project or reloads one from disk. The second pass is where a compiler
+	 * that remembers the first one shows it: the classes it already built are bound into a world that
+	 * has just re-read every file, and everything referencing them is refused against them, so the
+	 * second report compiles less than the first. Reading the two reports beside each other is the
+	 * whole test, and it needs no window.
+	 *
+	 * @param name The project, or several separated by commas.
+	 * @param only Module names to compile, or null for all of them.
 	 */
 	public static function run(name:String, only:String):Void {
 		Sink.listen(function(d:Diagnostic):Void say('  ' + d.toString().split('\n').join('\n  ')));
 
+		var names:Array<String> = name.split(',');
+
+		for (i => one in names) {
+			if (names.length > 1)
+				say('--- pass ${i + 1} of ${names.length} ---');
+
+			once(one, only);
+		}
+
+		/**
+		 * Here rather than at the end of a pass, which is where it used to be: a probe that exits
+		 * inside the cycle can only ever run one, and the second cycle is the whole point of asking
+		 * for two.
+		 */
+		Sys.exit(0);
+	}
+
+	/** One load-and-compile cycle, reported on its own. */
+	static function once(name:String, only:String):Void {
 		var project:ProjectInfo = null;
 		for (candidate in Projects.all())
 			if (candidate.name == name)
@@ -82,8 +108,6 @@ class JitProbe {
 		var call:String = argument('--call');
 		if (call != null)
 			invoke(call);
-
-		Sys.exit(0);
 	}
 
 	/**

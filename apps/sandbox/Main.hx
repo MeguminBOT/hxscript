@@ -49,6 +49,12 @@ class Main {
 
 		Shell.autoRun = argument('--run');
 
+		// `--only A,B` beside `--run` compiles just those and interprets the rest, which is how a fault
+		// inside emitted bytecode gets narrowed to the module carrying it.
+		var only:String = argument('--only');
+		if (only != null)
+			host.Sandbox.compileOnly = only.split(',');
+
 		openfl.Lib.current.addChild(new FlxGame(WIDTH, HEIGHT, Shell.new, 60, 60, true));
 	}
 
