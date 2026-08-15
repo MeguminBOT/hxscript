@@ -1,3 +1,7 @@
+import world.Body;
+import world.Player;
+import world.Sim;
+
 /**
  * The room's rules, asked without a room.
  *
