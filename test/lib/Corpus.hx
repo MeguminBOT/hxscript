@@ -211,10 +211,11 @@ class Corpus {
 		// an accessor stands in front of it. A backend reaching that offset writes the right number
 		// past the setter, so the field reads back correctly and the object is never told it changed.
 		// That is not hypothetical: it is what left every sprite of a heaps project sitting still.
-		// The import is not decoration. A host class a script names has to be placeable by every
-		// backend, and one of them places a `new` through what the module imported rather than through
-		// what the world can resolve, so a case naming a host type without importing it is refused
-		// there and the row says nothing about properties.
+		// The import used to be load-bearing: cppia placed a host name through what the module
+		// imported rather than through what the world can resolve, so a case naming a host type
+		// without importing it was refused there and the row said nothing about properties. It no
+		// longer is, and `Frontier` names `HostFlag` and `HostDial` with no import to keep that
+		// honest. Kept here because it is how the case would be written anyway.
 		var host:String = 'import HostBase;';
 
 		check('host property setter', 'var h = new HostBase(); h.scaled = 5; return h.scaled;', '10', null, host);
