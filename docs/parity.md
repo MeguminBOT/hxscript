@@ -188,8 +188,10 @@ and never reaches that stage.
   scene graph is built on. Answering it needs the parameter types, and nothing at runtime carries a
   constructor's signature, so the build's own type table records them for the constructors it can
   matter for and `hxscript.types.ArgumentTools` asks. It covers `new` and `super(...)`, not method
-  calls: a method call short in the middle still binds in order. On cppia a module containing such a
-  call is refused and interpreted instead, because the placing cannot be written as an instruction.
+  calls: a method call short in the middle still binds in order. Both compilers place it too: cppia
+  routes a `new` through `hxscript.runtime.Construct`, which has the values in hand, and places a
+  `super(...)` at emit time against the recorded parameters, refusing only when the argument types do
+  not decide it.
 - **No `@:structInit` or `@:multiType`.** `Map` is the one special-cased multi-type
   (its implementation is picked from the key type). `@:op` and `@:arrayAccess` are honored on native
   abstracts only; see section 3.

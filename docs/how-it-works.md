@@ -28,9 +28,15 @@ I got out of bed, tested the theory with a small case, and it worked. The next d
 for close to twenty hours straight, broken up by coffee, the toilet breaks that follow from it, and
 some snacks.
 
+Later the same question came back wearing different clothes: HashLink has bytecode of its own and a
+jit that is genuinely good, and a great many Haxe games ship on it. That one turned out to be a
+harder problem than cppia rather than the same problem again, for reasons that are the whole of part
+three.
+
 That is how we got here.
 
-What follows is the full technical side of the implementation.
+What follows is the full technical side of the implementation: the interpreter that defines what an
+answer should be, then the two backends that try to produce the same answer faster.
 
 # Part one: the interpreter
 
@@ -351,3 +357,120 @@ compiled instead, and everything that could not be compiled keeps running interp
 A module can therefore be in one of three states, and the report says which: compiled, refused with a
 reason and a position, or failed to load. There is no state where a script silently stops working
 because the compiler could not express it.
+
+# Part three: compiling to HashLink
+
+## Why it is a different problem
+
+cppia rests on two properties: the bytecode is text, and producing it needs no compiler. HashLink
+gives you the second and takes away the first, then adds a problem of its own.
+
+**The bytecode is binary.** There is no token stream to concatenate. A module is a header, pools of
+ints, floats and strings, a type table, a table of natives, then functions made of opcodes with
+integer operands, and every one of those is written in HashLink's own variable-length signed integer
+encoding: one byte up to 127, two up to 13 bits, four up to 29, with the sign carried in a bit of the
+leading byte rather than in the value. `hxscript.hl.Writer` owns that encoding, and it is the one
+thing in the whole backend that a reader and a writer can silently disagree about.
+
+**The loader is not reachable.** This is the part that nearly stopped the idea. HashLink's bytecode
+loader is compiled into `hl.exe`, not into `libhl`, so a program that links libhl, which is what
+every shipped HashLink game is, has no function it can call to load a module at run time. cppia had
+`cpp.cppia.Module.fromData` sitting right there. Here there was nothing.
+
+So the library carries HashLink's loader in its own tree and builds it into a native module: an
+`hxscript.hdll` beside a `.hl`, or compiled straight in for an HL/C binary, which has nowhere to put
+a shared library. `-D hxscript_hl` is the whole of what a host writes; the same macro that wires
+everything else compiles it.
+
+Carrying a VM's internals has one obvious hazard, and it is guarded twice. The loader shares struct
+layouts with libhl, so a copy built against one HashLink and run against another would read fields
+that have moved, silently and wrongly. The C pins the version it was built for and disables itself
+when `HL_VERSION` does not match, and the build records which HashLink it built against beside the
+module rather than guessing from timestamps, because an upgraded VM leaves exactly that mismatch.
+HashLink's jit is also x86 and x86-64 only, which has to be decided before `hl.h` is included, since
+`hl.h` defines the architecture macros back again.
+
+None of it can fail a build. No HashLink, no C compiler, an architecture with no jit, or a version
+the carried loader does not match, and you get one warning naming what to install. The natives are
+declared optional, so the program starts exactly as it would have and interprets every script.
+
+## Registers, not a stack
+
+cppia's instructions take their operands from a stack. HashLink's take registers, the registers are
+**typed**, and they are allocated per function. So every value the emitter produces needs somewhere
+of the right type to live, and moving a value between two types is an instruction rather than an
+assumption: an `i32` into an `f64` is `OToSFloat`, a primitive into a dynamic is `OToDyn`, and a
+dynamic into an `i32` is a call into the runtime.
+
+That single difference is most of what makes this emitter several times the size of the cppia one. It
+is also where the speed comes from: an `Int` that stays in an `i32` register for a whole loop is never
+boxed, and that is the same loop the interpreter walks allocating a value per iteration.
+
+The second surprise is that **a comparison is not a value.** HashLink has no instruction that turns
+`a < b` into a boolean; the comparisons *are* the conditional jumps. A condition is therefore emitted
+as control flow, and only a comparison actually read as a value (assigned to a variable, returned)
+pays for the pair of jumps that turns it back into one.
+
+## What has to be tracked that cppia never did
+
+**Traps.** A `try` pushes an entry on the VM's own stack, and it is popped by falling out of the `try`
+or by the throw firing. A `break` or a `continue` inside one does neither: it jumps past the
+`OEndTrap` and leaves an entry pointing into a frame that has moved on. That is not an error where it
+was made. It is an access violation later, inside whatever the function returned into. So the
+emitter records how many traps were open when each loop was entered, and a jump out of a loop ends
+the ones that loop opened.
+
+**Function shapes.** A call has to be written against the callee's real signature, so every function
+in the batch is given one before any body is written. That shape also has to record when it belongs
+to the *world* rather than to the script: a method overriding one the host declared takes the host's
+arguments, and an argument the host always supplies has no default to fill in, because a typed
+register has nowhere to put the null that would have said it was left out.
+
+## Reaching the helpers, and why their signatures are written out by hand
+
+Everything the emitter cannot decide statically goes to `hxscript.hl.Runtime`, the way cppia's goes to
+`hxscript.runtime.Indexing`. There is far more of it here, because typed registers mean arithmetic on
+a value of unknown type cannot be an opcode at all: `Runtime.add`, `sub`, `mul` and the rest each ask
+what they were handed, and take the abstract's `@:op` method when there is one.
+
+How they are called matters more than it looks. A helper held in a dynamic register is invoked through
+`hl_dyn_call`, which boxes every argument and the result and reads the callee's signature to marshal
+against, and that is most of what a support call costs, paid on every field read, every dynamic
+operator and every iteration step. Naming the signature instead turns it into a direct call.
+
+Which is why the shape table is written out by hand rather than derived: it has to agree with
+`Runtime` exactly, and a module holds no host types, so `String`, `Array` and any class of the host
+cannot be named in it at all. Those become `Dynamic`, and only the primitives keep their own type.
+Every case in the conformance corpus that reaches a helper is what checks the table still agrees.
+
+## The field cache
+
+A scripted instance keeps its fields in a `Map<String, Variable>`, so every field access was a string
+hash. That is most of what made a compiled field access barely faster than an interpreted one, and it
+is the one thing about the design that could not simply be emitted away.
+
+The hash cannot be removed, but it can be paid once. The `Variable` a name resolves to is created when
+the instance is built and mutated in place forever after, so a site that has resolved one may keep it
+and check only that the receiver is the same object. Every field access in the emitted code gets its
+own slot, filled the first time it runs: a hit is a pointer compare and a field read, and a miss costs
+what the read cost before, plus the compare.
+
+## Scripted classes become real types
+
+The other half of the speed is that a compiled class stops being a `ScriptedObject` with a map in it.
+The batch lays each one out as a genuine HashLink type with real fields and a real prototype, extends
+whatever base the world already had, and registers itself as the class the world hands out for that
+path. Its constructor and methods take the instance first, and the world's own `isOfType` answers for
+it, so a value built by a compiled module and a value built by the interpreter are the same kind of
+thing to everything that asks.
+
+## What comes out
+
+`Backend.run` compiles a group, hands the bytes to the carried loader, and binds each compiled class
+back into the world in place of its scripted form: the same substitution cppia performs, reached
+completely differently. The VM jits what it loads, so unlike hxcpp there is no second mode to turn on:
+there is no HashLink column without the jit, and the benchmarks have none.
+
+A module is compiled, refused with a reason and a position, or failed to load, and the report says
+which. `test/hl/loader/` is where the pieces are exercised on their own: the writer against a module
+HashLink itself reads back, and the loader against a module it did not produce.

@@ -5,7 +5,7 @@ Output goes between the GENERATED markers in `docs/hl-benchmarks.md`.
 Same table shape as the two collators next door, on purpose: the three documents are read together
 and a reader moving between them should not have to learn a third format.
 
-What differs is what the columns ARE. The other two suites compare things of one kind — six
+What differs is what the columns ARE. The other two suites compare things of one kind: six
 interpreters, or one library's three modes. This one compares a script against the program it would
 have been if you had not scripted it, so two of its four columns are Haxe with no library in them at
 all. The interesting numbers here are therefore ratios against a floor rather than against each

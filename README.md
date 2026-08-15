@@ -251,6 +251,8 @@ Two worked examples and two applications, all runnable:
 - [HashLink benchmarks](docs/hl-benchmarks.md) runs it against the same program compiled by Haxe,
   which is what a script costs against not scripting it at all.
 - [Static checking](docs/checker.md) sets out the design for a pre-run checker, and its limits.
+- **[How it works](docs/how-it-works.md)** is the long technical account: the interpreter, then
+  compiling to cppia, then compiling to HashLink, and why each one is shaped the way it is.
 - [Internals](docs/internals.md) explains why the parts that are not obvious are the way they are.
 - [Tests](test) holds the suites, which double as executable documentation of behaviour.
 - [Changelog](CHANGELOG.md) has what changed per release, including the renames 2.0.0 asks you

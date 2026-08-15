@@ -60,8 +60,8 @@ that names it.
   HashLink jits what it loads, so there is no separate jitted mode the way there is on hxcpp.
 - **One conformance corpus, six columns, and a table written from what came back.** `sh test/all.sh`
   runs every suite and reports by part rather than by file. The middle suite is the interesting one:
-  329 constructs offered to six ways of running a script — interpreted on eval, hxcpp and HashLink,
-  and compiled as cppia with and without the JIT and as HashLink bytecode — so that a part of the
+  329 constructs offered to six ways of running a script, interpreted on eval, hxcpp and HashLink,
+  and compiled as cppia with and without the JIT and as HashLink bytecode, so that a part of the
   language working in one and not another is visible rather than inferred. `docs/support-table.md`
   is regenerated from those columns, never edited. A case that ends the process is recorded as
   `killed` and the run resumes past it, which is not a detail: hxcpp's cppia has taken the process
@@ -125,7 +125,7 @@ Then a set found by running real projects rather than by reading the code, most 
 script meets the host:
 
 - A closure naming something of the class around it resolved to nothing, so `hit.onClick =
-  function(e) tapped();` — the most ordinary line in an interface — did not compile. The instance is
+  function(e) tapped();`, the most ordinary line in an interface, did not compile. The instance is
   captured now.
 - A host property was written past rather than through: assigning to one stored the value and never
   ran the setter.
@@ -148,7 +148,7 @@ script meets the host:
 
 - **A type in the module's own package resolves with no import**, the way Haxe resolves one. Naming
   a sibling module used to reach nothing, and the failure surfaced at the first use rather than at
-  the name — `Invalid access to field` interpreted, `Cannot call` compiled — so both sides failed
+  the name (`Invalid access to field` interpreted, `Cannot call` compiled), so both sides failed
   alike and it read as an unsupported construct rather than as a defect. Every module of a packaged
   project had to import its own siblings. Imports are still read first, so an explicit import of
   another package's type of the same name still wins.
@@ -170,7 +170,7 @@ script meets the host:
   operator. A typedef is emitted as the class it aliases rather than as itself, since a typedef has
   no runtime class and cppia resolved the name to null and then used it without looking.
 - `a[i]` is decided the same way compiled as interpreted. It is three operations in Haxe depending on
-  the value — a map keyed, an array indexed, an abstract's `@:arrayAccess` — and the two sides
+  the value (a map keyed, an array indexed, an abstract's `@:arrayAccess`), and the two sides
   choosing differently on the same line is the whole hazard.
 - A `Bool` survives the round trip through cppia and its JIT, which has several shapes because cppia
   has no boolean of its own and carries one as an integer.

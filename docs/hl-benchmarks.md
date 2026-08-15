@@ -40,8 +40,8 @@ The comparison needs the same program twice: as source text for the interpreter 
 as real declarations for `haxe` to compile. Written twice by hand, the two drift, and then the suite
 is measuring the difference between two corpora rather than between two ways of running one.
 
-So it is written once, in [`ModeCases.hx`](../test/bench/mbench/ModeCases.hx) — the same corpus the
-execution-mode benchmark uses — and [`GenNative.hx`](../test/bench/hlbench/GenNative.hx) writes the
+So it is written once, in [`ModeCases.hx`](../test/bench/mbench/ModeCases.hx), the same corpus the
+execution-mode benchmark uses, and [`GenNative.hx`](../test/bench/hlbench/GenNative.hx) writes the
 Haxe half out of it before every run. The transform is three substitutions: the case's class is given
 a name of its own, its helper class is given one, and the loop bound is redirected through a value
 the optimiser cannot see.
@@ -71,7 +71,7 @@ linking the compiler in changed the number.
 
 Haxe compiles the native columns for real, and a real compiler handed a synthetic loop whose result
 it can prove emits no loop at all. The bound is read through a mutable static so it cannot fold on
-the iteration count alone, but a body it can hoist still goes — a call that always answers the same
+the iteration count alone, but a body it can hoist still goes: a call that always answers the same
 thing, an assignment nothing reads. Those rows are marked `folded`.
 
 **They are counted anyway, and that is the point rather than a caveat.** What a host is deciding is
@@ -194,7 +194,7 @@ module is rejected whole. Those rows are the edge of the compiled subset: `noCal
 Every case ends in a value the harness knows, and that is not decoration: a column that parsed a case
 and skipped the work would otherwise be recorded as extremely fast, which here would be the headline.
 
-It earned itself on the first run. `nullCoal` — `var z:Null<Int> = null; s = z ?? 5;` — is one of the
+It earned itself on the first run. `nullCoal`, which is `var z:Null<Int> = null; s = z ?? 5;`, is one of the
 cases added when this suite was built, and the HashLink backend compiled it to `0` where every
 interpreter answers `5`. It was reported as `WRONG` rather than as a time, which is the whole reason
 the check exists: a column that quietly answered 0 would have posted an excellent number for it.

@@ -153,9 +153,21 @@ class Backend {
 		return holders.exists(path);
 	}
 
-	/** @return The class standing in for a scripted one, which is where its statics are too. */
+	/**
+	 * @return The class standing in for a scripted one, which is where its statics are too.
+	 *
+	 * Guarded like every other member that reaches the loader's state, which this one was not: `built`
+	 * is declared inside the block, so a build defining `hxscript_hl` on a target that is not
+	 * HashLink stopped here with `Unknown identifier : built`. That is a legal thing for a host to
+	 * do, since the define travels with the library rather than with the target, and it is what the
+	 * matching `hxscript_cppia` build does without complaint.
+	 */
 	public static function substitute(path:String):Dynamic {
+		#if (hl && hxscript_hl)
 		return built.get(path);
+		#else
+		return null;
+		#end
 	}
 
 	/** Which classes have at least one compiled function in them. */

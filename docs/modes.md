@@ -74,7 +74,8 @@ second backend under `hxscript.hl`. HashLink jits what it loads, so there is no 
 here the way there is on hxcpp.
 
 Needs `-D hxscript_hl`, and links a small native module that the same macro compiles into the binary,
-so a host writes the define and nothing else. It reaches the same construct-for-construct agreement
+so a host writes the define and nothing else. Why it needs one at all, and what else differs from
+cppia, is [`how-it-works.md`](how-it-works.md#part-three-compiling-to-hashlink). It reaches the same construct-for-construct agreement
 cppia does, recorded in [`support-table.md`](support-table.md), and refuses nothing in the corpus.
 
 The figures on this page are hxcpp's. This backend has its own and they are not quoted here yet.
@@ -252,14 +253,14 @@ matching compiles in full, over enum constructors, arrays, objects and nested sh
 the `SWITCH` instruction cannot express is rewritten into an if-else chain rather than refused.
 
 Three more went the same way and they are the ones a project met most often. **Constructing an
-abstract the host compiled** — `h3d.Vector`, `h3d.Matrix`, `h2d.col.Point`, which is most of what a
-3D script writes — used to name a type with no runtime class, so it was refused; it is now built
+abstract the host compiled**, meaning `h3d.Vector`, `h3d.Matrix` and `h2d.col.Point`, which is most
+of what a 3D script writes, used to name a type with no runtime class, so it was refused; it is now built
 through `hxscript.runtime.Construct`, which reaches the static the constructor became. **A
 constructor call that leaves out an optional in the middle**, `new Mesh(prim, parent)` against
 `(primitive, ?material, ?parent)`, is placed by the same helper for a `new` and against the recorded
 parameter shape for a `super(...)`, rather than padded from the right into the wrong parameter. And
-**a host name the module never imported** — a secondary type of an imported module, an enum
-constructor, an enum-abstract constant — is now looked up in the world's type table, which is where
+**a host name the module never imported**, whether a secondary type of an imported module, an enum
+constructor or an enum-abstract constant, is now looked up in the world's type table, which is where
 the interpreter had been finding it all along.
 
 The evidence is the shared conformance corpus: 329 constructs offered to six columns, one per way
@@ -269,8 +270,8 @@ compiled column agrees with its own target's interpreter on all 329 and refuses 
 
 That is a stronger claim than "nothing was refused", and the two halves are deliberately kept apart:
 a refusal costs speed, and a construct that compiled to the wrong thing is reported as a difference
-instead. Several were, during this work — the wrapper's class name where a boxed abstract's value
-belonged, and `0` where a scaled vector belonged — which is the reason the table separates them.
+instead. Several were, during this work: the wrapper's class name where a boxed abstract's value
+belonged, and `0` where a scaled vector belonged. That is the reason the table separates them.
 
 ## Where compiled code still differs
 

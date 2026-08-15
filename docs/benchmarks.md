@@ -306,8 +306,8 @@ earlier run.
 
 **RuleScript's figures are new rather than changed.** Its build had been failing, and the runner was
 silently falling back to binaries left behind by an earlier run: they answered the cases the corpus
-held when they were built and reported everything added since as `crash`. Both halves are fixed —
-the build parameters named `hscript.Ast`, a module neither hscript checkout declares, where
+held when they were built and reported everything added since as `crash`. Both halves are fixed.
+The build parameters named `hscript.Ast`, a module neither hscript checkout declares, where
 RuleScript's own `extraParams.hxml` names `hscript.Tools`; and `run.sh` now removes a binary before
 rebuilding it, so a failed build can no longer leave a usable one behind.
 
