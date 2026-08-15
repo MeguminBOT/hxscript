@@ -229,6 +229,13 @@ class Presets {
 			'h2d.filter.Glow',
 			'h2d.col.Point',
 			'hxd.Key',
+
+			/**
+			 * The other way a game is played. `hxd.Pad.wait` hands over a pad as one arrives, and its
+			 * sticks, triggers and buttons are read per frame the way the keyboard is, so a project
+			 * that wants both writes the same loop twice rather than anything special.
+			 */
+			'hxd.Pad',
 			'hxd.Timer',
 			'hxd.Math',
 			'hxd.Event',
