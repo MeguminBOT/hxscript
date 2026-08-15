@@ -45,6 +45,10 @@ class BenchCases {
 		// `switch (i % 3)` maps 0 -> 1, 1 -> 2, anything else -> 3, evaluated at the last counter value
 		var switchX:String = Std.string(((n - 1) % 3 == 0) ? 1 : (((n - 1) % 3 == 1) ? 2 : 3));
 
+		// `modArith` at the last counter value, worked out here so the expected value is exact rather
+		// than a number somebody would have to trust.
+		var modX:String = Std.string(((n - 1) * 7 + 3) % 11);
+
 		return [
 			// --- core: plain expression-level hscript, expected to work in every library ---
 			{
@@ -218,6 +222,60 @@ class BenchCases {
 				s: 'var i = 0; var s = 0; while (i < $N) { s = (i % 2 == 0) ? 1 : 2; i += 1; } s;'
 			},
 
+			{
+				n: "anonField",
+				t: "core",
+				i: N,
+				x: last,
+				s: 'var o = {a: 0}; var i = 0; var s = 0; while (i < $N) { o.a = i; s = o.a; i += 1; } s;'
+			},
+			{
+				n: "closureCall",
+				t: "core",
+				i: N,
+				x: "7",
+				s: 'var f = function(a) { return a; }; var i = 0; var s = 0; while (i < $N) { s = f(7); i += 1; } s;'
+			},
+			{
+				n: "hostMethod",
+				t: "core",
+				i: N,
+				x: "2",
+				s: 'var t = "abcdef"; var i = 0; var s = 0; while (i < $N) { s = t.indexOf("c"); i += 1; } s;'
+			},
+			// `ext` rather than `core`, though the construct is as ordinary as they come. What varies is
+			// not the language but whether a library puts the standard library in a script's scope at all:
+			// hscript and hscript-improved answer `Unknown variable: Math` out of the box, where iris,
+			// RuleScript, insanity and this one resolve it.
+			{
+				n: "hostStatic",
+				t: "ext",
+				i: N,
+				x: last,
+				s: 'var i = 0; var s = 0; while (i < $N) { s = Math.max(i, 0); i += 1; } s;'
+			},
+			{
+				n: "arrayPush",
+				t: "core",
+				i: N,
+				x: last,
+				s: 'var a = []; var i = 0; while (i < $N) { a.push(i); i += 1; } a[a.length - 1];'
+			},
+			{
+				n: "boolLogic",
+				t: "core",
+				i: N,
+				x: "true",
+				s: 'var i = 0; var b = false; while (i < $N) { b = (i >= 0) && (i < $N); i += 1; } b;'
+			},
+			{
+				n: "modArith",
+				t: "core",
+				i: N,
+				x: modX,
+				s: 'var i = 0; var s = 0; while (i < $N) { s = (i * 7 + 3) % 11; i += 1; } s;'
+			},
+
 			// --- ext: features a library may not implement ---
 			{
 				n: "switch",
@@ -293,6 +351,36 @@ class BenchCases {
 				i: N,
 				x: "3",
 				s: 'class D { public var x = 3; public function new() {} }\n' + 'var d = new D(); var i = 0; var s = 0; while (i < $N) { s = d.x; i += 1; } s;'
+			},
+
+			// --- ext: newer language, where the point is which libraries have reached it ---
+			{
+				n: "stringSwitch",
+				t: "ext",
+				i: N,
+				x: "2",
+				s: 'var t = "b"; var i = 0; var s = 0; while (i < $N) { switch (t) { case "a": s = 1; case "b": s = 2; default: s = 3; } i += 1; } s;'
+			},
+			{
+				n: "nullCoal",
+				t: "ext",
+				i: N,
+				x: "5",
+				s: 'var z = null; var i = 0; var s = 0; while (i < $N) { s = z ?? 5; i += 1; } s;'
+			},
+			// An abstract with an operator, which is what hscript-insanity spent its last thirty-odd
+			// commits on. A library that cannot declare one reports `unsupported`, which is the reading
+			// this case exists for rather than a time.
+			{
+				n: "abstractOp",
+				t: "ext",
+				i: N,
+				x: last,
+				s: 'abstract Metres(Int) from Int to Int { public inline function new(v:Int) this = v;
+'
+				+ '@:op(A + B) public inline function plus(o:Int):Int return this + o; }
+'
+				+ 'var i = 0; var s = 0; while (i < $N) { var m = new Metres(i); s = m + 0; i += 1; } s;'
 			}
 		];
 	}
