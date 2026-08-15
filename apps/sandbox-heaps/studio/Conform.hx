@@ -100,7 +100,21 @@ class Conform {
 				'DIFFERS';
 			}
 
-			say(pad(label, 30) + pad(verdict, 13) + pad(was, 34) + now);
+			say(pad(label, 30) + pad(verdict, 13) + pad(clip(was), 34) + clip(now));
+
+			/**
+			 * **The whole of both, whenever they disagree.**
+			 *
+			 * A row has to stay a row, so the table clips, and for a case that agrees there is nothing
+			 * in the clipped part worth reading. A case that differs is the opposite: the difference is
+			 * usually a thrown message, and a thrown message says which type could not be cast to which
+			 * somewhere past the thirtieth character. Clipping it leaves `threw Can't cast ...`, which
+			 * names the problem as precisely as `it broke`.
+			 */
+			if (verdict == 'DIFFERS') {
+				say('    interpreted  ' + was);
+				say('    compiled     ' + now);
+			}
 		}
 
 		say('');
@@ -187,12 +201,16 @@ class Conform {
 		}
 	}
 
-	/** @return A value on one line and short enough that a row stays a row. */
+	/** @return A value on one line, however long that line is. */
 	static function flatten(v:String):String {
 		var flat:String = StringTools.replace(v, '\r', ' ');
 		flat = StringTools.replace(flat, '\n', ' ');
-		flat = StringTools.replace(flat, '\t', ' ');
-		return flat.length > 32 ? flat.substr(0, 29) + '...' : flat;
+		return StringTools.replace(flat, '\t', ' ');
+	}
+
+	/** @return Short enough that a row stays a row. */
+	static function clip(v:String):String {
+		return v.length > 32 ? v.substr(0, 29) + '...' : v;
 	}
 
 	static function pad(v:String, width:Int):String {
