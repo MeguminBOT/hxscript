@@ -7,7 +7,7 @@ import TestCase.ok;
  * Imports across modules of one world, and `import pack.*` in particular.
  *
  * A wildcard used to reach nothing a package declared: the filter that keeps a module's main type
- * compared the whole module path against the type's name, so `puzzle.core.Handoff` never matched
+ * compared the whole module path against the type's name, so `game.core.Handoff` never matched
  * `Handoff` and every packaged type was dropped. Only an unpackaged module could survive it, which
  * is why the root wildcard in the default imports looked fine.
  */

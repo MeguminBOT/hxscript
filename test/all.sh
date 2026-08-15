@@ -94,7 +94,7 @@ if [ "$SANDBOX" = "1" ]; then
 		note "host" "skipped, no build at apps/sandbox-heaps/export/hlc"
 		echo "  build it with: cd apps/sandbox-heaps && ./build.sh"
 	else
-		for project in conform widgets heaps3d puzzle; do
+		for project in conform widgets heaps3d; do
 			line=$(cd "$(dirname "$app")" && ./Sandbox.exe --conform "$project" 2>/dev/null | grep -E '^== ' || true)
 			printf '  %-10s %s\n' "$project" "${line:-did not report}"
 

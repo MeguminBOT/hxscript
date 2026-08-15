@@ -166,10 +166,9 @@ sh "$lib_path/src/hxscript/hl/native/build.sh" "${native_flags[@]}"
 # be there for `projects/` to be seeded on a first run.
 #
 # **Replaced rather than copied over.** `cp -r` merges into what is already there, so a script
-# deleted from a template stayed in the build output forever. One did: a `Game.hx` removed from the
-# puzzle template months of edits ago went on being seeded, and it declared a second `Piece` that
-# won the name over `puzzle.game.Piece`. That reads as the library resolving a type wrongly across
-# modules, and it cost a rebuild of the library at an older commit to find that it was not.
+# deleted from a template stayed in the build output forever. One did, and it declared a second
+# class that won a name over the template's own. That reads as the library resolving a type
+# wrongly across modules, and it cost a rebuild at an older commit to find that it was not.
 rm -rf export/hlc/assets/templates
 mkdir -p export/hlc/assets
 cp -r assets/templates export/hlc/assets/

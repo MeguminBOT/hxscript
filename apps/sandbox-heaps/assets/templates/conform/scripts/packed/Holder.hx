@@ -5,7 +5,7 @@ import packed.Held;
 /**
  * A module that constructs a class of its own package, annotates it, and calls it.
  *
- * The three separate questions the puzzle template fails on, kept apart so a failure says which:
+ * Three separate questions, kept apart so a failure says which one it is:
  * whether the value can be made, whether it satisfies an annotation naming its type, and whether a
  * method can be called on it.
  */

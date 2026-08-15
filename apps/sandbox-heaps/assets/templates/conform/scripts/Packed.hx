@@ -5,9 +5,8 @@ import packed.Holder;
  * A class of a package, reached from outside it and from inside it.
  *
  * Everything else in this project is flat, and so is the corpus, and a project is neither: it is
- * many modules laid out in packages. The puzzle template is the first thing here shaped that way and
- * it does not run, so these ask the same questions on two modules instead of on twenty-eight, one
- * question each so that a failure says which one.
+ * many modules laid out in packages. These ask the same questions on two modules, one question
+ * each, so that a failure says which one.
  */
 class Packed {
 	/** @return The names of this module's cases. */
@@ -21,7 +20,7 @@ class Packed {
 		return 'made ' + (h != null);
 	}
 
-	/** Calling a method on one, which is where the puzzle engine stops. */
+	/** Calling a method on one, which is where a multi-module project stops. */
 	public static function usedHere():Dynamic {
 		var h:Held = new Held();
 		h.bump();
@@ -41,7 +40,7 @@ class Packed {
 		return 'made ' + owner.made();
 	}
 
-	/** And the call, done from inside the package, which is the puzzle shape exactly. */
+	/** And the call, done from inside the package, which is the shape that failed. */
 	public static function usedInside():Dynamic {
 		var owner:Holder = new Holder();
 		return owner.used();

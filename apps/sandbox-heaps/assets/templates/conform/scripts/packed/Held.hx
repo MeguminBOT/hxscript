@@ -5,8 +5,8 @@ package packed;
  *
  * `Shared` next door is the same idea one step simpler: another module, no package. A project is
  * usually neither, being many modules laid out in packages, and the difference between the two turns
- * out to matter. The puzzle template is 28 modules under `puzzle.game`, `puzzle.core` and
- * `puzzle.play`, and its engine cannot call a method on the board it just constructed.
+ * out to matter: a project is many modules laid out in packages, and a class that cannot call a
+ * method on one its own package built is the failure this pins down.
  */
 class Held {
 	public var n:Int = 0;
