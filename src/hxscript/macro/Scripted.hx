@@ -1284,7 +1284,9 @@ class Scripted {
 				}
 
 				/** Kept in `__vars` too, since a compiled body asks from outside any frame of the interpreter's. */
-				var __superRef:hxscript.runtime.Variable = {ref: hxscript.runtime.Reference.RSuper(superLocals, __constructSuper)};
+				var __superRef:hxscript.runtime.Variable = {
+					ref: hxscript.runtime.Reference.RSuper(superLocals, __constructSuper, Type.getSuperClass(Type.getClass(this)))
+				};
 				__interp.locals.set('super', __superRef);
 				__vars.set('super', __superRef);
 			}
@@ -1398,7 +1400,14 @@ class Scripted {
 				}
 
 				if (isSuper) {
-					var __superRef:hxscript.runtime.Variable = {ref: hxscript.runtime.Reference.RSuper(superLocals, constructor ?? __constructSuper)};
+					/**
+					 * The base is named only when `__constructSuper` is what will run, since that is the
+					 * one whose parameters belong to the host class rather than to a script.
+					 */
+					var __superRef:hxscript.runtime.Variable = {
+						ref: hxscript.runtime.Reference.RSuper(superLocals, constructor ?? __constructSuper,
+							constructor != null ? null : Type.getSuperClass(Type.getClass(this)))
+					};
 					__interp.locals.set('super', __superRef);
 					__vars.set('super', __superRef);
 				}

@@ -515,7 +515,7 @@ class Runtime {
 			return null;
 
 		switch (cast(found, Reference)) {
-			case RSuper(locals, _):
+			case RSuper(locals, _, _):
 				if (locals == null || !locals.exists(name))
 					return null;
 
@@ -623,8 +623,17 @@ class Runtime {
 			 */
 			var builds:Dynamic = stood.hostClass == null ? null : (cast stood.hostClass : hl.BaseType.Class).__constructor__;
 
-			if (builds != null)
-				Reflect.callMethod(null, hl.Api.noClosure(builds), [self].concat(given));
+			if (builds != null) {
+				/**
+				 * Placed rather than passed in order, which is what the interpreter does with the same
+				 * `super`: it hands them to `Type.createInstance` through the same helper. A base
+				 * declaring `(primitive, ?material, ?parent)` reached by `super(prim, parent)` is the
+				 * ordinary way to write it, and passing two arguments to the first two parameters puts
+				 * a scene object where a material belongs.
+				 */
+				var placed:Array<Dynamic> = hxscript.types.ArgumentTools.forConstructor(stood.hostClass, given);
+				Reflect.callMethod(null, hl.Api.noClosure(builds), [self].concat(placed));
+			}
 
 			return;
 		}
@@ -633,7 +642,7 @@ class Runtime {
 
 		if (found != null && found is Reference) {
 			switch (cast(found, Reference)) {
-				case RSuper(_, constructor):
+				case RSuper(_, constructor, _):
 					if (constructor != null) {
 						Reflect.callMethod(self, constructor, args);
 						return;
@@ -1144,7 +1153,12 @@ class Runtime {
 		if (boxed != null)
 			return boxed;
 
-		return hxscript.proxy.TypeProxy.createInstance(type, (args : Array<Dynamic>));
+		/**
+		 * The arguments placed rather than passed in order, which is the same helper the interpreter
+		 * constructs through. A call that leaves an optional parameter out in the middle is written by
+		 * type and cannot be read back from the array, and the two backends have to agree about it.
+		 */
+		return hxscript.proxy.TypeProxy.createInstance(type, hxscript.types.ArgumentTools.forConstructor(type, (args : Array<Dynamic>)));
 	}
 
 	/**

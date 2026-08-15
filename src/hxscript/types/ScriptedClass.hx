@@ -566,7 +566,8 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 		 * those arguments are evaluated once rather than twice.
 		 */
 		if (Reflect.field(instanceClass, '__nativeSuper') == true) {
-			var inst:IScriptedInstance = Type.createInstance(instanceClass, superArguments(arguments));
+			var forSuper:Array<Dynamic> = superArguments(arguments);
+			var inst:IScriptedInstance = Type.createInstance(instanceClass, ArgumentTools.forConstructor(instanceClass, forSuper));
 			inst.__scriptConstruct(this, arguments);
 			return inst;
 		}

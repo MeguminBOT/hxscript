@@ -18,8 +18,8 @@
 # which is a fact about this build rather than about the library. They were added to the corpus
 # and not here, and nothing ran the whole matrix afterwards, so five cases sat failing.
 --macro hxscript.setup.Autowire.run()
--D hxscript_bridge_types=HostBase,HostQuirk
--D hxscript_keep=haxe.Json,haxe.ds.Option,HostVec,HostVecImpl,HostFlag,HostDial
+-D hxscript_bridge_types=HostBase,HostQuirk,HostShaped
+-D hxscript_keep=haxe.Json,haxe.ds.Option,HostVec,HostVecImpl,HostFlag,HostDial,HostTint
 
 -main AllCommon
 -cpp bin_test/cpp/common
@@ -42,8 +42,8 @@
 # which is a fact about this build rather than about the library. They were added to the corpus
 # and not here, and nothing ran the whole matrix afterwards, so five cases sat failing.
 --macro hxscript.setup.Autowire.run()
--D hxscript_bridge_types=HostBase,HostQuirk
--D hxscript_keep=haxe.Json,haxe.ds.Option,HostVec,HostVecImpl,HostFlag,HostDial
+-D hxscript_bridge_types=HostBase,HostQuirk,HostShaped
+-D hxscript_keep=haxe.Json,haxe.ds.Option,HostVec,HostVecImpl,HostFlag,HostDial,HostTint
 
 -main AllCpp
 -cpp bin_test/cpp/cppia
@@ -65,8 +65,8 @@
 # which is a fact about this build rather than about the library. They were added to the corpus
 # and not here, and nothing ran the whole matrix afterwards, so five cases sat failing.
 --macro hxscript.setup.Autowire.run()
--D hxscript_bridge_types=HostBase,HostQuirk
--D hxscript_keep=haxe.Json,haxe.ds.Option,HostVec,HostVecImpl,HostFlag,HostDial
+-D hxscript_bridge_types=HostBase,HostQuirk,HostShaped
+-D hxscript_keep=haxe.Json,haxe.ds.Option,HostVec,HostVecImpl,HostFlag,HostDial,HostTint
 
 -main FrontierTest
 -cpp bin_test/cppia

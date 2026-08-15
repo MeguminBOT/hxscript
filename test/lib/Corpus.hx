@@ -486,6 +486,37 @@ class Corpus {
 		check('an optional method argument', 'return new T().grow(2);', '12',
 			'public function new() {} public function grow(n:Int, ?by:Int):Int { return n + (by == null ? 10 : by); }');
 
+		// Which optional a short call leaves out is decided by type, not by position, and the ones
+		// above never show it because their optionals are all at the end. A constructor of the shape
+		// every scene graph is built on, `(thing, ?options, ?parent)`, is where it shows: the call
+		// writes two arguments meaning the first and the last, and a binding that goes in order puts
+		// the parent in the options and the constructor fails on a type the script never mentioned.
+		// Written against a host class on purpose. A script's own function is bound by a runtime that
+		// has its parameter list in front of it, and a compiled one's is not: nothing at runtime
+		// carries a constructor's signature, so this is the half that had to be recorded to be asked.
+		var shaped:String = 'import HostShaped;';
+
+		check('a host optional in the middle left out', 'var p = new HostShaped("p"); return new HostShaped("c", p).shape();', 'c/-/p',
+			null, shaped);
+
+		check('a host optional in the middle given', 'var p = new HostShaped("p"); return new HostShaped("c", new HostTint("red"), p).shape();',
+			'c/red/p', null, shaped);
+
+		check('a host optional at the end left out', 'return new HostShaped("c", new HostTint("red")).shape();', 'c/red/-', null, shaped);
+
+		check('every host optional left out', 'return new HostShaped("c").shape();', 'c/-/-', null, shaped);
+
+		// The same call written as a `super`, which reaches the base through a bridge rather than
+		// through `new` and so is a separate path on every backend.
+		check('a host optional in the middle left out of a super', 'var p = new HostShaped("p"); return new Sub("c", p).shape();', 'c/-/p',
+			null, shaped + '\nclass Sub extends HostShaped { public function new(label:String, ?held:HostShaped) { super(label, held); } }');
+
+		// Placing an argument means looking at it, and what a script holds an abstract in is a wrapper
+		// around the value rather than the value. Every other call unwraps one on the way through and
+		// construction was the one that did not, so this is here to keep the two together.
+		check('a boxed abstract handed to a constructor', 'return new T(new HostVec(3, 4)).seen;', '3',
+			'public var seen:Float; public function new(v:HostVec) { seen = v.x; }', 'import HostVec;');
+
 		at('inheritance');
 		check('an override through a base reference', 'var v:Base = new Child(); return v.speak();', 'child',
 			null,

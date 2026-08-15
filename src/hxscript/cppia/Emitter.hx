@@ -1236,6 +1236,10 @@ class Emitter {
 					throw new Unsupported('new ' + cl + ', which is an abstract the host compiled and so has no class to make', e.pos);
 
 				var built:String = (cl == 'Map' || cl == 'haxe.ds.Map') && !typePaths.exists(cl) ? 'hxscript.runtime.AnyMap' : resolveType(cl, e.pos);
+
+				if (shortOfMiddle(built, params.length))
+					throw new Unsupported('new ' + cl + ', which leaves out a parameter that is not its last', e.pos);
+
 				var wantedNew:Int = padArgs(declaredClass(built), 'new', params.length);
 				w.pos(line);
 				w.token('NEW');
@@ -1763,6 +1767,10 @@ class Emitter {
 
 			case EIdent('super'):
 				var supplied:Int = params.length;
+
+				if (superArgs >= 0 && shortOfMiddle(currentSuper, supplied))
+					throw new Unsupported('super(...), which leaves out a parameter of ' + currentSuper + ' that is not its last', pos);
+
 				var wanted:Int = superArgs > supplied ? superArgs : supplied;
 
 				w.pos(line);
@@ -3218,6 +3226,49 @@ class Emitter {
 			return info.kind == 'class' ? 0 : -1;
 
 		return info.ctorArgs;
+	}
+
+	/**
+	 * Whether a call leaves out a parameter of a host constructor that is not the last one.
+	 *
+	 * Everything here pads from the right, and for most constructors that is what Haxe does too. It
+	 * is not what Haxe does for one whose optional parameter has another parameter behind it: `new
+	 * Mesh(prim, parent)` against `(primitive, ?material, ?parent)` is placed by asking what each
+	 * argument is, and the answer is a `null` in the middle rather than one on the end. Padding it
+	 * here writes the parent into the material.
+	 *
+	 * Nothing in an instruction can ask that question, and the interpreter can, so the module is
+	 * refused and interpreted instead: slower, and the answer the script was written for.
+	 *
+	 * **Only where a skip is possible at all.** A call is placed in order for as long as the
+	 * parameters it reaches are required ones, since a required parameter is never the one dropped.
+	 * So `new Mesh(prim)` is padded here as it always was, and it is `new Mesh(prim, parent)`, whose
+	 * second parameter may be skipped, that has to go elsewhere to be decided.
+	 *
+	 * @param path The host class's full path.
+	 * @param given How many arguments the call wrote.
+	 * @return Whether this call is one padding cannot complete.
+	 */
+	function shortOfMiddle(path:String, given:Int):Bool {
+		var infos:Array<hxscript.types.TypeCollection.TypeInfo> = hxscript.types.TypeCollection.main.fromCompilePath(path);
+		if (infos == null || infos.length == 0)
+			infos = hxscript.types.TypeCollection.main.fromPath(path);
+		if (infos == null || infos.length == 0)
+			return false;
+
+		var written:Null<String> = infos[0].ctorSkip;
+		if (written == null)
+			return false;
+
+		var params:Array<String> = written.split('|');
+		if (given >= params.length)
+			return false;
+
+		for (i in 0...given)
+			if (params[i].charAt(0) == '?')
+				return true;
+
+		return false;
 	}
 
 	/**

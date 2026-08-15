@@ -37,6 +37,19 @@ typedef TypeInfo = {
 	var ?ctorArgs:Int;
 
 	var ?ctorRequired:Int;
+
+	/**
+	 * The constructor's parameters, for a constructor a call may leave a middle one out of.
+	 *
+	 * `?` for an optional parameter and then a type to test a value against, one per parameter,
+	 * separated by `|`. An empty type accepts anything, which is what a parameter is given when
+	 * nothing at runtime can answer whether a value is one.
+	 *
+	 * Only written when the constructor has an optional parameter with another parameter after it,
+	 * because that is the only shape a call can be short of in the middle rather than at the end.
+	 * Everything else pads on the right, which every target already does.
+	 */
+	var ?ctorSkip:String;
 }
 
 /** The type index, keyed several ways so lookups by path, module, package, or compile path are direct. */

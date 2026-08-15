@@ -3531,7 +3531,7 @@ class Interp {
 
 		if (o is Reference) {
 			switch (cast(o, Reference)) {
-				case RSuper(locals, _):
+				case RSuper(locals, _, _):
 					if (locals == null) {
 						error(EHasNoSuper);
 					} else if (locals.exists(f)) {
@@ -3883,13 +3883,21 @@ class Interp {
 
 		if (f is Reference) {
 			switch (cast(f, Reference)) {
-				case RSuper(locals, constructor):
+				case RSuper(locals, constructor, rebuilt):
 					if (constructor == null) {
 						error(EHasNoSuper);
 					} else if (!superConstructorAllowed) {
 						error(ECustom('Cannot call super constructor outside class constructor'));
 					} else {
 						f = constructor;
+
+						/**
+						 * A rebuilt base's constructor takes the host class's parameters, so the same
+						 * placing a `new` of that class gets applies here: `super(label, held)` against
+						 * `(label, ?tint, ?held)` means the first and the last.
+						 */
+						if (rebuilt != null)
+							args = ArgumentTools.forConstructor(rebuilt, args);
 					}
 				default:
 			}
@@ -3977,7 +3985,7 @@ class Interp {
 		if (boxed != null)
 			return boxed;
 
-		return Type.createInstance(c, args);
+		return Type.createInstance(c, ArgumentTools.forConstructor(c, args));
 	}
 }
 
