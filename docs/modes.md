@@ -223,7 +223,7 @@ so a refusal costs speed rather than behaviour.
 
 | refused | note |
 | --- | --- |
-| a name it cannot resolve | an identifier or type that is neither in the batch, ambient, nor a host static |
+| a name it cannot resolve | an identifier or type that is in neither the batch, the module's imports, the module's own package, the world's type table, nor the host's ambient names |
 | a reference to a class compiled in another batch | it cannot link across batches, so it waits for one that holds both |
 | a reference to a scripted type that stays interpreted | there is nothing for the name to link to, and cppia resolves an unknown one to null and then uses it without looking |
 | a host superclass whose constructor shape is unknown | the type table has no entry for it, so a call to it cannot be padded |
@@ -238,6 +238,17 @@ listed as refused until recently: abstracts, map comprehensions, rest arguments,
 key-value loops, `??`, `%=`, `case a | b:`, and a `using` whose receiver type is known. Pattern
 matching compiles in full, over enum constructors, arrays, objects and nested shapes alike: a switch
 the `SWITCH` instruction cannot express is rewritten into an if-else chain rather than refused.
+
+Three more went the same way and they are the ones a project met most often. **Constructing an
+abstract the host compiled** — `h3d.Vector`, `h3d.Matrix`, `h2d.col.Point`, which is most of what a
+3D script writes — used to name a type with no runtime class, so it was refused; it is now built
+through `hxscript.runtime.Construct`, which reaches the static the constructor became. **A
+constructor call that leaves out an optional in the middle**, `new Mesh(prim, parent)` against
+`(primitive, ?material, ?parent)`, is placed by the same helper for a `new` and against the recorded
+parameter shape for a `super(...)`, rather than padded from the right into the wrong parameter. And
+**a host name the module never imported** — a secondary type of an imported module, an enum
+constructor, an enum-abstract constant — is now looked up in the world's type table, which is where
+the interpreter had been finding it all along.
 
 The evidence is [`test/cpp/CppiaTest.hx`](../test/cpp/CppiaTest.hx), which runs 173 constructs
 interpreted and compiled and compares the answers. It reports 0 wrong, and one refusal that is

@@ -98,6 +98,24 @@ Neko went from 287 to 370 passing and python from 38 to 367. php, js, lua and hl
 
 ### Compiler and parser
 
+- **A type in the module's own package resolves with no import**, the way Haxe resolves one. Naming
+  a sibling module used to reach nothing, and the failure surfaced at the first use rather than at
+  the name — `Invalid access to field` interpreted, `Cannot call` compiled — so both sides failed
+  alike and it read as an unsupported construct rather than as a defect. Every module of a packaged
+  project had to import its own siblings. Imports are still read first, so an explicit import of
+  another package's type of the same name still wins.
+- **An enum's constructors are bound when its type is imported on hxcpp.** A class and an enum are
+  one runtime object there, so `t is Class` was true of an enum and took it down the class branch:
+  `import haxe.ds.Option;` bound `Option` and neither `Some` nor `None`, and a bare `None` read
+  whatever else was in scope under that name. This was the one case where two interpreters answered
+  differently on different targets.
+- **cppia refuses nothing in the conformance corpus**, down from 19 of 329 cases, with no case
+  answering differently. Three causes: constructing an abstract the host compiled, which has no
+  runtime class for a `NEW` to name and is now built through `hxscript.runtime.Construct`; a
+  constructor call short of an optional in the middle, now placed by type rather than padded from
+  the right into the wrong parameter; and a host name the module never imported, now resolved
+  through the world's type table. Boxed abstracts also reach `Std.string` and their `@:op` methods
+  from compiled code, which is what construction working made reachable.
 - `??`, `%=`, `case a | b:` and a `using` whose receiver type is known now compile instead of being
   refused. A typedef alias such as bare `List` resolves.
 - `final class`, `abstract class` and `extern` members parse. The flags are recorded but not

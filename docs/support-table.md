@@ -12,9 +12,9 @@ None. Every case with a written answer produced it in every column that ran it.
 
 **hl-bytecode** against `hl-interp`: 329 agree, **0 differ**, 0 refused, 0 fell back to the interpreter, 0 killed the process.
 
-**hxcpp-cppia** against `hxcpp-interp`: 310 agree, **0 differ**, 19 refused, 0 fell back to the interpreter, 0 killed the process.
+**hxcpp-cppia** against `hxcpp-interp`: 329 agree, **0 differ**, 0 refused, 0 fell back to the interpreter, 0 killed the process.
 
-**hxcpp-cppia-jit** against `hxcpp-interp`: 310 agree, **0 differ**, 19 refused, 0 fell back to the interpreter, 0 killed the process.
+**hxcpp-cppia-jit** against `hxcpp-interp`: 329 agree, **0 differ**, 0 refused, 0 fell back to the interpreter, 0 killed the process.
 
 ## What works, by part and by mode
 
@@ -49,18 +49,17 @@ rather than correctness. **Bold** marks a part where something is actually wrong
 | syntax | 36 | 36/36 | 36/36 | 36/36 | 36/36 | 36/36 | 36/36 |
 | inheritance | 9 | 9/9 | 9/9 | 9/9 | 9/9 | 9/9 | 9/9 |
 | shapes | 25 | 25/25 | 25/25 | 25/25 | 25/25 | 25/25 | 25/25 |
-| arguments | 12 | 12/12 | 12/12 | 12/12 +5r | 12/12 +5r | 12/12 | 12/12 |
+| arguments | 12 | 12/12 | 12/12 | 12/12 | 12/12 | 12/12 | 12/12 |
 | reflection | 14 | 14/14 | 14/14 | 14/14 | 14/14 | 14/14 | 14/14 |
 | refusals | 25 | 25/25 | 25/25 | 25/25 | 25/25 | 25/25 | 25/25 |
-| host | 30 | **29/30** | 30/30 | 30/30 +14r | 30/30 +14r | 30/30 | 30/30 |
+| host | 30 | **29/30** | 30/30 | 30/30 | 30/30 | 30/30 | 30/30 |
 
 ## Where the interpreter itself reads differently per target
 
-2 of 329 cases. This is reachability, not semantics.
+1 of 329 cases. This is reachability, not semantics.
 
 | case | eval-interp | hxcpp-interp | hl-interp |
 | --- | --- | --- | --- |
-| a host enum constructor bare after an import | None | 0 | None |
 | an abstract Map through its alias | **killed** | 1 | 1 |
 
 <details>
@@ -276,12 +275,12 @@ rather than correctness. **Bold** marks a part where something is actually wrong
 | 205 | a default argument overridden | 4 | 4 | 4 | 4 | 4 | 4 |
 | 206 | two optionals, one given | 1/2/9 | 1/2/9 | 1/2/9 | 1/2/9 | 1/2/9 | 1/2/9 |
 | 207 | an optional method argument | 12 | 12 | 12 | 12 | 12 | 12 |
-| 208 | a host optional in the middle left out | c/-/p | c/-/p | refused: new HostShaped, which leaves out a parameter that is not its last | refused: new HostShaped, which leaves out a parameter that is not its last | c/-/p | c/-/p |
-| 209 | a host optional in the middle given | c/red/p | c/red/p | refused: unresolved type HostTint | refused: unresolved type HostTint | c/red/p | c/red/p |
-| 210 | a host optional at the end left out | c/red/- | c/red/- | refused: new HostShaped, which leaves out a parameter that is not its last | refused: new HostShaped, which leaves out a parameter that is not its last | c/red/- | c/red/- |
+| 208 | a host optional in the middle left out | c/-/p | c/-/p | c/-/p | c/-/p | c/-/p | c/-/p |
+| 209 | a host optional in the middle given | c/red/p | c/red/p | c/red/p | c/red/p | c/red/p | c/red/p |
+| 210 | a host optional at the end left out | c/red/- | c/red/- | c/red/- | c/red/- | c/red/- | c/red/- |
 | 211 | every host optional left out | c/-/- | c/-/- | c/-/- | c/-/- | c/-/- | c/-/- |
-| 212 | a host optional in the middle left out of a super | c/-/p | c/-/p | refused: super(...), which leaves out a parameter of HostShaped that is not ... | refused: super(...), which leaves out a parameter of HostShaped that is not ... | c/-/p | c/-/p |
-| 213 | a boxed abstract handed to a constructor | 3 | 3 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 3 | 3 |
+| 212 | a host optional in the middle left out of a super | c/-/p | c/-/p | c/-/p | c/-/p | c/-/p | c/-/p |
+| 213 | a boxed abstract handed to a constructor | 3 | 3 | 3 | 3 | 3 | 3 |
 | 214 | an override through a base reference | child | child | child | child | child | child |
 | 215 | a method calling another on this | 21 | 21 | 21 | 21 | 21 | 21 |
 | 216 | a method calling another on this with an argument | 20 | 20 | 20 | 20 | 20 | 20 |
@@ -337,30 +336,30 @@ rather than correctness. **Bold** marks a part where something is actually wrong
 | 266 | rest arguments | 6 | 6 | 6 | 6 | 6 | 6 |
 | 267 | a static extension on an unknown receiver | abab | abab | abab | abab | abab | abab |
 | 268 | a typed catch on a scripted class | caught | caught | caught | caught | caught | caught |
-| 269 | a host abstract constructed | 3:4 | 3:4 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 3:4 | 3:4 |
-| 270 | a host abstract property | 5 | 5 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 5 | 5 |
-| 271 | a host abstract field | 7 | 7 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 7 | 7 |
-| 272 | a host abstract operator | 4:6 | 4:6 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 4:6 | 4:6 |
-| 273 | a host abstract in an array | 2:2 | 2:2 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 2:2 | 2:2 |
-| 274 | an abstract operator on a parameter | 2:4 | 2:4 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 2:4 | 2:4 |
-| 275 | an abstract method taking its own abstract | 2:4 | 2:4 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 2:4 | 2:4 |
-| 276 | a field of an abstract bound as a parameter | 3 | 3 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 3 | 3 |
-| 277 | an abstract returned through a declared return type | 2:5 | 2:5 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 2:5 | 2:5 |
+| 269 | a host abstract constructed | 3:4 | 3:4 | 3:4 | 3:4 | 3:4 | 3:4 |
+| 270 | a host abstract property | 5 | 5 | 5 | 5 | 5 | 5 |
+| 271 | a host abstract field | 7 | 7 | 7 | 7 | 7 | 7 |
+| 272 | a host abstract operator | 4:6 | 4:6 | 4:6 | 4:6 | 4:6 | 4:6 |
+| 273 | a host abstract in an array | 2:2 | 2:2 | 2:2 | 2:2 | 2:2 | 2:2 |
+| 274 | an abstract operator on a parameter | 2:4 | 2:4 | 2:4 | 2:4 | 2:4 | 2:4 |
+| 275 | an abstract method taking its own abstract | 2:4 | 2:4 | 2:4 | 2:4 | 2:4 | 2:4 |
+| 276 | a field of an abstract bound as a parameter | 3 | 3 | 3 | 3 | 3 | 3 |
+| 277 | an abstract returned through a declared return type | 2:5 | 2:5 | 2:5 | 2:5 | 2:5 | 2:5 |
 | 278 | an own method called from a closure | 2 | 2 | 2 | 2 | 2 | 2 |
 | 279 | an own field read from a closure | 7 | 7 | 7 | 7 | 7 | 7 |
-| 280 | an enum abstract constructor, bare | 1 | 1 | refused: unresolved identifier Add | refused: unresolved identifier Add | 1 | 1 |
+| 280 | an enum abstract constructor, bare | 1 | 1 | 1 | 1 | 1 | 1 |
 | 281 | an enum abstract constructor, through an import | 1 | 1 | 1 | 1 | 1 | 1 |
-| 282 | an enum abstract constructor, unimported | 1 | 1 | refused: unresolved identifier HostFlag | refused: unresolved identifier HostFlag | 1 | 1 |
+| 282 | an enum abstract constructor, unimported | 1 | 1 | 1 | 1 | 1 | 1 |
 | 283 | a host static by bare name after a static import | 3 | 3 | 3 | 3 | 3 | 3 |
-| 284 | a host static written then read by bare name | 5 | 5 | refused: unresolved identifier HostDial | refused: unresolved identifier HostDial | 5 | 5 |
-| 285 | a host static written then read qualified | 6 | 6 | refused: unresolved identifier HostDial | refused: unresolved identifier HostDial | 6 | 6 |
+| 284 | a host static written then read by bare name | 5 | 5 | 5 | 5 | 5 | 5 |
+| 285 | a host static written then read qualified | 6 | 6 | 6 | 6 | 6 | 6 |
 | 286 | a host static read | true | true | true | true | true | true |
 | 287 | a host static that changes | true | true | true | true | true | true |
 | 288 | a host method on a value | AB | AB | AB | AB | AB | AB |
 | 289 | a host class constructed | hi | hi | hi | hi | hi | hi |
 | 290 | a host enum value | None | None | None | None | None | None |
 | 291 | a host enum through an import | None | None | None | None | None | None |
-| 292 | a host enum constructor bare after an import | None | 0 | refused: unresolved identifier None | refused: unresolved identifier None | None | None |
+| 292 | a host enum constructor bare after an import | None | None | None | None | None | None |
 | 293 | a host enum constructor with arguments through an import | Some(3) | Some(3) | Some(3) | Some(3) | Some(3) | Some(3) |
 | 294 | a host enum matched | 7 | 7 | 7 | 7 | 7 | 7 |
 | 295 | an abstract Map through its alias | **killed** | 1 | 1 | 1 | 1 | 1 |
