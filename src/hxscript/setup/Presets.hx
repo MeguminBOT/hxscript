@@ -328,6 +328,20 @@ class Presets {
 			'h3d.pass.DefaultShadowMap',
 			'h3d.parts.GpuParticles',
 			'h3d.col.Sphere',
+
+			/**
+			 * The shape a game asks questions of rather than draws. `Ray` with
+			 * `Bounds.rayIntersection` is every hitscan shot and every ground probe, and both are
+			 * arithmetic with no device behind them, so a project can run its own collision without a
+			 * window and a test can drive it without one either.
+			 *
+			 * `h3d.col.Point` is not here beside it, and cannot be: it is a typedef to `h3d.Vector`,
+			 * which is an `@:forward abstract`, and the manifest holds a reference per type so that
+			 * dead code elimination keeps them. An abstract is not a value, so naming one there fails
+			 * the build inside a macro rather than where it was written. Nothing is lost, since the
+			 * 2D preset already wraps `h3d.Vector` and the alias resolves to that.
+			 */
+			'h3d.col.Ray',
 			/**
 			 * `Polygon` is the base the shapes share and is worth naming for itself: preparing one to
 			 * be drawn is `unindex` and `addNormals`, both declared there, and a project that builds a

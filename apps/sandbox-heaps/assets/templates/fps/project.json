@@ -1,0 +1,6 @@
+{
+	"title": "Shooter",
+	"kind": "heaps",
+	"entry": "Shooter",
+	"description": "A first person room with targets that come apart when shot and crates that take the hit and slide. The simulation is a separate class with no scene graph in it, so every rule it follows is asked without a window: --conform fps runs ten cases over the physics itself."
+}

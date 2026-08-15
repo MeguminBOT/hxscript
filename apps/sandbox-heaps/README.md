@@ -191,6 +191,7 @@ new build cannot write over it.
 | `lights` | a field of cubes and orbiting spheres under a directional light and two point lights, each switchable |
 | `shadows` | spheres on a floor under a light that circles, dragging the shadows with it |
 | `gpuparticles` | ten thousand particles as one description rather than ten thousand objects, with their bounds drawn |
+| `fps` | a first person room with targets that break and crates that take the hit, whose whole simulation is a class with no scene graph in it |
 
 The last six are after the Heaps samples of the same names, adapted to this app's lifecycle. Heaps is
 MIT licensed, © 2013 Nicolas Cannasse.
