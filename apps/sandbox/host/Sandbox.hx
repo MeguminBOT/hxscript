@@ -102,6 +102,15 @@ class Sandbox {
 
 		hxscript.error.Sink.onDiagnostic.push(count);
 
+		/**
+		 * Every script below is about to be re-read from disk into a world that did not exist a moment
+		 * ago, so whatever was compiled for the last one describes files this one has not seen. Left
+		 * alone, those classes are bound into this world by path and everything that references them
+		 * is refused against them as `compiled elsewhere`, so a project that compiled whole on the
+		 * first run compiles less of itself on every run after.
+		 */
+		hxscript.compile.Compiler.reset();
+
 		world = new Environment();
 		listed = null;
 
@@ -200,6 +209,14 @@ class Sandbox {
 	 * something holds an instance or has written to a static, and between being read and being run,
 	 * nothing has.
 	 */
+	/**
+	 * Module names to compile, or null for all of them. Set by `--only` beside `--run`.
+	 *
+	 * A bisecting aid rather than a setting anybody wants: it exists so a crash inside emitted
+	 * bytecode can be narrowed to the module that carries it.
+	 */
+	public static var compileOnly:Null<Array<String>> = null;
+
 	public static function compile():Void {
 		if (world == null || compiledWorld)
 			return;
@@ -215,7 +232,25 @@ class Sandbox {
 			return;
 		}
 
-		var report = hxscript.compile.Compiler.compile(world);
+		/**
+		 * Only the modules named, when a run was asked to narrow itself.
+		 *
+		 * A fault in emitted bytecode ends the process with nothing written down, so the only way to
+		 * find which module carries one is to compile some and interpret the rest, then halve. Every
+		 * other module still runs, interpreted, so the project behaves and the crash either follows
+		 * the subset or it does not. `--probe` narrows the same way but never executes, which is no
+		 * help for a fault that only appears once the bytecode runs.
+		 */
+		var chosen:Null<Array<Module>> = null;
+
+		if (compileOnly != null) {
+			chosen = [];
+			for (module in world.modules)
+				if (compileOnly.indexOf(module.name) >= 0)
+					chosen.push(module);
+		}
+
+		var report = hxscript.compile.Compiler.compile(world, chosen);
 		var parts:Array<String> = ['compiled ${report.compiled.length} class(es) in ' + Math.round(report.ms * 10) / 10 + 'ms'];
 
 		classCount = report.compiled.length;

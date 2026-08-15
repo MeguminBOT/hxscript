@@ -173,6 +173,19 @@ class Backend {
 	/** Which classes have at least one compiled function in them. */
 	static var holders:Map<String, Bool> = new Map();
 
+	/**
+	 * Forgets every class compiled so far, so the next compile starts from source.
+	 *
+	 * The counterpart of cppia's, and here for the same reason: a host that re-reads its scripts into
+	 * a new world must be able to say that what was built for the old one no longer applies.
+	 */
+	public static function reset():Void {
+		holders = new Map();
+		#if (hl && hxscript_hl)
+		built = new Map();
+		#end
+	}
+
 	#if (hl && hxscript_hl)
 	/**
 	 * Compiles one module and binds whatever came out of it.

@@ -142,6 +142,24 @@ class Compiler {
 	 *        matters: they are declared before any is emitted, so they may refer to each other.
 	 * @return What compiled, what did not and why, and how long it took.
 	 */
+	/**
+	 * Forgets every class compiled so far, so the next compile starts from source.
+	 *
+	 * A backend remembers what it has built, by scripted path, for as long as the process lives, and
+	 * that is right for a host that keeps one world: a module offered twice need not be compiled
+	 * twice. It is wrong the moment a host builds a NEW world from files it has re-read, which is what
+	 * every reload and every project switch is. The paths are the same, so the old classes are bound
+	 * into the new world and the modules that were not compiled last time are refused against them
+	 * with `compiled elsewhere`, each refusal taking its dependents with it. A project that compiled
+	 * whole on the first run compiles less of itself on every run after.
+	 *
+	 * So a host that re-reads its scripts calls this first. Anything already running keeps the classes
+	 * it holds; this only decides what the next compile is offered.
+	 */
+	public static function reset():Void {
+		Backend.reset();
+	}
+
 	public static function compile(env:Environment, ?modules:Array<Module>):Report {
 		var report:Report = Report.empty();
 
@@ -172,5 +190,8 @@ class Compiler {
 	public static function compile(env:Environment, ?modules:Array<Module>):Report {
 		return Report.empty();
 	}
+
+	/** Does nothing: this build has no compiler, so nothing has been built to forget. */
+	public static function reset():Void {}
 	#end
 }
