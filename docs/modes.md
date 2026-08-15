@@ -22,8 +22,8 @@ cppia](#runtime-translation-and-how-it-differs-from-haxes-cppia) is the comparis
 
 ## Contents
 
-- [The three modes](#the-three-modes): [interpreted](#interpreted), [cppia](#cppia),
-  [cppia with the JIT](#cppia-with-the-jit)
+- [The four modes](#the-four-modes): [interpreted](#interpreted), [cppia](#cppia),
+  [cppia with the JIT](#cppia-with-the-jit), [HashLink bytecode](#hashlink-bytecode)
 - [What compiling buys](#what-compiling-buys)
 - [What compiling costs](#what-compiling-costs)
 - [Choosing](#choosing)
@@ -35,7 +35,7 @@ cppia](#runtime-translation-and-how-it-differs-from-haxes-cppia) is the comparis
 - [Where compiled code still differs](#where-compiled-code-still-differs)
 - [What is not known](#what-is-not-known)
 
-## The three modes
+## The four modes
 
 ### Interpreted
 
@@ -66,6 +66,18 @@ The same bytecode with `cpp.cppia.Host.enableJit(true)` called before a module l
 
 It is a process-wide switch in hxcpp rather than a per-module one, so it is a decision made once at
 startup, and you cannot have some modules jitted and others not.
+
+### HashLink bytecode
+
+The same declarations emitted as HashLink's own bytecode and loaded into the running process, by a
+second backend under `hxscript.hl`. HashLink jits what it loads, so there is no separate jitted mode
+here the way there is on hxcpp.
+
+Needs `-D hxscript_hl`, and links a small native module that the same macro compiles into the binary,
+so a host writes the define and nothing else. It reaches the same construct-for-construct agreement
+cppia does, recorded in [`support-table.md`](support-table.md), and refuses nothing in the corpus.
+
+The figures on this page are hxcpp's. This backend has its own and they are not quoted here yet.
 
 ## What compiling buys
 
@@ -250,10 +262,15 @@ parameter shape for a `super(...)`, rather than padded from the right into the w
 constructor, an enum-abstract constant — is now looked up in the world's type table, which is where
 the interpreter had been finding it all along.
 
-The evidence is [`test/cpp/CppiaTest.hx`](../test/cpp/CppiaTest.hx), which runs 173 constructs
-interpreted and compiled and compares the answers. It reports 0 wrong, and one refusal that is
-asserted on purpose. That is a stronger claim than "nothing was refused": a construct that compiled
-to the wrong thing would show as `WRONG`, and two of them did during the work.
+The evidence is the shared conformance corpus: 329 constructs offered to six columns, one per way
+of running a script, with `sh test/all.sh` collecting them and
+[`support-table.md`](support-table.md) written from what came back rather than by hand. Every
+compiled column agrees with its own target's interpreter on all 329 and refuses none.
+
+That is a stronger claim than "nothing was refused", and the two halves are deliberately kept apart:
+a refusal costs speed, and a construct that compiled to the wrong thing is reported as a difference
+instead. Several were, during this work — the wrapper's class name where a boxed abstract's value
+belonged, and `0` where a scaled vector belonged — which is the reason the table separates them.
 
 ## Where compiled code still differs
 
