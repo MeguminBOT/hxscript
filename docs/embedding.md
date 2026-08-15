@@ -481,10 +481,15 @@ its own stack with no link to its caller, so that frame does not appear in the c
 
 ## Compiling at runtime
 
-Optional, and **hxcpp only**. On that target a module can be translated to cppia bytecode and loaded
-as a real class instead of being walked as a tree; everywhere else scripts are interpreted and this
-section does not apply. [`modes.md`](modes.md) covers what that is worth and when it repays the cost;
-this section is the wiring.
+Optional, and only where the target has bytecode of its own: **hxcpp**, through cppia, and
+**HashLink**, through its own loader. On either a module can be translated and loaded as a real class
+instead of being walked as a tree; everywhere else scripts are interpreted and this section does not
+apply. [`modes.md`](modes.md) covers what that is worth and when it repays the cost; this section is
+the wiring.
+
+The defines below are hxcpp's. HashLink wants `-D hxscript_hl` instead, and nothing else: the native
+module its loader needs is built by the same macro, which
+[the build flags](#build-flags) covers.
 
 **Nothing here happens on its own.** The defines make the compiler *available*, and that is all. If
 you never ask, every script is interpreted exactly as before. What to compile, when, and what to do

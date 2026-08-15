@@ -52,6 +52,9 @@ class ModeCases {
 		// `switch (i % 3)` maps 0 -> 1, 1 -> 2, anything else -> 3, at the last counter value
 		var switchX:String = Std.string(((n - 1) % 3 == 0) ? 1 : (((n - 1) % 3 == 1) ? 2 : 3));
 
+		// `modArith` at the last counter value, worked out here so the expected value is exact.
+		var modX:String = Std.string(((n - 1) * 7 + 3) % 11);
+
 		var out:Array<Case> = [];
 
 		function add(name:String, tier:String, expect:String, body:String, ?extra:String):Void {
@@ -115,6 +118,24 @@ class ModeCases {
 		add('forArray', 'op', Std.string(ARRAY_LEN - 1),
 			'var a:Array<Int> = []; for (k in 0...$ARRAY_LEN) a.push(k); var s:Int = 0; for (p in 0...$passes) { for (v in a) { s = v; } } return s;');
 
+		add('anonField', 'op', last, 'var o:Dynamic = {a: 0}; var i:Int = 0; var s:Int = 0; while (i < $N) { o.a = i; s = o.a; i += 1; } return s;');
+
+		add('hostMethod', 'op', '2', 'var t:String = "abcdef"; var i:Int = 0; var s:Int = 0; while (i < $N) { s = t.indexOf("c"); i += 1; } return s;');
+
+		add('hostStatic', 'op', last,
+			'var i:Int = 0; var s:Int = 0; while (i < $N) { s = Std.int(Math.max(i, 0)); i += 1; } return s;');
+
+		add('arrayPush', 'op', last, 'var a:Array<Int> = []; var i:Int = 0; while (i < $N) { a.push(i); i += 1; } return a[a.length - 1];');
+
+		add('boolLogic', 'op', 'true', 'var i:Int = 0; var b:Bool = false; while (i < $N) { b = (i >= 0) && (i < $N); i += 1; } return b;');
+
+		add('modArith', 'op', modX, 'var i:Int = 0; var s:Int = 0; while (i < $N) { s = (i * 7 + 3) % 11; i += 1; } return s;');
+
+		add('stringSwitch', 'op', '2',
+			'var t:String = "b"; var i:Int = 0; var s:Int = 0; while (i < $N) { switch (t) { case "a": s = 1; case "b": s = 2; default: s = 3; } i += 1; } return s;');
+
+		add('nullCoal', 'op', '5', 'var z:Null<Int> = null; var i:Int = 0; var s:Int = 0; while (i < $N) { s = z ?? 5; i += 1; } return s;');
+
 		// --- one call per iteration ---
 
 		add('call0', 'call', '7', 'var i:Int = 0; var s:Int = 0; while (i < $N) { s = f0(); i += 1; } return s;',
@@ -128,6 +149,9 @@ class ModeCases {
 
 		add('callCap20', 'call', '7', fill(CAPTURED) + 'var i:Int = 0; var s:Int = 0; while (i < $N) { s = f1(7); i += 1; } return s;',
 			'\tstatic function f1(a:Int):Int { return a; }\n');
+
+		add('closureCall', 'call', '7',
+			'var f:Int -> Int = function(a:Int):Int { return a; }; var i:Int = 0; var s:Int = 0; while (i < $N) { s = f(7); i += 1; } return s;');
 
 		add('classCall', 'call', last, 'var h:Holder = new Holder(); var i:Int = 0; var s:Int = 0; while (i < $N) { s = h.set(i); i += 1; } return s;',
 			'}\nclass Holder {\n\tpublic var v:Int = 0;\n\tpublic function new() {}\n\tpublic function set(x:Int):Int { v = x; return v; }\n');

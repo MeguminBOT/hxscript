@@ -208,6 +208,22 @@ class Interp {
 	public static var interpSwitches:Int = 0;
 	#end
 
+	/**
+	 * The package the running module declares, searched for a name nothing else in scope answers.
+	 *
+	 * Haxe resolves a type in the same package with no import at all, and this did not: `world/Sim.hx`
+	 * naming `Player` from `world/Player.hx` resolved to nothing, and the failure surfaced at the
+	 * first use rather than at the name. Every module of a packaged project had to import its own
+	 * siblings, which is not a script anybody would write.
+	 *
+	 * Searched LAST, after imports, so an explicit import of another package's `Player` still wins:
+	 * that is the order Haxe reads them in, and the import is the more deliberate of the two.
+	 */
+	public var packagePath:String = '';
+
+	/** Names this package turned out not to hold, so a miss is not looked up again. */
+	var packageMisses:Map<String, Bool> = new Map();
+
 	/** The current source position, updated as expressions are evaluated. */
 	var position:Position = {origin: 'hscript', line: 0};
 
@@ -1157,6 +1173,8 @@ class Interp {
 
 				switch (decl.d) {
 					default:
+					case DPackage(path):
+						packagePath = path.join('.');
 					case DUsing(path):
 						usingType(path);
 					case DImport(path, mode):
@@ -1567,11 +1585,43 @@ class Interp {
 				return Reflect.getProperty(parent, id);
 		}
 
+		var near:Dynamic = packageType(id);
+		if (near != null) {
+			return resolveMirror(near);
+		}
+
 		if (!variables.exists(id)) {
 			error(EUnknownVariable(id));
 		}
 
 		return null;
+	}
+
+	/**
+	 * Resolves a name against the running module's own package, and binds what it finds.
+	 *
+	 * The last question asked about a name, and only about one that could be a type. What it finds is
+	 * imported under that name, so the search happens once per name per interpreter and every later
+	 * read is the map lookup it would have been had the module written the import itself.
+	 *
+	 * @param id The name.
+	 * @return The type the package holds under that name, or null when it holds none.
+	 */
+	public function packageType(id:String):Dynamic {
+		if (packagePath.length == 0 || id == null || id.length == 0)
+			return null;
+		if (!id.isTypeIdentifier() || packageMisses.exists(id))
+			return null;
+
+		var found:Dynamic = TypeTools.resolve(packagePath + '.' + id, environment);
+
+		if (found == null) {
+			packageMisses.set(id, true);
+			return null;
+		}
+
+		importType(id, found);
+		return imports.get(id);
 	}
 
 	/**
@@ -1581,7 +1631,7 @@ class Interp {
 	 * @return True if `resolve` would succeed.
 	 */
 	public function isResolvable(id:String):Bool {
-		return ((imports.exists(id) || variables.exists(id)) || (parent != null && parentFields.exists(id)));
+		return ((imports.exists(id) || variables.exists(id)) || (parent != null && parentFields.exists(id)) || packageType(id) != null);
 	}
 
 	/**
@@ -1615,6 +1665,17 @@ class Interp {
 				importEnumValues(t);
 		} else if (t is IScriptedType) {
 			imports.set(name, t);
+		} else if (TypeTools.isEnumType(t)) {
+			/**
+			 * Ahead of the class branch, because on hxcpp that branch would take this. A class and an
+			 * enum are one runtime object there, so `t is Class` is true of an enum too and every
+			 * import of one bound the type and left its constructors unbound: `import haxe.ds.Option;`
+			 * then `None` read whatever else was in scope under that name.
+			 */
+			imports.set(name, t);
+
+			if (enumValueImport)
+				importEnumValues(t);
 		} else if (t is Class) {
 			if (Type.getSuperClass(t) == AbstractValue && t.isEnum) {
 				for (i => construct in AbstractTools.getEnumConstructs(t))
@@ -1624,11 +1685,6 @@ class Interp {
 			}
 
 			imports.set(name, t);
-		} else if (t is Enum) {
-			imports.set(name, t);
-
-			if (enumValueImport)
-				importEnumValues(t);
 		} else if (t != null && Type.getClassName(cast t) != null) {
 			imports.set(name, t);
 		} else {

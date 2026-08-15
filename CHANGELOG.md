@@ -47,6 +47,31 @@ that names it.
 
 ### Added
 
+- **A second compiler backend, for HashLink.** The same declarations emitted as HashLink's own
+  bytecode and loaded into a running process, under `hxscript.hl`. Bytecode compiling was hxcpp-only
+  before this; it now needs only a target with bytecode of its own, and HashLink is the second.
+  `-D hxscript_hl` is the whole of what a host writes: the VM's loader is compiled into `hl.exe`
+  rather than into `libhl`, so the library carries the loader sources and the same macro builds the
+  native module the backend needs, `hxscript.hdll` beside a `.hl` or linked in for HL/C. It is
+  skipped when one is already there and was built for the same HashLink, recorded beside it rather
+  than guessed from timestamps, because an upgraded VM leaves a module whose struct offsets are
+  silently wrong. Nothing about it can fail a build: with no HashLink, no C compiler, or a version
+  the carried loader does not match, you get one warning and every script is interpreted.
+  HashLink jits what it loads, so there is no separate jitted mode the way there is on hxcpp.
+- **One conformance corpus, six columns, and a table written from what came back.** `sh test/all.sh`
+  runs every suite and reports by part rather than by file. The middle suite is the interesting one:
+  329 constructs offered to six ways of running a script — interpreted on eval, hxcpp and HashLink,
+  and compiled as cppia with and without the JIT and as HashLink bytecode — so that a part of the
+  language working in one and not another is visible rather than inferred. `docs/support-table.md`
+  is regenerated from those columns, never edited. A case that ends the process is recorded as
+  `killed` and the run resumes past it, which is not a detail: hxcpp's cppia has taken the process
+  down more than once, and losing that reading is worse than losing the case.
+- **`apps/sandbox-heaps`**, the heaps sandbox, as a native HashLink binary: the same
+  folder-of-`.hx`-files idea as the lime sandbox, on heaps, and where the 3D half is exercised.
+  Nine project templates, seven of the heaps samples ported as examples listed apart from your own
+  projects, and a first-person shooter whose physics is tested without opening a window. A project's
+  assets are read from disk when it runs rather than baked in when it is built, and scripts reach
+  the gamepad and the pointer that heaps already carried.
 - **Your own classes, without writing a bridge.** Mark a class `@:scriptable` and name its package
   with `-D hxscript_host=<packages>`, and the bridge is generated. A hand-written bridge and
   `--macro include('bridges')` still work and are still the answer for a base in a library you do not
@@ -96,8 +121,62 @@ Five portability faults, each one a target answering a reflection question diffe
 
 Neko went from 287 to 370 passing and python from 38 to 367. php, js, lua and hl build again.
 
+Then a set found by running real projects rather than by reading the code, most of them where a
+script meets the host:
+
+- A closure naming something of the class around it resolved to nothing, so `hit.onClick =
+  function(e) tapped();` — the most ordinary line in an interface — did not compile. The instance is
+  captured now.
+- A host property was written past rather than through: assigning to one stored the value and never
+  ran the setter.
+- A bridge could collide with itself, and a base named in full was not recognised as the same type
+  as the base named short, so extending one dropped the bridge.
+- A host abstract's forwarded members were unreachable from compiled code, and a host enum reached
+  through a short name had no constructor built for it.
+- An import binding a static rather than a type (`import HostDial.step;`) was recorded as a type, so
+  the name evaluated to null where the interpreter gave the field's value.
+- A typed array's elements were read back as something other than what the annotation promised,
+  which reinterprets memory rather than misbehaving.
+- A `break` or `continue` leaving a `try` did not give its trap back.
+- A wildcard import reached nothing a package declared, because the filter that keeps a module's main
+  type compared the whole module path against the type's name.
+- An integer result stored where a float goes was not converted, and `Int` arithmetic that overflows
+  now has one answer rather than one per mode.
+- A world that failed to start died silently instead of reporting it.
+
 ### Compiler and parser
 
+- **A type in the module's own package resolves with no import**, the way Haxe resolves one. Naming
+  a sibling module used to reach nothing, and the failure surfaced at the first use rather than at
+  the name — `Invalid access to field` interpreted, `Cannot call` compiled — so both sides failed
+  alike and it read as an unsupported construct rather than as a defect. Every module of a packaged
+  project had to import its own siblings. Imports are still read first, so an explicit import of
+  another package's type of the same name still wins.
+- **An enum's constructors are bound when its type is imported on hxcpp.** A class and an enum are
+  one runtime object there, so `t is Class` was true of an enum and took it down the class branch:
+  `import haxe.ds.Option;` bound `Option` and neither `Some` nor `None`, and a bare `None` read
+  whatever else was in scope under that name. This was the one case where two interpreters answered
+  differently on different targets.
+- **cppia refuses nothing in the conformance corpus**, down from 19 of 329 cases, with no case
+  answering differently. Three causes: constructing an abstract the host compiled, which has no
+  runtime class for a `NEW` to name and is now built through `hxscript.runtime.Construct`; a
+  constructor call short of an optional in the middle, now placed by type rather than padded from
+  the right into the wrong parameter; and a host name the module never imported, now resolved
+  through the world's type table. Boxed abstracts also reach `Std.string` and their `@:op` methods
+  from compiled code, which is what construction working made reachable.
+- More constructs compile that used to be refused: `super.m` as a value, a local declared with
+  property accessors, a static extension whose receiver type is only known at run time, a scripted
+  abstract's operators (with what they return), optional arguments and their defaults, and the `is`
+  operator. A typedef is emitted as the class it aliases rather than as itself, since a typedef has
+  no runtime class and cppia resolved the name to null and then used it without looking.
+- `a[i]` is decided the same way compiled as interpreted. It is three operations in Haxe depending on
+  the value — a map keyed, an array indexed, an abstract's `@:arrayAccess` — and the two sides
+  choosing differently on the same line is the whole hazard.
+- A `Bool` survives the round trip through cppia and its JIT, which has several shapes because cppia
+  has no boolean of its own and carries one as an integer.
+- A nested function's locals belong to it rather than to its parent, and an argument the capture pass
+  boxes has its declared type erased rather than kept and misapplied.
+- Typedef chains are followed to the end when resolving a type, rather than one hop.
 - `??`, `%=`, `case a | b:` and a `using` whose receiver type is known now compile instead of being
   refused. A typedef alias such as bare `List` resolves.
 - `final class`, `abstract class` and `extern` members parse. The flags are recorded but not
@@ -107,7 +186,10 @@ Neko went from 287 to 370 passing and python from 38 to 367. php, js, lua and hl
 
 `embedding.md` is restructured around what a host does, and lists every build flag, mark and runtime
 setting. `internals.md` is new, holding the design rationale that used to live in oversized
-docstrings.
+docstrings. `how-it-works.md` is new and is the technical document: the interpreter everything else
+is measured against, then the cppia half, then the HashLink one, each with a real method going in and
+the bytecode coming out. `support-table.md` is new and generated. `modes.md` gains the fourth mode
+and README no longer says compiling is hxcpp-only.
 
 ## 1.1.2
 

@@ -159,6 +159,13 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 					interp.variables.set(k, v);
 		}
 
+		/**
+		 * The package the declaring module is in, so a class reaches its own siblings by bare name
+		 * the way Haxe does. A class runs on an interpreter of its own rather than the module's, and
+		 * only the module's had been told which package it was.
+		 */
+		interp.packagePath = (module == null || module.pack == null) ? (baseInterp == null ? '' : baseInterp.packagePath) : module.pack.join('.');
+
 		interp.pushStack(hxscript.runtime.ScriptStack.StackItem.SModule(module?.path ?? name));
 
 		safe = false;

@@ -14,14 +14,14 @@ script can declare classes, enums, typedefs and abstracts, and extend the ones y
 already compiled. The interpreter is plain Haxe and builds on every target; see
 [Status](#status) for where that is exercised rather than only compiled.
 
-**On hxcpp** it can also translate a script to native bytecode while your application is running,
-with no Haxe toolchain anywhere in sight. That part is hxcpp-only, because the bytecode is hxcpp's
-own.
+**On hxcpp and HashLink** it can also translate a script to native bytecode while your application
+is running, with no Haxe toolchain anywhere in sight. That part needs a target with bytecode of its
+own: hxcpp has cppia, and HashLink has its own, each reached through a backend of its own.
 
 It began as a fork of [hscript-insanity](https://github.com/inky03/hscript-insanity), itself a fork
 of [hscript](https://github.com/HaxeFoundation/hscript), and has since grown into its own thing:
-runtime type enforcement, working abstracts, a diagnostic channel, and a bytecode compiler for hxcpp.
-See [lineage](#lineage) for what came from where.
+runtime type enforcement, working abstracts, a diagnostic channel, and a bytecode compiler with a
+backend for hxcpp and one for HashLink. See [lineage](#lineage) for what came from where.
 
 ```haxe
 import hxscript.Script;
@@ -136,7 +136,7 @@ evaluates Haxe-shaped expressions and does that well; what it does not do is let
 | type annotations | parsed, ignored | **enforced at runtime** |
 | `Int` / `Float` distinction | blurred by `Dynamic` | preserved (`/` is always `Float`) |
 | errors | message | call stack across scripts and into the host |
-| **compiling to native bytecode** | no | yes, at runtime, from source text, on hxcpp |
+| **compiling to native bytecode** | no | yes, at runtime, from source text, on hxcpp and HashLink |
 
 The hscript column reflects 2.7.0, the version the benchmark suite ran.
 [benchmarks.md](docs/benchmarks.md) puts six libraries in this family through identical scripts and
@@ -184,19 +184,21 @@ runtime; type parameters are erased by Haxe itself before the interpreter ever s
 
 ## Compiling at runtime
 
-**hxcpp targets only.** Scripts are interpreted everywhere by default. On hxcpp a module can
-instead be translated to [cppia](https://haxe.org/manual/target-cppia.html), hxcpp's own bytecode,
-and loaded as a real `Class<Dynamic>`, worth about **21x per operation** and **37x per call**, rising
-to about **30x** and **104x** with hxcpp's JIT on top.
+**Where the target has bytecode of its own.** Scripts are interpreted everywhere by default. On
+hxcpp a module can instead be translated to [cppia](https://haxe.org/manual/target-cppia.html),
+hxcpp's own bytecode, and loaded as a real `Class<Dynamic>`, worth about **21x per operation** and
+**37x per call**, rising to about **30x** and **104x** with hxcpp's JIT on top. On HashLink a second
+backend emits HashLink bytecode and loads it into the running process, where the VM's own JIT takes
+it.
 
 ```haxe
 var report = hxscript.compile.Compiler.compile(env);
 trace('${report.compiled.length} compiled, ${report.skipped.length} interpreted');
 ```
 
-Needs `-D hxscript_cppia` here and `-D scriptable` on the host. It is decided per module: whatever
-the emitter cannot express is reported with a reason and left to the interpreter, so turning it on
-cannot break a script that was working.
+Needs `-D hxscript_cppia` here and `-D scriptable` on the host, or `-D hxscript_hl` for HashLink.
+It is decided per module: whatever the emitter cannot express is reported with a reason and left to
+the interpreter, so turning it on cannot break a script that was working.
 
 **Haxe can emit cppia too, but only as a build step.** That is the difference this is for. Haxe's
 path compiles a `.hx` file ahead of time, against a snapshot of your host's classes, on a machine
@@ -206,19 +208,20 @@ mods, in-app editors and anything a user writes after the fact. Where both can c
 script, expect Haxe's output to be faster: it type-checks and optimises, and this is a direct
 translation with no optimisation passes.
 
-**It is the newest part of the library.** What it rests on is
-[`test/cpp/CppiaTest.hx`](test/cpp/CppiaTest.hx), which runs 151 constructs interpreted and compiled
-and compares the answers, currently 0 wrong and one deliberate refusal whose message is itself
-asserted, plus a differential suite that does the same across whole worlds. Three wrong-answer bugs
-were found that way, which is both the reason to trust it as far as you do and the reason not to
-trust it further.
+**It is the newest part of the library.** What it rests on is a shared conformance corpus of 329
+constructs, run in six columns, one per way of executing a script: interpreted on eval, hxcpp and
+HashLink, and compiled as cppia with and without the JIT and as HashLink bytecode. Every compiled
+column currently agrees with its own target's interpreter on all 329 and refuses none of them, and
+[`support-table.md`](docs/support-table.md) is that reading, regenerated rather than written.
+Several wrong-answer bugs were found this way, which is both the reason to trust it as far as you do
+and the reason not to trust it further.
 
 [modes.md](docs/modes.md) is the full comparison and the guidance on when compiling repays what it
 costs; [mode-benchmarks.md](docs/mode-benchmarks.md) is where the figures come from.
 
 ## Try it
 
-Two worked examples and one application, all runnable:
+Two worked examples and two applications, all runnable:
 
 - [`examples/battle/`](examples/battle) is a small turn-based RPG whose creatures, bosses and status
   effects are all scripts. Its whole integration is one short file.
@@ -228,6 +231,10 @@ Two worked examples and one application, all runnable:
 - [`apps/sandbox/`](apps/sandbox) is the **hxScript Sandbox: Lime HXCPP**, a prototyping tool for
   lime, openfl and flixel where a project is a folder of `.hx` files it reads at runtime. Drop a
   folder in, press Run, edit, save, watch it reload.
+- [`apps/sandbox-heaps/`](apps/sandbox-heaps) is the same idea on heaps and HashLink, and is where
+  the 3D half is exercised: it ships seven of the heaps samples as examples plus a first-person
+  shooter whose physics is tested without opening a window, and it drives the conformance projects
+  that check a real project's interop interpreted against compiled.
 
 ## Documentation
 
@@ -241,6 +248,8 @@ Two worked examples and one application, all runnable:
   fooling yourself.
 - [Benchmarks](docs/benchmarks.md) puts six libraries in this family through identical scripts.
 - [Mode benchmarks](docs/mode-benchmarks.md) runs the same corpus interpreted, compiled and jitted.
+- [HashLink benchmarks](docs/hl-benchmarks.md) runs it against the same program compiled by Haxe,
+  which is what a script costs against not scripting it at all.
 - [Static checking](docs/checker.md) sets out the design for a pre-run checker, and its limits.
 - [Internals](docs/internals.md) explains why the parts that are not obvious are the way they are.
 - [Tests](test) holds the suites, which double as executable documentation of behaviour.
@@ -270,8 +279,9 @@ Working, and in use. What is known to be missing:
 | neko, python | yes | yes | a handful of scripted-abstract cases fail |
 | js, java, lua, php, hl | yes | no runtime here | compile and generate only |
 
-The bytecode compiler is hxcpp-only and passes in full there. What neko and python fail, and why, is
-in [`test/known-failing.txt`](test/known-failing.txt).
+The bytecode compiler needs a target with bytecode of its own, hxcpp or HashLink, and passes in
+full on both. What neko and python fail, and why, is in
+[`test/known-failing.txt`](test/known-failing.txt).
 
 ## Lineage
 
@@ -290,7 +300,7 @@ fork with patches:
 - structural typedefs checked by field *type* rather than by name alone;
 - one diagnostic channel for every phase, carrying the position, the source line and a likely cause;
 - automatic setup for the game library already in your build;
-- a compiler that translates a script to cppia bytecode at runtime;
+- a compiler that translates a script to cppia or HashLink bytecode at runtime;
 - interpreter performance work that was measured rather than assumed.
 
 Pull requests welcome at [hxScript](https://github.com/MeguminBOT/hxscript/pulls).

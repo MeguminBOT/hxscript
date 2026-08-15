@@ -85,11 +85,25 @@ class Emitter {
 	/** The declared type of each local, in step with `scopes`. */
 	var scopeTypes:Array<StringMap<String>>;
 
+	/**
+	 * The type each local was WRITTEN as, in step with `scopes`, whatever its slot ended up holding.
+	 *
+	 * `scopeTypes` is what the emitted slot may be specialised to, and an argument the caller can
+	 * leave off is deliberately not in it: a cppia `Int` slot reads a padded call's null as 0, so an
+	 * optional keeps an untyped slot. That loses the annotation for everything else that wanted to
+	 * READ it, and placing a short `super(...)` is exactly that: `?held:HostShaped` says which
+	 * parameter the argument was meant for, and the slot table had thrown the answer away.
+	 */
+	var scopeWritten:Array<StringMap<String>>;
+
 	/** Full path for each short type name in view, from imports, declarations and ambient types. */
 	var typePaths:StringMap<String>;
 
 	/** How many typedef hops to follow before giving up, so a cycle cannot spin. */
 	static inline var TYPEDEF_DEPTH:Int = 8;
+
+	/** How far up an extends chain to look before giving up on it. */
+	static inline var SUPER_DEPTH:Int = 32;
 
 	/** Paths this batch declares, which can be linked directly rather than resolved as host types. */
 	var moduleClasses:StringMap<Bool>;
@@ -141,6 +155,9 @@ class Emitter {
 
 	/** What `resolvable` has answered, so a repeated reference costs a map read. */
 	var resolvedTypes:StringMap<Bool> = new StringMap();
+
+	/** What `worldType` has answered, misses written as the empty string, so a repeat costs a map read. */
+	var worldTypes:StringMap<String> = new StringMap();
 
 	/**
 	 * Set while an assignment's target is being written, and cleared by whatever consumes it.
@@ -254,6 +271,16 @@ class Emitter {
 	var ambientMembers:StringMap<String>;
 
 	/**
+	 * Bare names an import bound to a field of the type it named, as the owning type's path.
+	 *
+	 * `import HostFlag;` puts `Add` in scope as well as `HostFlag`, and `import haxe.ds.Option;` puts
+	 * `None` in scope: an enum's constructors and an enum abstract's constants are reachable
+	 * unqualified once their type is imported, which is what the interpreter's own import table
+	 * records and what this one did not.
+	 */
+	var importedFields:StringMap<String>;
+
+	/**
 	 * `class.field` of every static property with a getter, which must be read through it.
 	 *
 	 * A static read links straight to the storage slot, so unlike a member property the accessor is
@@ -271,6 +298,7 @@ class Emitter {
 		nextVarId = 1;
 		scopes = [];
 		scopeTypes = [];
+		scopeWritten = [];
 		typePaths = new StringMap();
 		moduleClasses = new StringMap();
 		classVars = new StringMap();
@@ -286,6 +314,7 @@ class Emitter {
 		refs = [];
 		external = new StringMap();
 		ambientMembers = new StringMap();
+		importedFields = new StringMap();
 		currentClass = '';
 		currentSuper = '';
 
@@ -937,7 +966,7 @@ class Emitter {
 			var spelling:String = loose ? '' : typeName(a.t);
 
 			noteArrayElement(a.name, a.t);
-			var id:Int = declareVar(a.name, loose ? null : spelling);
+			var id:Int = declareVar(a.name, loose ? null : spelling, a.t == null ? null : typeName(a.t));
 
 			w.str(a.name);
 			w.int(id);
@@ -1223,22 +1252,30 @@ class Emitter {
 				}
 
 				/**
-				 * A host abstract has no runtime class to make, and cppia does not report that: the
-				 * generated `NEW` names a type its loader cannot find and the process ends, silently
-				 * and with a success code, part way through whatever it was doing. Refusing the module
-				 * hands it to the interpreter, which fails the same construct with a message somebody
-				 * can read.
+				 * A host abstract has no runtime class to make, so there is no name a `NEW` could
+				 * carry: the one it named resolved to null and the hxcpp process ended part way
+				 * through, silently and with a success code. Built through the helper instead, which
+				 * reaches the static the constructor became.
 				 *
 				 * Only a host one. An abstract a script declared is built above this, through the
 				 * constructor the batch emitted for it.
 				 */
-				if (hxscript.types.AbstractTools.resolve(cl) != null)
-					throw new Unsupported('new ' + cl + ', which is an abstract the host compiled and so has no class to make', e.pos);
+				if (hxscript.types.AbstractTools.resolve(cl) != null) {
+					emitConstruct(nativePath(typePaths.exists(cl) ? typePaths.get(cl) : cl), params, e.pos);
+					return;
+				}
 
 				var built:String = (cl == 'Map' || cl == 'haxe.ds.Map') && !typePaths.exists(cl) ? 'hxscript.runtime.AnyMap' : resolveType(cl, e.pos);
 
-				if (shortOfMiddle(built, params.length))
-					throw new Unsupported('new ' + cl + ', which leaves out a parameter that is not its last', e.pos);
+				/**
+				 * A call that may be leaving out an optional in the middle, which an arity cannot
+				 * place: padding from the right would write the third argument into the second. The
+				 * helper has the values in hand and places them by type, the way Haxe placed them.
+				 */
+				if (shortOfMiddle(built, params.length)) {
+					emitConstruct(built, params, e.pos);
+					return;
+				}
 
 				var wantedNew:Int = padArgs(declaredClass(built), 'new', params.length);
 				w.pos(line);
@@ -1525,6 +1562,27 @@ class Emitter {
 			return;
 		}
 
+		var hosted:Null<{receiver:Expr, other:Null<Expr>, name:String}> = hostOperatorFor(plain, e1, e2);
+		if (hosted != null) {
+			if (plain != op) {
+				emitBinop('=', e1, {e: EBinop(plain, e1, e2), pos: pos}, pos);
+				return;
+			}
+
+			/**
+			 * A member call rather than a static one: a host abstract's operator is a method of the
+			 * wrapper the host's build generated, which is the value in hand.
+			 */
+			w.pos(line);
+			w.token('CALLMEMBER');
+			w.type('');
+			w.str(hosted.name);
+			w.int(1);
+			expr(hosted.receiver);
+			expr(hosted.other);
+			return;
+		}
+
 		if (ASSIGN_OPS.indexOf(op) >= 0) {
 			if (repeatableField(e1)) {
 				emitBinop('=', e1, {e: EBinop(op.substr(0, op.length - 1), e1, e2), pos: pos}, pos);
@@ -1768,8 +1826,23 @@ class Emitter {
 			case EIdent('super'):
 				var supplied:Int = params.length;
 
-				if (superArgs >= 0 && shortOfMiddle(currentSuper, supplied))
-					throw new Unsupported('super(...), which leaves out a parameter of ' + currentSuper + ' that is not its last', pos);
+				if (superArgs >= 0 && shortOfMiddle(currentSuper, supplied)) {
+					/**
+					 * A base whose optional is not its last, reached with fewer arguments than it
+					 * declares. `new` hands this to the runtime helper, which cannot be done here: a
+					 * base is constructed onto the instance being built rather than made, so the
+					 * arguments have to be in the instruction. They are placed against the recorded
+					 * parameters instead, from the types the call site wrote.
+					 */
+					var placed:Null<Array<Expr>> = placeSuper(currentSuper, params, pos);
+
+					if (placed == null)
+						throw new Unsupported('super(...), which leaves out a parameter of ' + currentSuper
+							+ ' that is not its last, and whose arguments do not say which', pos);
+
+					params = placed;
+					supplied = params.length;
+				}
 
 				var wanted:Int = superArgs > supplied ? superArgs : supplied;
 
@@ -2004,37 +2077,7 @@ class Emitter {
 
 		var asType:Null<String> = typeOf(obj);
 		if (asType != null) {
-			if (isEnumCtor(asType, name)) {
-				w.pos(line);
-				w.token('FENUM');
-				useType(asType);
-				w.str(name);
-				return;
-			}
-
-			if (staticGetters.exists(asType + '.' + name)) {
-				w.pos(line);
-				w.token('CALLSTATIC');
-				useType(asType);
-				w.str('get_' + name);
-				w.int(0);
-				return;
-			}
-
-			var wrapper:Null<Class<Dynamic>> = nativeAbstract(asType);
-			if (wrapper != null) {
-				var constant:Null<Dynamic> = abstractConstant(wrapper, name);
-				if (constant == null)
-					throw new Unsupported('$asType.$name, which is a field of an abstract that is not a constant', pos);
-
-				emitConstant(constant, line);
-				return;
-			}
-
-			w.pos(line);
-			w.token('FSTATIC');
-			useType(asType);
-			w.str(name);
+			emitStaticField(asType, name, pos);
 			return;
 		}
 
@@ -2088,6 +2131,55 @@ class Emitter {
 		expr(obj);
 		w.pos(line);
 		w.token('s');
+		w.str(name);
+	}
+
+	/**
+	 * Writes a read of a field belonging to a type rather than to an instance.
+	 *
+	 * Its own function because two spellings arrive here: `HostFlag.Add`, which names the type, and
+	 * a bare `Add` that an `import HostFlag;` bound to the same field. The two have to fold to the
+	 * same instruction or the naming decides the value, which is the whole complaint behind the
+	 * host-name refusals.
+	 *
+	 * @param asType The owning type's path.
+	 * @param name The field.
+	 * @param pos Where it appears.
+	 * @throws Unsupported If it is a field of an abstract that is not a foldable constant.
+	 */
+	function emitStaticField(asType:String, name:String, pos:Position):Void {
+		var line:Int = pos == null ? 0 : pos.line;
+
+		if (isEnumCtor(asType, name)) {
+			w.pos(line);
+			w.token('FENUM');
+			useType(asType);
+			w.str(name);
+			return;
+		}
+
+		if (staticGetters.exists(asType + '.' + name)) {
+			w.pos(line);
+			w.token('CALLSTATIC');
+			useType(asType);
+			w.str('get_' + name);
+			w.int(0);
+			return;
+		}
+
+		var wrapper:Null<Class<Dynamic>> = nativeAbstract(asType);
+		if (wrapper != null) {
+			var constant:Null<Dynamic> = abstractConstant(wrapper, name);
+			if (constant == null)
+				throw new Unsupported('$asType.$name, which is a field of an abstract that is not a constant', pos);
+
+			emitConstant(constant, line);
+			return;
+		}
+
+		w.pos(line);
+		w.token('FSTATIC');
+		useType(asType);
 		w.str(name);
 	}
 
@@ -2209,6 +2301,11 @@ class Emitter {
 		if (emitAmbient(v, pos))
 			return;
 
+		if (importedFields.exists(v)) {
+			emitStaticField(importedFields.get(v), v, pos);
+			return;
+		}
+
 		if (inheritedMember(v)) {
 			w.pos(line);
 			w.token('FNAME');
@@ -2216,6 +2313,18 @@ class Emitter {
 			w.str(v);
 			w.pos(line);
 			w.token('THIS');
+			return;
+		}
+
+		/**
+		 * A type the world carries under this name, which the module never imported. Last of all, so
+		 * every name a module binds itself has already answered.
+		 */
+		var world:Null<String> = worldType(v);
+		if (world != null) {
+			w.pos(line);
+			w.token('CLASSOF');
+			w.type(world);
 			return;
 		}
 
@@ -3229,6 +3338,208 @@ class Emitter {
 	}
 
 	/**
+	 * Writes a construction through the runtime helper rather than through `NEW`.
+	 *
+	 * For the two shapes an opcode cannot express: a host abstract, which has no class to name, and a
+	 * call that may be leaving out an optional parameter in the middle, which an arity cannot place.
+	 * `hxscript.runtime.Construct` answers both with the arguments in hand, which is what neither the
+	 * opcode nor this emitter has.
+	 *
+	 * The path travels as a string rather than as a `CLASSOF`, because an abstract's wrapper is a
+	 * class the host's own build generated and its name is not one the type table carries: a
+	 * reference to it would fail `useType` for a type that is really there.
+	 *
+	 * @param path The type's compile path.
+	 * @param params The arguments as the call wrote them.
+	 * @param pos Where it appears.
+	 */
+	function emitConstruct(path:String, params:Array<Expr>, pos:Position):Void {
+		var line:Int = pos == null ? 0 : pos.line;
+
+		w.pos(line);
+		w.token('CALLSTATIC');
+		w.type('hxscript.runtime.Construct');
+		w.str('make');
+		w.int(2);
+
+		w.pos(line);
+		w.token('s');
+		w.str(path);
+
+		expr({e: EArrayDecl(params), pos: pos});
+	}
+
+	/**
+	 * Places a short `super(...)` into the parameters the base really declares.
+	 *
+	 * The same walk `hxscript.types.ArgumentTools` performs at run time, done here because there is
+	 * no run time to do it in: a base is constructed onto the instance being built, so the arguments
+	 * are part of the instruction and cannot be handed to a helper first. What stands in for the
+	 * values is what the call site wrote them as.
+	 *
+	 * **Certain, or nothing.** An argument whose type this cannot name leaves the whole call
+	 * undecided and the module is refused, which is what it did for every such call before. A wrong
+	 * placement would be worse than the refusal, because it would quietly construct the base with the
+	 * parent in the material.
+	 *
+	 * @param path The base's path.
+	 * @param params The arguments as the call wrote them.
+	 * @param pos Where it appears.
+	 * @return The arguments in their parameters with a `null` where one was skipped, or null when
+	 *         nothing was skipped after all, or when the types in hand do not decide it.
+	 */
+	function placeSuper(path:String, params:Array<Expr>, pos:Position):Null<Array<Expr>> {
+		var shape:Null<Array<String>> = ctorShape(path);
+		if (shape == null)
+			return null;
+
+		var out:Array<Expr> = [];
+		var at:Int = 0;
+		var skipped:Bool = false;
+
+		for (part in shape) {
+			var optional:Bool = part.charAt(0) == '?';
+			var key:String = optional ? part.substr(1) : part;
+
+			if (at >= params.length) {
+				/** A required parameter with nothing left to give it: not a call this can place. */
+				if (!optional)
+					return null;
+
+				out.push({e: EIdent('null'), pos: pos});
+				continue;
+			}
+
+			var takes:Null<Bool> = accepts(key, params[at]);
+
+			if (takes == null)
+				return null;
+
+			if (takes) {
+				out.push(params[at]);
+				at++;
+			} else if (optional) {
+				out.push({e: EIdent('null'), pos: pos});
+				skipped = true;
+			} else {
+				return null;
+			}
+		}
+
+		/** Arguments left over means the walk put them somewhere they do not belong. */
+		if (at < params.length)
+			return null;
+
+		/** Nothing skipped, so ordinary padding was right all along and is left to do it. */
+		return skipped ? out : null;
+	}
+
+	/**
+	 * Whether a parameter of this type takes what this argument was written as.
+	 *
+	 * @param key The parameter's recorded type, empty for one that takes anything.
+	 * @param e The argument.
+	 * @return True or false when that is certain, and null when it is not.
+	 */
+	function accepts(key:String, e:Expr):Null<Bool> {
+		if (key.length == 0)
+			return true;
+
+		if (e.e.match(EIdent('null')))
+			return true;
+
+		var written:Null<String> = inferType(e);
+
+		/**
+		 * Falling back to what the local was written as, which is what an optional parameter has
+		 * instead of a slot type: `?held:HostShaped` is untyped storage and still says plainly which
+		 * parameter it was meant for.
+		 */
+		if (written == null || written.length == 0) {
+			switch (e.e) {
+				case EIdent(v) if (lookupVar(v) != null):
+					written = writtenVarType(v);
+				case _:
+			}
+		}
+
+		if (written == null || written.length == 0)
+			return null;
+
+		switch (key) {
+			case 'Int':
+				return written == 'Int';
+			case 'Float' | 'Single':
+				return written == 'Int' || written == 'Float' || written == 'Single';
+			case 'Bool':
+				return written == 'Bool';
+			case 'String':
+				return written == 'String';
+			case _:
+		}
+
+		switch (written) {
+			case 'Int' | 'Float' | 'Single' | 'Bool' | 'String':
+				return false;
+			case _:
+		}
+
+		var value:String = typePaths.exists(written) ? typePaths.get(written) : written;
+		var wanted:String = typePaths.exists(key) ? typePaths.get(key) : key;
+
+		return value == wanted ? true : descends(value, wanted);
+	}
+
+	/**
+	 * Whether one type is the other or is built on it, asked of the build rather than of a value.
+	 *
+	 * @param value The argument's type.
+	 * @param wanted The parameter's type.
+	 * @return True or false when the chain is known, and null when it is not.
+	 */
+	function descends(value:String, wanted:String):Null<Bool> {
+		/**
+		 * A class this batch declares has no runtime class to walk, and what it extends is a
+		 * declaration rather than a chain, so whether it reaches the parameter's type is left
+		 * undecided rather than guessed at.
+		 */
+		if (declaredClass(value) != null || !resolvable(value))
+			return null;
+
+		var cls:Class<Dynamic> = Type.resolveClass(value);
+		if (cls == null)
+			return null;
+
+		var seen:Int = 0;
+
+		while (cls != null && seen < SUPER_DEPTH) {
+			if (Type.getClassName(cls) == wanted)
+				return true;
+
+			cls = Type.getSuperClass(cls);
+			seen++;
+		}
+
+		return false;
+	}
+
+	/**
+	 * @param path A class's path.
+	 * @return Its constructor's recorded parameters, or null when a call of it cannot be short in
+	 *         the middle and so none were recorded.
+	 */
+	function ctorShape(path:String):Null<Array<String>> {
+		var infos:Array<hxscript.types.TypeCollection.TypeInfo> = hxscript.types.TypeCollection.main.fromCompilePath(path);
+		if (infos == null || infos.length == 0)
+			infos = hxscript.types.TypeCollection.main.fromPath(path);
+		if (infos == null || infos.length == 0)
+			return null;
+
+		var written:Null<String> = infos[0].ctorSkip;
+		return (written == null || written.length == 0) ? null : written.split('|');
+	}
+
+	/**
 	 * Whether a call leaves out a parameter of a host constructor that is not the last one.
 	 *
 	 * Everything here pads from the right, and for most constructors that is what Haxe does too. It
@@ -3508,6 +3819,81 @@ class Emitter {
 	}
 
 	/**
+	 * The host abstract an expression's type names, when it is one.
+	 *
+	 * The batch's own abstracts are `abstractTypeOf`'s answer and are reached as statics of the class
+	 * this emitter wrote for them. A host one has no such class: what a script holds is the wrapper
+	 * the build's macro generated, and its methods are members of that.
+	 *
+	 * @param e The expression whose type to read.
+	 * @return The abstract's path, or null when the value is not one, or is one this batch declared.
+	 */
+	function hostAbstractOf(e:Expr):Null<String> {
+		var declared:Null<String> = instanceClassOf(e);
+		if (declared == null)
+			declared = typeOf(e);
+		if (declared == null)
+			declared = inferType(e);
+		if (declared == null)
+			return null;
+
+		var full:Null<String> = typePaths.exists(declared) ? typePaths.get(declared) : declared;
+		if (moduleClasses.exists(full) || moduleAbstracts.exists(full))
+			return null;
+
+		return nativeAbstract(full) == null ? null : full;
+	}
+
+	/**
+	 * The method a host abstract declares for an operator, and which operand it belongs to.
+	 *
+	 * A host abstract's `@:op` method is a real method of the wrapper class, recorded in the `_ops`
+	 * table the interpreter reads through `AbstractTools.opMethod`. Without this the operator lowered
+	 * to whatever arithmetic the wrapper happened to support, which is none: `v * 2` on a boxed
+	 * vector answered 0 where every interpreter answered the scaled vector.
+	 *
+	 * Decided from the written types, the same way `operatorFor` decides it for the batch's own
+	 * abstracts. A value whose type the emitter cannot name is left to the plain operator, which is
+	 * what it was before any of this.
+	 *
+	 * @param op The operator symbol.
+	 * @param a The left operand.
+	 * @param b The right operand, or null for a unary one.
+	 * @return What to call and on which side, or null when neither operand declares it.
+	 */
+	function hostOperatorFor(op:String, a:Expr, b:Null<Expr>):Null<{receiver:Expr, other:Null<Expr>, name:String}> {
+		var owner:Null<String> = hostAbstractOf(a);
+		var found:Null<String> = owner == null ? null : hostOpMethod(owner, op);
+		if (found != null)
+			return {receiver: a, other: b, name: found};
+
+		/**
+		 * The other operand only for a commutative one, because `1 + metres` is the same method as
+		 * `metres + 1` and `2 - metres` is not `metres - 2`.
+		 */
+		if (b == null || (op != '+' && op != '*'))
+			return null;
+
+		owner = hostAbstractOf(b);
+		found = owner == null ? null : hostOpMethod(owner, op);
+		return found == null ? null : {receiver: b, other: a, name: found};
+	}
+
+	/**
+	 * @param path A host abstract's path.
+	 * @param op The operator symbol.
+	 * @return The method its wrapper serves that operator with, or null when it declares none.
+	 */
+	function hostOpMethod(path:String, op:String):Null<String> {
+		var wrapper:Null<Class<Dynamic>> = nativeAbstract(path);
+		if (wrapper == null)
+			return null;
+
+		var ops:Map<String, String> = Reflect.field(wrapper, '_ops');
+		return ops == null ? null : ops.get(op);
+	}
+
+	/**
 	 * @param items A map literal's entries.
 	 * @return The map class it builds, by what its keys are.
 	 */
@@ -3652,13 +4038,40 @@ class Emitter {
 		if (moduleClasses.exists(path)) {
 			if (refs.indexOf(path) < 0)
 				refs.push(path);
-		} else if (external.exists(path)) {
-			throw new Unsupported('uses $path, which is compiled elsewhere', null);
-		} else if (!resolvable(path)) {
-			throw new Unsupported('uses $path, which nothing at runtime answers to', null);
+
+			w.type(path);
+			return;
 		}
 
-		w.type(path);
+		var stands:String = proxied(path);
+
+		if (external.exists(stands))
+			throw new Unsupported('uses $stands, which is compiled elsewhere', null);
+		if (!resolvable(stands))
+			throw new Unsupported('uses $stands, which nothing at runtime answers to', null);
+
+		w.type(stands);
+	}
+
+	/**
+	 * The class that really answers for a name the host stands something else in for.
+	 *
+	 * `Config.typeProxy` binds `Std`, `Type` and `Reflect` to this library's own versions, and the
+	 * interpreter resolves a script's use of those names through it. Compiled code linked the native
+	 * class instead, so the two disagreed about the same call: `Std.string` of a boxed abstract
+	 * printed the wrapper's class name where the interpreter printed the value, because opening the
+	 * box is exactly what the proxy is for.
+	 *
+	 * @param path The name as the script wrote it.
+	 * @return The class standing in for it, or the path unchanged when nothing does.
+	 */
+	function proxied(path:String):String {
+		var stand:Dynamic = hxscript.Config.typeProxy.get(path);
+		if (stand == null)
+			return path;
+
+		var name:Null<String> = Type.getClassName(stand);
+		return name == null ? path : name;
 	}
 
 	/**
@@ -3781,6 +4194,54 @@ class Emitter {
 		}
 
 		typePaths.set(short, full);
+		bindConstructors(full);
+	}
+
+	/**
+	 * Records the bare names an import puts in scope beyond the type's own.
+	 *
+	 * Importing an enum makes its constructors reachable unqualified, and importing an enum abstract
+	 * does the same for its constants: `import haxe.ds.Option;` then `None`, `import HostFlag;` then
+	 * `Add`. The interpreter binds both when it processes the import, and this table did not, so a
+	 * module written the ordinary way was refused over `unresolved identifier None`.
+	 *
+	 * A name already bound is left alone, so an earlier import and a module's own declarations both
+	 * keep the meaning they had.
+	 *
+	 * @param full The imported type's path.
+	 */
+	function bindConstructors(full:String):Void {
+		var wrapper:Null<Class<Dynamic>> = hxscript.types.AbstractTools.resolve(full);
+
+		if (wrapper != null) {
+			if (Reflect.field(wrapper, 'isEnum') != true)
+				return;
+
+			for (name in hxscript.types.AbstractTools.getEnumConstructs(cast wrapper)) {
+				if (!importedFields.exists(name))
+					importedFields.set(name, full);
+			}
+
+			return;
+		}
+
+		/**
+		 * The compile path rather than the written one, since an enum reached through a typedef
+		 * answers to a different name than the import spells, and that is the name a `FSTATIC` on it
+		 * has to carry.
+		 */
+		var path:String = nativePath(full);
+		if (!resolvable(path))
+			return;
+
+		var en:Enum<Dynamic> = Type.resolveEnum(path);
+		if (en == null)
+			return;
+
+		for (name in Type.getEnumConstructs(en)) {
+			if (!importedFields.exists(name))
+				importedFields.set(name, path);
+		}
 	}
 
 	/**
@@ -3965,11 +4426,11 @@ class Emitter {
 	function typeOf(e:Expr):Null<String> {
 		switch (e.e) {
 			case EIdent(v):
-				if (lookupVar(v) != null || members.exists(v) || statics.exists(v))
+				if (lookupVar(v) != null || members.exists(v) || statics.exists(v) || moduleFields.exists(v))
 					return null;
 				if (typePaths.exists(v))
 					return typePaths.get(v);
-				return null;
+				return worldType(v);
 
 			case EField(_, _, _):
 				var path:Null<String> = dottedPath(e);
@@ -4006,6 +4467,43 @@ class Emitter {
 	 * @param path The dotted name, or null when the chain was not all plain names.
 	 * @return The path when the host has that type, otherwise null.
 	 */
+	/**
+	 * A bare name the world carries a type for, which this module's imports never mentioned.
+	 *
+	 * cppia placed a host name through **what the module imported** and nothing else, so anything the
+	 * import table did not literally hold was unresolved. Two ordinary things fall in that gap: a
+	 * secondary type of an imported module, since `import HostShaped;` brings in every type
+	 * `HostShaped.hx` declares and the table only ever held the one it is named for; and a host type
+	 * named without an import at all. The interpreter resolves both, out of the world's own type
+	 * index, so a module doing either was refused over a name that was never in doubt.
+	 *
+	 * Only the host build's own table, for the reason `resolvable` gives: `Type.resolveClass` also
+	 * answers for every class an EARLIER cppia load registered, and those are precisely the ones a
+	 * new module cannot link against.
+	 *
+	 * **Asked last and never first.** A local, a member, a static, a module field and an import all
+	 * answer ahead of this, so a name a module binds itself keeps the meaning that module gave it.
+	 *
+	 * @param name The bare name as written.
+	 * @return Its compile path, or null when nothing in the world carries that name.
+	 */
+	function worldType(name:String):Null<String> {
+		if (name == null || name.length == 0 || !hxscript.types.TypeTools.isTypeIdentifier(name))
+			return null;
+
+		var known:Null<String> = worldTypes.get(name);
+		if (known != null)
+			return known.length == 0 ? null : known;
+
+		var infos:Array<hxscript.types.TypeCollection.TypeInfo> = hxscript.types.TypeCollection.main.fromPath(name);
+		if (infos == null || infos.length == 0)
+			infos = hxscript.types.TypeCollection.main.fromCompilePath(name);
+
+		var found:String = (infos == null || infos.length == 0) ? '' : nativePath(name);
+		worldTypes.set(name, found);
+		return found.length == 0 ? null : found;
+	}
+
 	function hostTypePath(path:Null<String>):Null<String> {
 		if (path == null || path.indexOf('.') < 0)
 			return null;
@@ -4049,6 +4547,11 @@ class Emitter {
 			return nativePath(typePaths.get(name));
 		if (name.indexOf('.') >= 0)
 			return nativePath(name);
+
+		var world:Null<String> = worldType(name);
+		if (world != null)
+			return world;
+
 		throw new Unsupported('unresolved type ' + name, pos);
 	}
 
@@ -4172,12 +4675,14 @@ class Emitter {
 	inline function pushScope():Void {
 		scopes.push(new StringMap());
 		scopeTypes.push(new StringMap());
+		scopeWritten.push(new StringMap());
 	}
 
 	/** Closes the innermost scope. */
 	inline function popScope():Void {
 		scopes.pop();
 		scopeTypes.pop();
+		scopeWritten.pop();
 	}
 
 	/**
@@ -4187,13 +4692,18 @@ class Emitter {
 	 * @param type Its declared type, if annotated.
 	 * @return The variable id.
 	 */
-	function declareVar(name:String, ?type:String):Int {
+	function declareVar(name:String, ?type:String, ?written:String):Int {
 		var id:Int = nextVarId++;
 		if (scopes.length == 0)
 			pushScope();
 		scopes[scopes.length - 1].set(name, id);
 		if (type != null && type.length > 0)
 			scopeTypes[scopeTypes.length - 1].set(name, type);
+
+		var said:Null<String> = (written != null && written.length > 0) ? written : type;
+		if (said != null && said.length > 0)
+			scopeWritten[scopeWritten.length - 1].set(name, said);
+
 		return id;
 	}
 
@@ -4202,6 +4712,18 @@ class Emitter {
 		var i:Int = scopeTypes.length - 1;
 		while (i >= 0) {
 			var found:Null<String> = scopeTypes[i].get(name);
+			if (found != null)
+				return found;
+			i--;
+		}
+		return null;
+	}
+
+	/** The type a local was written as, whatever its slot holds, or null when it was written none. */
+	function writtenVarType(name:String):Null<String> {
+		var i:Int = scopeWritten.length - 1;
+		while (i >= 0) {
+			var found:Null<String> = scopeWritten[i].get(name);
 			if (found != null)
 				return found;
 			i--;

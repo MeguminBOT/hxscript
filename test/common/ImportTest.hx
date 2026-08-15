@@ -37,6 +37,50 @@ class ImportTest {
 		ok('a wildcard beside an alias keeps both',
 			world(pack, 'game', 'Play', 'import game.core.*;\nimport game.core.Modes as M;', 'return Handoff.tag() + "/" + M.tag();')
 			== 'handoff/modes');
+
+		/*
+			A module of the user's own package, which Haxe resolves with nothing written at all.
+
+			This needed an import, and the failure did not surface at the name: it surfaced at the
+			first use, as `Invalid access to field` interpreted and `Cannot call` compiled, so both
+			sides reported it the same way and a conformance pass read it as unsupported everywhere
+			rather than as a defect. Every module of a packaged project had to import its own
+			siblings, which is not a script anybody writes.
+		*/
+		var near:Array<{pack:String, name:String, body:String}> = [
+			{
+				pack: 'game',
+				name: 'Near',
+				body: 'public var n:Int = 3; public function new() {} public function twice():Int return n * 2; '
+				+ 'public static function tag():String return "near";'
+			}
+		];
+
+		ok('a sibling module is constructed and called with no import', world(near, 'game', 'Play', '', 'var v = new Near(); return v.twice();') == '6');
+
+		ok('a sibling module satisfies an annotation', world(near, 'game', 'Play', '', 'var v:Near = new Near(); return v.twice();') == '6');
+
+		ok('a sibling module\'s static is reached with no import', world(near, 'game', 'Play', '', 'return Near.tag();') == 'near');
+
+		// Imports are read before the package is, which is the order Haxe reads them in: the import
+		// is the more deliberate of the two and a module that writes one means it.
+		ok('an import wins over a sibling of the same name',
+			world([
+				{pack: 'game', name: 'Twin', body: 'public static function tag():String return "mine";'},
+				{pack: 'other', name: 'Twin', body: 'public static function tag():String return "theirs";'}
+			], 'game', 'Play', 'import other.Twin;', 'return Twin.tag();')
+			== 'theirs');
+
+		// The other half of the same rule. Reaching a sibling must not turn into reaching anything.
+		ok('another package is still not reached without an import',
+			world([{pack: 'far', name: 'Away', body: 'public static function tag():String return "away";'}], 'game', 'Play', '',
+				'return Away.tag();')
+				.indexOf('threw') == 0);
+
+		ok('a nested package of the module\'s own is still not reached',
+			world([{pack: 'game.deep', name: 'Buried', body: 'public static function tag():String return "buried";'}], 'game', 'Play', '',
+				'return Buried.tag();')
+				.indexOf('threw') == 0);
 	}
 
 	/**

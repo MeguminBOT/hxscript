@@ -2370,13 +2370,33 @@ class Emitter {
 				}
 
 			case EBinop('??', a, b):
-				into(a, slot);
+				if (regs[slot] == tDyn) {
+					into(a, slot);
 
-				if (regs[slot] != tDyn) {
-				} else {
 					var over:Int = jump(OJNotNull, [slot]);
 					into(b, slot);
 					land([over]);
+				} else {
+					/**
+					 * A slot that cannot hold null has to be tested somewhere that can.
+					 *
+					 * This used to write the left side into the slot and skip the test entirely,
+					 * reasoning that a register holding no null needs no null check. The null is
+					 * gone by then: `var z:Null<Int> = null; z ?? 5` puts `z` into an `i32`, which
+					 * reads it as 0, so the check had nothing left to find and the right side never
+					 * ran. Compiled code answered 0 where every interpreter answers 5.
+					 *
+					 * Decided in a dynamic register instead, where a null is still a null, and only
+					 * the side that won is moved into the slot.
+					 */
+					var held:Int = reg(tDyn);
+					into(a, held);
+
+					var over:Int = jump(OJNotNull, [held]);
+					into(b, held);
+					land([over]);
+
+					move(held, slot);
 				}
 
 			case EBinop(op, a, b) if (COMPARE.exists(op) || op == '&&' || op == '||'):

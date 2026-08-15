@@ -22,8 +22,8 @@ cppia](#runtime-translation-and-how-it-differs-from-haxes-cppia) is the comparis
 
 ## Contents
 
-- [The three modes](#the-three-modes): [interpreted](#interpreted), [cppia](#cppia),
-  [cppia with the JIT](#cppia-with-the-jit)
+- [The four modes](#the-four-modes): [interpreted](#interpreted), [cppia](#cppia),
+  [cppia with the JIT](#cppia-with-the-jit), [HashLink bytecode](#hashlink-bytecode)
 - [What compiling buys](#what-compiling-buys)
 - [What compiling costs](#what-compiling-costs)
 - [Choosing](#choosing)
@@ -35,7 +35,7 @@ cppia](#runtime-translation-and-how-it-differs-from-haxes-cppia) is the comparis
 - [Where compiled code still differs](#where-compiled-code-still-differs)
 - [What is not known](#what-is-not-known)
 
-## The three modes
+## The four modes
 
 ### Interpreted
 
@@ -66,6 +66,18 @@ The same bytecode with `cpp.cppia.Host.enableJit(true)` called before a module l
 
 It is a process-wide switch in hxcpp rather than a per-module one, so it is a decision made once at
 startup, and you cannot have some modules jitted and others not.
+
+### HashLink bytecode
+
+The same declarations emitted as HashLink's own bytecode and loaded into the running process, by a
+second backend under `hxscript.hl`. HashLink jits what it loads, so there is no separate jitted mode
+here the way there is on hxcpp.
+
+Needs `-D hxscript_hl`, and links a small native module that the same macro compiles into the binary,
+so a host writes the define and nothing else. It reaches the same construct-for-construct agreement
+cppia does, recorded in [`support-table.md`](support-table.md), and refuses nothing in the corpus.
+
+The figures on this page are hxcpp's. This backend has its own and they are not quoted here yet.
 
 ## What compiling buys
 
@@ -223,7 +235,7 @@ so a refusal costs speed rather than behaviour.
 
 | refused | note |
 | --- | --- |
-| a name it cannot resolve | an identifier or type that is neither in the batch, ambient, nor a host static |
+| a name it cannot resolve | an identifier or type that is in neither the batch, the module's imports, the module's own package, the world's type table, nor the host's ambient names |
 | a reference to a class compiled in another batch | it cannot link across batches, so it waits for one that holds both |
 | a reference to a scripted type that stays interpreted | there is nothing for the name to link to, and cppia resolves an unknown one to null and then uses it without looking |
 | a host superclass whose constructor shape is unknown | the type table has no entry for it, so a call to it cannot be padded |
@@ -239,10 +251,26 @@ key-value loops, `??`, `%=`, `case a | b:`, and a `using` whose receiver type is
 matching compiles in full, over enum constructors, arrays, objects and nested shapes alike: a switch
 the `SWITCH` instruction cannot express is rewritten into an if-else chain rather than refused.
 
-The evidence is [`test/cpp/CppiaTest.hx`](../test/cpp/CppiaTest.hx), which runs 173 constructs
-interpreted and compiled and compares the answers. It reports 0 wrong, and one refusal that is
-asserted on purpose. That is a stronger claim than "nothing was refused": a construct that compiled
-to the wrong thing would show as `WRONG`, and two of them did during the work.
+Three more went the same way and they are the ones a project met most often. **Constructing an
+abstract the host compiled** — `h3d.Vector`, `h3d.Matrix`, `h2d.col.Point`, which is most of what a
+3D script writes — used to name a type with no runtime class, so it was refused; it is now built
+through `hxscript.runtime.Construct`, which reaches the static the constructor became. **A
+constructor call that leaves out an optional in the middle**, `new Mesh(prim, parent)` against
+`(primitive, ?material, ?parent)`, is placed by the same helper for a `new` and against the recorded
+parameter shape for a `super(...)`, rather than padded from the right into the wrong parameter. And
+**a host name the module never imported** — a secondary type of an imported module, an enum
+constructor, an enum-abstract constant — is now looked up in the world's type table, which is where
+the interpreter had been finding it all along.
+
+The evidence is the shared conformance corpus: 329 constructs offered to six columns, one per way
+of running a script, with `sh test/all.sh` collecting them and
+[`support-table.md`](support-table.md) written from what came back rather than by hand. Every
+compiled column agrees with its own target's interpreter on all 329 and refuses none.
+
+That is a stronger claim than "nothing was refused", and the two halves are deliberately kept apart:
+a refusal costs speed, and a construct that compiled to the wrong thing is reported as a difference
+instead. Several were, during this work — the wrapper's class name where a boxed abstract's value
+belonged, and `0` where a scaled vector belonged — which is the reason the table separates them.
 
 ## Where compiled code still differs
 
