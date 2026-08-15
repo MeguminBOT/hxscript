@@ -499,7 +499,7 @@ class Emitter {
 		for (decl in decls) {
 			switch (decl.d) {
 				case DClass(c):
-					var base:Null<String> = baseName(c.extend);
+					var base:Null<String> = basePath(c.extend);
 
 					if (base == null)
 						continue;
@@ -520,7 +520,7 @@ class Emitter {
 			if (bases.exists(c.name) || c.extend == null)
 				continue;
 
-			hosts.set(c.name, hostShape(baseName(c.extend), decl(decls, c)));
+			hosts.set(c.name, hostShape(basePath(c.extend), decl(decls, c)));
 		}
 
 		for (decl in decls) {
@@ -732,7 +732,7 @@ class Emitter {
 	 * @throws Unsupported If it extends something the world cannot be asked about.
 	 */
 	function layout(c:ClassDecl, pos:Position):Void {
-		var base:Null<String> = baseName(c.extend);
+		var base:Null<String> = basePath(c.extend);
 		var inBatch:Null<String> = bases.get(c.name);
 		var host:Null<hl.Type> = null;
 
@@ -1048,7 +1048,7 @@ class Emitter {
 	 *         no constructor at all.
 	 */
 	function hostArity(base:Null<CType>):Int {
-		var named:Null<String> = baseName(base);
+		var named:Null<String> = basePath(base);
 		var found:Dynamic = named == null ? null : world(named);
 
 		if (found == null)
@@ -3501,13 +3501,20 @@ class Emitter {
 
 	/**
 	 * @param t A class's `extends` clause.
-	 * @return The name it gives, or null when there is none.
+	 * @return The path it gives, as the script wrote it, or null when there is none.
+	 *
+	 * **Whole, not the last segment.** The world is asked for this name, and a script that names its
+	 * base in full rather than importing it wrote the only thing that identifies it: reduced to a
+	 * segment, `h3d.scene.fwd.PointLight` became `PointLight`, which resolves only if the script also
+	 * imported it, so a class extending a fully-qualified base was skipped as one nothing answers to.
+	 * A base of this batch is declared with a simple name and a script extends it by that name, so
+	 * joining leaves those exactly as they were.
 	 */
-	function baseName(t:Null<CType>):Null<String> {
+	function basePath(t:Null<CType>):Null<String> {
 		return switch (t) {
 			case null: null;
-			case CTPath(parts, _): parts[parts.length - 1];
-			case CTParent(inner): baseName(inner);
+			case CTPath(parts, _): parts.join('.');
+			case CTParent(inner): basePath(inner);
 			case _: null;
 		}
 	}
@@ -3936,7 +3943,7 @@ class Emitter {
 		if (holds != tDyn)
 			elements[elements.length - 1].set(name, holds);
 
-		var written:Null<String> = baseName(t);
+		var written:Null<String> = basePath(t);
 
 		if (written == null || classes.exists(written) || declared.exists(written))
 			return;

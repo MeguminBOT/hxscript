@@ -50,13 +50,29 @@ class Bridges {
 		var taken:Map<String, String> = [];
 
 		var every:Array<String> = [];
+		var listed:Map<String, Bool> = [];
+
+		/**
+		 * Each base once, however many ways it arrived. A curated preset and a package scan name the
+		 * same class routinely, and the second arrival matched a name already taken by itself, so
+		 * every bridged base warned that it was being skipped for colliding with itself. Nothing was
+		 * lost, since the bridge was made on the first arrival, but ten such lines per build read as
+		 * ten bridges missing.
+		 */
+		function want(base:String):Void {
+			if (listed.exists(base))
+				return;
+
+			listed.set(base, true);
+			every.push(base);
+		}
 
 		for (lib in libs)
 			for (base in lib.bases)
-				every.push(base);
+				want(base);
 
 		for (base in scanned(libs))
-			every.push(base);
+			want(base);
 
 		{
 			for (base in every) {
