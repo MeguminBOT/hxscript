@@ -13,6 +13,17 @@ typedef Library = {
 	 */
 	var define:String;
 
+	/**
+	 * The define that turns this one on, when it is not its own.
+	 *
+	 * A record whose subject is half of another library's rather than a library of its own sets this:
+	 * heaps' 3D half arrives with `-lib heaps` like the rest of it, so nothing would ever define
+	 * `heaps3d`, and giving it that define anyway is what lets `hxscript_setup_skip` address the half
+	 * rather than the whole. So `define` is the name, `requires` is the switch, and they are the same
+	 * for every library that is one.
+	 */
+	var ?requires:String;
+
 	/** What to call it in the setup report. */
 	var title:String;
 

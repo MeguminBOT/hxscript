@@ -199,10 +199,16 @@ class Presets {
 	/**
 	 * Heaps, which shares no ancestry with the others and so is the honest test of whether the
 	 * arrangement generalises.
+	 *
+	 * **This is the 2D half and whatever 3D types the 2D half names**, with `HEAPS_3D` holding the
+	 * rest. The three that live here rather than there are not a judgement call: `h2d.Drawable`
+	 * declares `colorAdd` an `h3d.Vector` and `colorMatrix` an `h3d.Matrix`, and `h2d.Tile` is a
+	 * region of an `h3d.mat.Texture`, so a project that never draws a triangle in space still names
+	 * all three. Nothing else under `h3d` is reachable from `h2d`, which is what makes the cut a cut.
 	 */
 	public static final HEAPS:Library = {
 		define: 'heaps',
-		title: 'heaps',
+		title: 'heaps 2D',
 		roots: [],
 		ignore: [],
 		types: [
@@ -223,10 +229,25 @@ class Presets {
 			'h2d.filter.Glow',
 			'h2d.col.Point',
 			'hxd.Key',
+
+			/**
+			 * The other way a game is played. `hxd.Pad.wait` hands over a pad as one arrives, and its
+			 * sticks, triggers and buttons are read per frame the way the keyboard is, so a project
+			 * that wants both writes the same loop twice rather than anything special.
+			 */
+			'hxd.Pad',
 			'hxd.Timer',
 			'hxd.Math',
 			'hxd.Event',
-			'hxd.res.DefaultFont'
+			'hxd.res.Any',
+			'hxd.res.Sound',
+			'hxd.res.DefaultFont',
+			'hxd.snd.Channel',
+			'hxd.snd.effect.Pitch',
+			'hxscript.heaps.SoundTools',
+
+			/** Named by `h2d.Tile`, and by `h2d.Object.drawTo`. */
+			'h3d.mat.Texture'
 		],
 		bases: ['h2d.Object'],
 		abstractPackages: [],
@@ -235,17 +256,136 @@ class Presets {
 		 * runtime class and `new h2d.col.Point(3, 4)` in a script resolved to nothing. A wrapper is
 		 * what gives an abstract something to resolve to, and this is the one a project reaches for
 		 * most: it is what `getBounds`, `globalToLocal` and every collision shape are written in.
+		 *
+		 * The three `h3d` ones are the same story for the 2D half. `colorAdd` and `colorMatrix` are
+		 * declared on `h2d.Drawable` as an `h3d.Vector` and an `h3d.Matrix`, and `color` on the same
+		 * class is an `h3d.Vector4`, so tinting a sprite names all three and nothing about it is 3D.
 		 */
-		abstracts: ['h2d.BlendMode', 'h2d.col.Point'],
+		abstracts: ['h2d.BlendMode', 'h2d.col.Point', 'h3d.Vector', 'h3d.Vector4', 'h3d.Matrix'],
 		abstractExclude: [],
 		globals: [
+			'hxscript.heaps.SoundTools',
 			'h2d.Object',
 			'h2d.Bitmap',
 			'h2d.Graphics',
 			'h2d.Text',
 			'h2d.Tile',
 			'hxd.Key',
-			'hxd.Timer'
+			'hxd.Timer',
+			'h3d.Vector'
+		]
+	};
+
+	/**
+	 * The 3D half of heaps, which arrives with the rest of it and can be left out.
+	 *
+	 * heaps is not a 2D engine with 3D bolted on: a project picks one scene graph or the other, and
+	 * a preset offering only `h2d` says the library does not support half of what the framework is
+	 * for. So this is on whenever heaps is, and is a record of its own for the other reason, which is
+	 * that a project only ever wants one of the two graphs and this is the more expensive one. Nine
+	 * of the eleven bridges a heaps build generates are here, and a bridge costs one generated
+	 * override per inherited method.
+	 *
+	 * ```
+	 * -D hxscript_setup_skip=heaps3d
+	 * ```
+	 *
+	 * A 2D project that says that keeps every `h2d` type, `h3d.Vector`, `h3d.Matrix` and
+	 * `h3d.mat.Texture`, and stops paying for a scene graph it never builds into.
+	 *
+	 * **The 3D scene graph is bridgeable because a base no longer has to be rebuilt to be extended.**
+	 * A bridge used to copy the constructor of the class it extends, by turning the compiler's own
+	 * output back into source, and this branch does not survive that: `ObjectFlags` is an abstract
+	 * whose methods mutate `this`, so every flag property becomes arithmetic on the underlying `Int`
+	 * against a field typed as the abstract, which no source may write.
+	 *
+	 * Such a base is constructed by Haxe instead. The bridge gets a real constructor calling a real
+	 * `super`, and the instance is made through it, which means the base runs exactly as compiled and
+	 * nothing about it has to survive a round trip. Scripts can be part of the 3D scene rather than
+	 * only building into it.
+	 */
+	public static final HEAPS_3D:Library = {
+		define: 'heaps3d',
+		requires: 'heaps',
+		title: 'heaps 3D',
+		roots: [],
+		ignore: [],
+		types: [
+			/**
+			 * The scene itself, so a project can say what the host handed it. A 3D project is given the
+			 * scene rather than being one, and every camera move, ambient change and renderer setting
+			 * is reached through it, so leaving it unnameable made the one object a project always has
+			 * the one it could not annotate.
+			 */
+			'h3d.scene.Scene',
+			'h3d.scene.Object',
+			'h3d.scene.Mesh',
+			'h3d.scene.Graphics',
+			'h3d.scene.Box',
+			'h3d.scene.Sphere',
+			'h3d.scene.Interactive',
+			'h3d.scene.CameraController',
+			'h3d.scene.fwd.DirLight',
+			'h3d.scene.fwd.PointLight',
+
+			/** Ambient light and the light budget, which is `scene.lightSystem`. */
+			'h3d.scene.fwd.LightSystem',
+
+			/** Shadows, particles, and the sphere a culling test is written in. */
+			'h3d.pass.DefaultShadowMap',
+			'h3d.parts.GpuParticles',
+			'h3d.col.Sphere',
+
+			/**
+			 * The shape a game asks questions of rather than draws. `Ray` with
+			 * `Bounds.rayIntersection` is every hitscan shot and every ground probe, and both are
+			 * arithmetic with no device behind them, so a project can run its own collision without a
+			 * window and a test can drive it without one either.
+			 *
+			 * `h3d.col.Point` is not here beside it, and cannot be: it is a typedef to `h3d.Vector`,
+			 * which is an `@:forward abstract`, and the manifest holds a reference per type so that
+			 * dead code elimination keeps them. An abstract is not a value, so naming one there fails
+			 * the build inside a macro rather than where it was written. Nothing is lost, since the
+			 * 2D preset already wraps `h3d.Vector` and the alias resolves to that.
+			 */
+			'h3d.col.Ray',
+			/**
+			 * `Polygon` is the base the shapes share and is worth naming for itself: preparing one to
+			 * be drawn is `unindex` and `addNormals`, both declared there, and a project that builds a
+			 * mesh of its own builds a `Polygon`.
+			 */
+			'h3d.prim.Polygon',
+			'h3d.prim.Cube',
+			'h3d.prim.Sphere',
+			'h3d.prim.Cylinder',
+			'h3d.prim.Grid',
+
+			/** A sphere built from a subdivided solid rather than from rings, so it lights evenly. */
+			'h3d.prim.GeoSphere',
+			'h3d.mat.Material',
+			'h3d.Camera',
+			'h3d.Quat',
+			'h3d.col.Bounds'
+		],
+		bases: [
+			'h3d.scene.Object',
+			'h3d.scene.Mesh',
+			'h3d.scene.Graphics',
+			'h3d.scene.Box',
+			'h3d.scene.Sphere',
+			'h3d.scene.Interactive',
+			'h3d.scene.CameraController',
+			'h3d.scene.fwd.DirLight',
+			'h3d.scene.fwd.PointLight'
+		],
+		abstractPackages: [],
+		abstracts: [],
+		abstractExclude: [],
+		globals: [
+			'h3d.scene.Object',
+			'h3d.scene.Mesh',
+			'h3d.prim.Cube',
+			'h3d.mat.Material'
 		]
 	};
 
@@ -283,10 +423,15 @@ class Presets {
 	};
 
 	/** Every library shipped here, whether or not this build has it. */
-	public static final SHIPPED:Array<Library> = [CORE, LIME, OPENFL, FLIXEL, FLIXEL_ADDONS, FLIXEL_UI, HEAPS, SMIDR];
+	public static final SHIPPED:Array<Library> = [CORE, LIME, OPENFL, FLIXEL, FLIXEL_ADDONS, FLIXEL_UI, HEAPS, HEAPS_3D, SMIDR];
 
 	/**
 	 * The libraries this build actually has, with `custom` folded in.
+	 *
+	 * A record is turned on by `requires` where it has one and by its own `define` otherwise, and is
+	 * named to `hxscript_setup_skip` and `hxscript_setup_only` by its `define` either way. That is
+	 * the whole of what lets `-D hxscript_setup_skip=heaps3d` drop half of heaps: nothing defines
+	 * `heaps3d`, so it could not switch itself on, and it is the only name that addresses that half.
 	 *
 	 * @return The active records, custom ones last.
 	 */
@@ -307,7 +452,8 @@ class Presets {
 
 		return [
 			for (lib in out)
-				if (enabled(lib.define) && skip.indexOf(lib.define) < 0 && (only.length == 0 || only.indexOf(lib.define) >= 0)) lib
+				if (enabled(lib.requires ?? lib.define) && skip.indexOf(lib.define) < 0
+					&& (only.length == 0 || only.indexOf(lib.define) >= 0)) lib
 		];
 	}
 

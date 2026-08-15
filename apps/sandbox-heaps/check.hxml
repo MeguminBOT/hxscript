@@ -1,0 +1,33 @@
+# The sandbox with no window: what this build wired, and whether the projects load.
+#
+#     cd apps/sandbox-heaps
+#     haxe check.hxml
+#
+# Seconds rather than minutes, because it is the same host without heaps or a window under it, so it
+# answers "is the setup right" separately from "does the app build", which are the two questions that
+# otherwise get debugged as one.
+#
+# In a checkout of this repository, point the haxelib at it first, so `-lib hxscript` resolves and
+# `extraParams.hxml` applies. That file is the whole of the setup:
+#
+#     haxelib dev hxscript ../..
+#
+# **Heaps cannot be added to this one.** The sandbox for lime can be asked `-lib flixel` and will
+# report what a script could then reach, but heaps does not compile under eval: `hxd.fmt.hmd` fails
+# to type and `hlsdl` reaches the `hl` package, which eval refuses. So a project extending an h2d
+# class is reported here as extending a base this build does not carry, which is true and is as far
+# as a windowless check can get. What it still answers is everything else: the setup, the projects
+# on disk, whether each parses, and what each would run.
+#
+# `--run` rather than `-main ... --interp`, because only `--run` passes arguments through. Check's own
+# arguments do go after, for the same reason:
+#
+#     haxe check.hxml --projects ../some/other/folder
+
+-lib hxscript
+-cp .
+
+# Names the sandbox's own classes to hxScript, so `@:scriptable` on them means something.
+-D hxscript_host=host
+
+--run Check

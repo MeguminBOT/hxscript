@@ -41,6 +41,36 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 	/** The class's own interpreter, hosting its statics and initializer. */
 	public var interp:Interp;
 
+	/** Instance methods a backend compiled, as binders taking an instance. Null until one fills it. */
+	public var compiledMembers:Null<Map<String, Dynamic>> = null;
+
+	/**
+	 * Which position each of an instance's slots holds, shared by every instance of this class.
+	 *
+	 * Null until a backend that wants indexed storage asks for it. The order is whatever the first
+	 * instance bound, which is the order the bridge binds fields in and is therefore the same for
+	 * every instance of the class.
+	 */
+	public var slotIndex:Null<Map<String, Int>> = null;
+
+	/** The names, in slot order. */
+	public var slotNames:Null<Array<String>> = null;
+
+	/**
+	 * Binds one of this class's compiled instance methods to an instance.
+	 *
+	 * @param name The method.
+	 * @param instance What to bind it to.
+	 * @return The bound closure, or null when nothing compiled that method.
+	 */
+	public function boundMember(name:String, instance:Dynamic):Null<Dynamic> {
+		if (compiledMembers == null)
+			return null;
+
+		var make:Null<Dynamic> = compiledMembers.get(name);
+		return make == null ? null : make(instance);
+	}
+
 	/** The resolved base (a scripted class or a native class), resolved lazily and cached. */
 	public var extending(get, never):Dynamic;
 
@@ -160,7 +190,7 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 			if (!field.access.contains(AStatic))
 				continue;
 
-			var l:Variable = {r: null, access: field.access};
+			var l:Variable = {ref: null, access: field.access};
 
 			switch (field.kind) {
 				default:
@@ -344,6 +374,27 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 	}
 
 	/**
+	 * Whether a name is one of this class's methods rather than one of its variables.
+	 *
+	 * An instance keeps both in the same slots, so nothing about a slot says which it is. Reflection
+	 * has to know: `Reflect.fields` answers with what an instance stores, and a method is not that.
+	 *
+	 * @param field The name.
+	 * @return Whether this class or one it extends declares it as a function.
+	 */
+	public function declaresMethod(field:String):Bool {
+		for (f in decl.fields) {
+			if (f.name != field || f.access.contains(AStatic))
+				continue;
+
+			return f.kind.match(KFunction(_));
+		}
+
+		var ext:Dynamic = extending;
+		return (ext is ScriptedClass) ? cast(ext, ScriptedClass).declaresMethod(field) : false;
+	}
+
+	/**
 	 * The class that declares `field` as private, or null if no class in the chain does.
 	 *
 	 * @param field The field name.
@@ -500,9 +551,73 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 		if (hxscript.debug.Metrics.on)
 			hxscript.debug.Metrics.instances++;
 
+		/**
+		 * A base Haxe has to construct is constructed in two phases.
+		 *
+		 * Most bases are rebuilt: the bridge carries a copy of the base's constructor as an ordinary
+		 * method, so an empty instance can be allocated and that method run on it whenever the script
+		 * says `super(...)`. Some constructors cannot be rebuilt, and those bases get a real Haxe
+		 * constructor instead, which can only run as the instance is made.
+		 *
+		 * So the arguments have to be known first. The script's own `super(...)` arguments are
+		 * evaluated with its constructor's parameters bound and no instance in scope, which is legal
+		 * because Haxe forbids reaching `this` before `super` anyway; the instance is made with them;
+		 * and the rest of the script's constructor runs afterwards with the `super` call dropped, so
+		 * those arguments are evaluated once rather than twice.
+		 */
+		if (Reflect.field(instanceClass, '__nativeSuper') == true) {
+			var forSuper:Array<Dynamic> = superArguments(arguments);
+			var inst:IScriptedInstance = Type.createInstance(instanceClass, ArgumentTools.forConstructor(instanceClass, forSuper));
+			inst.__scriptConstruct(this, arguments);
+			return inst;
+		}
+
 		var inst:IScriptedInstance = Type.createEmptyInstance(instanceClass);
 		inst.__scriptConstruct(this, arguments);
 		return inst;
+	}
+
+	/**
+	 * Works out what to hand the base's real constructor.
+	 *
+	 * The script's constructor is read for the `super(...)` it opens with, and everything up to and
+	 * including that call's arguments is evaluated with the constructor's own parameters bound and
+	 * nothing else. There is no instance yet, and there cannot be: this is what decides how to make
+	 * one.
+	 *
+	 * @param arguments What the script's constructor was called with.
+	 * @return What the base's constructor should be called with.
+	 */
+	function superArguments(arguments:Array<Dynamic>):Array<Dynamic> {
+		var found:Null<FunctionDecl> = null;
+
+		for (field in decl.fields)
+			if (field.name == 'new')
+				switch (field.kind) {
+					case KFunction(fun): found = fun;
+					case _:
+				}
+
+		/**
+		 * A class declaring no constructor of its own, or one that never calls `super`, gets the base
+		 * built with no arguments. That is what Haxe does with an omitted `super()` too, and a base
+		 * whose constructor needs arguments will say so itself.
+		 */
+		if (found == null)
+			return [];
+
+		var opening:Null<{before:Array<Expr>, args:Array<Expr>}> = ScriptedTools.opensWithSuper(found.expr);
+		if (opening == null)
+			return [];
+
+		var body:Array<Expr> = opening.before.copy();
+		body.push(({e: EArrayDecl(opening.args), pos: found.expr.pos} : Expr));
+
+		var evaluate:Dynamic = interp.buildFunction('__superArguments', found.args, ({e: EBlock(body), pos: found.expr.pos} : Expr), null,
+			interp.locals);
+
+		var given:Dynamic = Reflect.callMethod(null, evaluate, arguments);
+		return (given is Array) ? (given : Array<Dynamic>) : [];
 	}
 
 	/**

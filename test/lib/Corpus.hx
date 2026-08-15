@@ -27,7 +27,10 @@ class Corpus {
 	 * @param check What to do with one. Whether a case is run interpreted, compiled, or both is the
 	 *        runner's business; this only says what the cases are.
 	 */
-	public static function run(check:Check):Void {
+	public static function run(check:Check, ?section:String -> Void):Void {
+		var at:String -> Void = section == null ? function(_:String):Void {} : section;
+
+		at('basics');
 		check('int literal', 'return 7;', '7');
 		check('arithmetic', 'return 6 * 7 - 2;', '40');
 		check('local var', 'var a = 3; var b = 4; return a * b;', '12');
@@ -51,9 +54,17 @@ class Corpus {
 		');
 		check('static field', 'count = 9; return count;', '9', 'static var count:Int = 0;');
 		check('bitwise', 'return (12 & 10) | (1 << 3);', '8');
+
+		// An integral operator answers with an integer whatever it is being asked for, so a
+		// destination of another width has to be converted into rather than written straight to.
+		// Every case above lands one in an `Int`, which is the one destination needing no conversion.
+		check('bitwise into a float', 'var f:Float = (255 >> 4) & 0xF; return f;', '15');
+		check('bitwise into a dynamic', 'var d:Dynamic = 12 & 10; return d;', '8');
+		check('a masked byte as a fraction', 'var a:Float = ((0xC0FFEE >> 16) & 0xFF) / 255; return Math.round(a * 100);', '75');
 		check('modulo and division', 'return Std.string(17 % 5) + Std.string(Std.int(17 / 5));', '23');
 		check('string compare', 'return "abc" == "abc" ? "eq" : "ne";', 'eq');
 
+		at('closures');
 		check('function value', 'var f = function(a:Int) { return a * 2; }; return f(21);', '42');
 		check('closure captures local', 'var n = 10; var f = function(a:Int) { return a + n; }; return f(5);', '15');
 		check('closure sees later writes', 'var n = 1; var f = function() { return n; }; n = 99; return f();', '99');
@@ -69,6 +80,7 @@ class Corpus {
 		check('array map with closure', 'var a = [1, 2, 3]; var t = 0; for (v in a) t += v * 2; return t;', '12');
 
 		var colour:String = 'enum Colour { Red; Green; Rgb(r:Int, g:Int, b:Int); }';
+		at('enums');
 		check('enum no-arg constructor', 'var c = Colour.Red; return Type.enumConstructor(c);', 'Red', '', colour);
 		check('enum equality', 'var c = Colour.Green; return c == Colour.Green ? "eq" : "ne";', 'eq', '', colour);
 		check('enum inequality', 'return Colour.Red == Colour.Green ? "eq" : "ne";', 'ne', '', colour);
@@ -118,6 +130,7 @@ class Corpus {
 			@:op(A * B) public function times(n:Float):Metres return new Metres(this * n);
 			public function describe():String return this + "m";
 		}';
+		at('abstracts');
 		check('scripted abstract method, annotated', 'var a:Metres = new Metres(2); return a.describe();', '2m', '', metres);
 		check('scripted abstract method, inferred', 'var a = new Metres(2); return a.describe();', '2m', '', metres);
 		check('scripted abstract method on a fresh value', 'return new Metres(2).describe();', '2m', '', metres);
@@ -135,6 +148,7 @@ class Corpus {
 			}
 		', metres);
 
+		at('modules');
 		check('interval as a value', 'var it = 0...3; var t = 0; while (it.hasNext()) t += it.next(); return t;', '3');
 		check('interval bound to a local then looped', 'var it = 1...4; var t = 0; for (v in it) t += v; return t;', '6');
 
@@ -146,6 +160,7 @@ class Corpus {
 			function outer(n:Int):Int return inner(n);
 		');
 
+		at('fields');
 		check('member field initialiser', 'var t = new T(); return t.raw;', '7', '
 			public var raw:Int = 7;
 			public function new() {}
@@ -191,9 +206,28 @@ class Corpus {
 			public function new() {}
 		');
 
+		// A property of a class the HOST compiled, which is a different mechanism from a property of a
+		// scripted one: the storage is a real field at a real offset and nothing on the receiver says
+		// an accessor stands in front of it. A backend reaching that offset writes the right number
+		// past the setter, so the field reads back correctly and the object is never told it changed.
+		// That is not hypothetical: it is what left every sprite of a heaps project sitting still.
+		// The import is not decoration. A host class a script names has to be placeable by every
+		// backend, and one of them places a `new` through what the module imported rather than through
+		// what the world can resolve, so a case naming a host type without importing it is refused
+		// there and the row says nothing about properties.
+		var host:String = 'import HostBase;';
+
+		check('host property setter', 'var h = new HostBase(); h.scaled = 5; return h.scaled;', '10', null, host);
+		check('host property setter ran', 'var h = new HostBase(); h.scaled = 5; return h.writes;', '1', null, host);
+		check('host property setter twice', 'var h = new HostBase(); h.scaled = 1; h.scaled = 3; return h.writes;', '2', null, host);
+		check('host property getter', 'var h = new HostBase(); h.shown = 4; return h.shown;', '5', null, host);
+		check('host plain field beside a property', 'var h = new HostBase(); h.kept = 2; h.scaled = 3; return h.kept + h.scaled;', '8',
+			null, host);
+
 		// An array literal has nothing in it to say what it holds, so it used to be built loose while an
 		// annotation promised a specific kind. Reading it back through that annotation reinterprets the
 		// memory, which crashes rather than misbehaves, so these index one after the round trip.
+		at('collections');
 		check('typed array local, literal init', 'var d:Array<Float> = [1.5, 2.5]; return d[1];', '2.5');
 		check('typed int array local', 'var d:Array<Int> = [4, 5, 6]; return d[2];', '6');
 		check('typed array field, indexed back', 'var t = new T(); t.data = [7.5]; return t.data[0];', '7.5', '
@@ -235,6 +269,7 @@ class Corpus {
 		check('nested float array', 'var d:Array<Array<Float>> = [[1.5], [2.5]]; return d[1][0];', '2.5');
 		check('nested string array', 'var d:Array<Array<String>> = [["a"], ["b"]]; return d[1][0];', 'b');
 
+		at('modules');
 		check('static property', 'return T.only;', '42', '
 			public static var only(get, never):Int;
 			static function get_only():Int return 42;
@@ -250,12 +285,14 @@ class Corpus {
 			static function readIt():Int return only;
 		');
 
+		at('stdlib');
 		check('regex match', 'var r = ~/[0-9]+/; return r.match("abc123") ? "yes" : "no";', 'yes');
 		check('regex no match', 'var r = ~/^[0-9]+$/; return r.match("abc") ? "yes" : "no";', 'no');
 		check('regex matched group', 'var r = ~/([a-z]+)([0-9]+)/; r.match("abc123"); return r.matched(2);', '123');
 		check('regex with flags', 'var r = ~/ABC/i; return r.match("xxabcxx") ? "yes" : "no";', 'yes');
 		check('regex replace', 'var r = ~/[0-9]/g; return r.replace("a1b2", "#");', 'a#b#');
 
+		at('matching');
 		check('case guard taken', 'var a = 5; switch (a) { case v if (v > 3): return "big"; default: return "small"; }', 'big');
 		check('case guard falls through to later case',
 			'var a = 2; switch (a) { case 2 if (false): return "no"; case 2: return "yes"; default: return "?"; }', 'yes');
@@ -265,6 +302,34 @@ class Corpus {
 		check('typed catch first match wins', 'try { throw 7; } catch (e:Int) { return "int"; } catch (e:String) { return "str"; }', 'int');
 		check('typed catch falls to dynamic', 'try { throw 1.5; } catch (e:Int) { return "int"; } catch (e:Dynamic) { return "dyn"; }', 'dyn');
 		check('catch binds the value', 'try { throw "x"; } catch (e:String) { return e + "!"; }', 'x!');
+
+		// A trap is a live entry on the VM's own stack, given back by falling out of the `try` that
+		// opened it. `break` and `continue` do neither: they jump past that, and the entry is left
+		// pointing into a frame that has moved on. Nothing goes wrong where it was written. It goes
+		// wrong in whatever the function returned into, which is why the values below matter less
+		// than the fact that the process is still there to report them.
+		at('controlflow');
+		check('continue out of a try', 'var n = 0; for (i in 0...4) { try { if (i == 1) continue; n += i; } catch (e:Dynamic) {} } return n;',
+			'5');
+		check('break out of a try', 'var n = 0; for (i in 0...4) { try { if (i == 2) break; n += i; } catch (e:Dynamic) {} } return n;', '1');
+		check('continue out of a try, many times',
+			'var n = 0; for (i in 0...200) { try { if (i % 2 == 0) continue; n += 1; } catch (e:Dynamic) {} } return n;', '100');
+		check('continue out of a try in a while',
+			'var n = 0; var i = 0; while (i < 4) { i++; try { if (i == 2) continue; n += i; } catch (e:Dynamic) {} } return n;', '8');
+		check('continue out of two nested trys',
+			'var n = 0; for (i in 0...3) { try { try { if (i == 1) continue; n += 1; } catch (e:Dynamic) {} } catch (e:Dynamic) {} } return n;',
+			'2');
+		// The other half of the same question: a jump out of a loop must not give back a trap that
+		// belongs to something the loop is inside, or the `catch` below never runs.
+		check('continue keeps a try around the loop',
+			'var n = 0; try { for (i in 0...3) { try { if (i == 1) continue; n += i; } catch (e:Dynamic) {} } throw "boom"; } catch (e:Dynamic) { n += 100; } return n;',
+			'102');
+		check('break keeps a try around the loop',
+			'var n = 0; try { for (i in 0...4) { try { if (i == 2) break; n += i; } catch (e:Dynamic) {} } throw "boom"; } catch (e:Dynamic) { n += 100; } return n;',
+			'101');
+		// A clause runs with the trap already given back, so leaving one gives back nothing.
+		check('continue from inside a catch',
+			'var n = 0; for (i in 0...4) { try { if (i == 1) throw "x"; n += i; } catch (e:Dynamic) { continue; } } return n;', '5');
 
 		check('null-safe field, present', 'var o = {a: 5}; return o?.a;', '5');
 		check('null-safe field, null', 'var o:Dynamic = null; return o?.a;', 'null');
@@ -278,6 +343,7 @@ class Corpus {
 			}
 		');
 
+		at('collections');
 		check('map literal, string keys', "var m = ['a' => 1, 'b' => 2]; return m.get('a') + m.get('b');", '3');
 		check('map literal, int keys', 'var m = [1 => "x", 2 => "y"]; return m.get(2);', 'y');
 		check('map literal, exists', "var m = ['a' => 1]; return m.exists('a') && !m.exists('b') ? 'ok' : 'no';", 'ok');
@@ -288,11 +354,13 @@ class Corpus {
 
 		// hxcpp cannot tell a whole Float from an Int inside a Dynamic, so a running total declared
 		// Float used to be added as an Int and wrapped at two billion. These accumulate past that.
+		at('numbers');
 		check('float total past the int limit', 'var t:Float = 0; var i:Int = 0; while (i < 100) { t = t + 100000000; i++; } return t;', '10000000000');
 		check('float total, compound assign', 'var t:Float = 0; var i:Int = 0; while (i < 100) { t += 100000000; i++; } return t;', '10000000000');
 		check('float total, subtracting', 'var t:Float = 0; var i:Int = 0; while (i < 100) { t -= 100000000; i++; } return t;', '-10000000000');
 		check('int multiply still wraps', 'var s:Int = 123456789; s = s * 1103515245; return s & 1073741823;', '231782385');
 
+		at('stdlib');
 		check('string interpolation, ident', "var n = 5; return 'n is $n';", 'n is 5');
 		check('string interpolation, expr', "var a = 2; var b = 3; return 'sum ${a + b}';", 'sum 5');
 		check('string interpolation, escaped', "var n = 1; return 'cost $$5 for $n';", "cost $5 for 1");
@@ -313,6 +381,7 @@ class Corpus {
 		check('unsigned shift', 'return -8 >>> 28;', '15');
 		check('compound shift', 'var i = 1; i <<= 3; return i;', '8');
 		check('compound xor', 'var i = 12; i ^= 10; return i;', '6');
+		at('syntax');
 		check('compound modulo', 'var i = 17; i %= 5; return i;', '2');
 		check('block in value position', 'var x = { var t = 5; t * 2; }; return x;', '10');
 		check('null coalesce', 'var a:Dynamic = null; return a ?? 5;', '5');
@@ -339,6 +408,7 @@ class Corpus {
 		check('switch object pattern', 'var o = {k: 3}; switch (o) { case {k: 3}: return "hit"; default: return "miss"; }', 'hit');
 		check('switch nested array', 'var a = [[1, 2]]; switch (a) { case [[x, y]]: return x + y; default: return 0; }', '3');
 
+		at('closures');
 		check('sibling closures share a name', 'var out = [];'
 			+ ' var a = function() return [for (i in 0...3) i].join(",");'
 			+ ' var b = function() { var i = 0; while (i < 3) i++; return i; };'
@@ -353,11 +423,13 @@ class Corpus {
 		check('capture boxes an argument', 'return taker(5);', '15',
 			'static function taker(n:Int):Int { var bump = function() n = n + 10; bump(); return n; }');
 
+		at('syntax');
 		check('is operator', 'var s:Dynamic = "x"; return s is String;', 'true');
 		check('is operator, false', 'var s:Dynamic = 5; return s is String;', 'false');
 		check('is operator on a scripted class', 'var v:Dynamic = new T(); return v is T;', 'true',
 			'public function new() {}');
 
+		at('inheritance');
 		check('super call', 'return new Child().speak();', 'base then child',
 			null,
 			'class Base { public function new() {} public function speak():String return "base"; }\n'
@@ -375,6 +447,7 @@ class Corpus {
 			+ 'class Child extends Base { public function new() { super(); } '
 			+ 'public function borrowed():String return super.kept; }');
 
+		at('shapes');
 		check('a do while', 'var i = 0; var n = 0; do { n += i; i++; } while (i < 5); return n;', '10');
 		check('a nested function calling itself', 'return fact(5);', '120', 'static function fact(n:Int):Int { return n <= 1 ? 1 : n * fact(n - 1); }');
 		check('a function value in a local', 'var f = function(x:Int):Int return x * 3; return f(4);', '12');
@@ -394,6 +467,7 @@ class Corpus {
 		check('a switch on a string', 'var s = "b"; switch (s) { case "a": return 1; case "b": return 2; default: return 3; }', '2');
 		check('a ternary chain', 'var n = 7; return n < 5 ? "low" : n < 10 ? "mid" : "high";', 'mid');
 
+		at('arguments');
 		check('an optional argument left out', 'return pad(3);', '13',
 			'static function pad(n:Int, ?extra:Int):Int { return n + (extra == null ? 10 : extra); }');
 
@@ -412,6 +486,38 @@ class Corpus {
 		check('an optional method argument', 'return new T().grow(2);', '12',
 			'public function new() {} public function grow(n:Int, ?by:Int):Int { return n + (by == null ? 10 : by); }');
 
+		// Which optional a short call leaves out is decided by type, not by position, and the ones
+		// above never show it because their optionals are all at the end. A constructor of the shape
+		// every scene graph is built on, `(thing, ?options, ?parent)`, is where it shows: the call
+		// writes two arguments meaning the first and the last, and a binding that goes in order puts
+		// the parent in the options and the constructor fails on a type the script never mentioned.
+		// Written against a host class on purpose. A script's own function is bound by a runtime that
+		// has its parameter list in front of it, and a compiled one's is not: nothing at runtime
+		// carries a constructor's signature, so this is the half that had to be recorded to be asked.
+		var shaped:String = 'import HostShaped;';
+
+		check('a host optional in the middle left out', 'var p = new HostShaped("p"); return new HostShaped("c", p).shape();', 'c/-/p',
+			null, shaped);
+
+		check('a host optional in the middle given', 'var p = new HostShaped("p"); return new HostShaped("c", new HostTint("red"), p).shape();',
+			'c/red/p', null, shaped);
+
+		check('a host optional at the end left out', 'return new HostShaped("c", new HostTint("red")).shape();', 'c/red/-', null, shaped);
+
+		check('every host optional left out', 'return new HostShaped("c").shape();', 'c/-/-', null, shaped);
+
+		// The same call written as a `super`, which reaches the base through a bridge rather than
+		// through `new` and so is a separate path on every backend.
+		check('a host optional in the middle left out of a super', 'var p = new HostShaped("p"); return new Sub("c", p).shape();', 'c/-/p',
+			null, shaped + '\nclass Sub extends HostShaped { public function new(label:String, ?held:HostShaped) { super(label, held); } }');
+
+		// Placing an argument means looking at it, and what a script holds an abstract in is a wrapper
+		// around the value rather than the value. Every other call unwraps one on the way through and
+		// construction was the one that did not, so this is here to keep the two together.
+		check('a boxed abstract handed to a constructor', 'return new T(new HostVec(3, 4)).seen;', '3',
+			'public var seen:Float; public function new(v:HostVec) { seen = v.x; }', 'import HostVec;');
+
+		at('inheritance');
 		check('an override through a base reference', 'var v:Base = new Child(); return v.speak();', 'child',
 			null,
 			'class Base { public function new() {} public function speak():String return "base"; }\n'
@@ -420,6 +526,14 @@ class Corpus {
 
 		check('a method calling another on this', 'return new T().outer();', '21',
 			'public function new() {} public function inner():Int return 21; public function outer():Int return inner();');
+
+		// With an argument, which is a different instruction's worth of bookkeeping: a method's shape
+		// counts the instance whether or not the call passes one, so the arguments start after it.
+		// Reached only through a call on `this`, which is why the case above never found this.
+		check('a method calling another on this with an argument', 'return new T().outer(6);', '20',
+			'public function new() {} public function inner(n:Int):Int return n * 3; public function outer(n:Int):Int return inner(n) + 2;');
+		check('a method calling another on this with two arguments', 'return new T().outer();', '11',
+			'public function new() {} public function inner(a:Int, b:Float):Int return a + Std.int(b); public function outer():Int return inner(4, 7.5);');
 
 		check('a field set by the base and read by the child', 'return new Child().read();', '7',
 			null,

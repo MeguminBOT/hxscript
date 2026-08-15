@@ -1,10 +1,14 @@
 # Execution modes
 
-A script can be interpreted or compiled to bytecode, and the bytecode can be jitted. **The two
-compiled modes are hxcpp-only**, since the bytecode is hxcpp's own; everywhere else a script is
-interpreted and this page is not a decision you have. It is about what choosing between them means
-where you do. The measurements behind every figure quoted here are
-in [`mode-benchmarks.md`](mode-benchmarks.md).
+A script can be interpreted or compiled to bytecode, and the bytecode can be jitted. **Compiling
+needs a target with bytecode of its own**: hxcpp, through cppia, and HashLink, through its own
+loader. Everywhere else a script is interpreted and this page is not a decision you have. It is
+about what choosing between them means where you do.
+
+Every figure quoted here is hxcpp's, measured in [`mode-benchmarks.md`](mode-benchmarks.md). The
+HashLink backend reaches the same construct-for-construct agreement, recorded in
+[`support-table.md`](support-table.md), and has its own measurements that this page does not yet
+carry.
 
 The short version: compiling is worth about **21x** on ordinary work and about **37x** on calls, it
 costs roughly **7ms per module** to do, and it is decided per module rather than per application. If

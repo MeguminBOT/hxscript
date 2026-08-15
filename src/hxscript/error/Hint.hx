@@ -360,6 +360,21 @@ class Hint {
 					out.push(name);
 		} catch (e:haxe.Exception) {}
 
+		/**
+		 * A scripted class's methods, which reflection does not list because a method is not a
+		 * field. What is being suggested here is a name the script wrote, and most of the names a
+		 * script gets wrong are methods.
+		 */
+		try {
+			var declared:Dynamic = hxscript.proxy.TypeProxy.getClass(o);
+
+			if (declared is hxscript.types.ScriptedClass) {
+				for (name in cast(declared, hxscript.types.ScriptedClass).typeGetInstanceFields())
+					if (out.indexOf(name) < 0)
+						out.push(name);
+			}
+		} catch (e:haxe.Exception) {}
+
 		try {
 			var cls:Class<Dynamic> = Type.getClass(o);
 			if (cls != null)

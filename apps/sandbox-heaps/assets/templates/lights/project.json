@@ -1,0 +1,6 @@
+{
+	"title": "Lights",
+	"kind": "heaps",
+	"entry": "Lights",
+	"description": "Cubes and orbiting spheres over a grid floor, lit by a directional light and points you can switch with 1, 2 and 3. After the Heaps sample of the same name, in forward rendering rather than PBR, because the app decides the renderer and a project cannot swap it underneath the UI."
+}

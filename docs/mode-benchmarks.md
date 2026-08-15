@@ -111,7 +111,7 @@ that a fixed per-call cost would show up as scale sensitivity, and nothing has r
 
 ## Results
 
-<!-- BEGIN GENERATED: test/mbench/collate.py -->
+<!-- BEGIN GENERATED: test/bench/mbench/collate.py -->
 ### Every case, microseconds per iteration at 100,000
 
 One row per case, and the only per-case table in this document. `kind` is which average the
@@ -239,14 +239,14 @@ case one passing test had already made the feature look finished.
 
 ## Reproducing
 
-The harness is in [`../test/mbench`](../test/mbench).
+The harness is in [`../test/bench/mbench`](../test/bench/mbench).
 
 ```sh
-sh test/mbench/run.sh
+sh test/bench/mbench/run.sh
 ```
 
 ```sh
-SCALES="25000 100000 500000" sh test/mbench/run.sh
+SCALES="25000 100000 500000" sh test/bench/mbench/run.sh
 ```
 
 Scales must be multiples of 1000, which is the array length `forArray` walks.

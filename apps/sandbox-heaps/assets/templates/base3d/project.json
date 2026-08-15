@@ -1,0 +1,6 @@
+{
+	"title": "Base 3D",
+	"kind": "heaps",
+	"entry": "Base3D",
+	"description": "A textured cube and a smaller one above it, lit by a directional light, with the camera circling. After the Heaps sample of the same name. The texture is loaded through hxd.Res, so this is where UVs, a material and an image meet."
+}

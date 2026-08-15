@@ -1,0 +1,6 @@
+{
+	"title": "GPU particles",
+	"kind": "heaps",
+	"entry": "Particles",
+	"description": "Ten thousand particles emitted as a cone, simulated on the GPU, with their bounds drawn around them. After the Heaps GpuParticles sample. A group is a description rather than a list of objects, which is why the count costs so little."
+}

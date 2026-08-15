@@ -2,15 +2,17 @@
 # Collects one conformance column per execution mode, surviving cases that end the process.
 #
 #   sh test/lib/conformance.sh                   every mode
-#   sh test/lib/conformance.sh cppia cppia-jit   just those
-#   NOBUILD=1 sh test/lib/conformance.sh cppia   run what is already built
+#   sh test/lib/conformance.sh hxcpp-cppia hxcpp-cppia-jit   just those
+#   NOBUILD=1 sh test/lib/conformance.sh hxcpp-cppia   run what is already built
 #
 # The modes, and what each one actually is:
 #
 #   eval-interp  the tree-walking interpreter on eval, for iterating on the interpreter
-#   cpp-interp   the tree-walking interpreter on hxcpp, which is what cppia is compared against
-#   cppia        hxcpp bytecode, the JIT off
-#   cppia-jit    the same bytecode with the JIT on
+#   hxcpp-interp   the tree-walking interpreter on hxcpp, which is what hxcpp-cppia is compared against
+#   hxcpp-cppia        hxcpp bytecode, the JIT off
+#   hxcpp-cppia-jit    the same bytecode with the JIT on
+#   hl-interp   the tree-walking interpreter inside an HL/C binary, with no loader linked
+#   hl-bytecode      HashLink bytecode inside an HL/C binary, loaded and jitted
 #
 # A column is a file of tab-separated rows under bin_test/conformance. Nothing here compares them:
 # `Table` does that, because a runner that decided what agreement meant would have to be built into
@@ -25,6 +27,7 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 OUT=${OUT:-$ROOT/bin_test/conformance}
 LIMIT=${LIMIT:-1000}
 NOBUILD=${NOBUILD:-0}
+HL=${HLPATH:-/c/hashlink/hashlink-1.16.0-win}
 
 CP="-cp $ROOT/src -cp $ROOT/test/common -cp $ROOT/test/common/fixtures -cp $ROOT/test/lib"
 
@@ -35,15 +38,15 @@ CP="-cp $ROOT/src -cp $ROOT/test/common -cp $ROOT/test/common/fixtures -cp $ROOT
 # ships. The base is a fixture rather than a standard-library class because a bridge has to be
 # generatable at all and most of the library is not: `StringBuf` and `haxe.io.BytesBuffer` inline an
 # abstract's constructor, and `haxe.Timer` starts a real timer and ended the run.
-KEEP="--macro hxscript.macro.Keep.run() --macro hxscript.setup.Autowire.run() -D hxscript_bridge_types=HostBase -D hxscript_keep=haxe.Json,haxe.ds.Option"
+KEEP="--macro hxscript.macro.Keep.run() --macro hxscript.setup.Autowire.run() -D hxscript_bridge_types=HostBase,HostQuirk,HostShaped -D hxscript_keep=haxe.Json,haxe.ds.Option,HostVec,HostVecImpl,HostFlag,HostDial,HostTint"
 
 cd "$ROOT"
 mkdir -p "$OUT"
 
-# Whether this run has already built the binary cppia and cppia-jit share.
+# Whether this run has already built the binary hxcpp-cppia and hxcpp-cppia-jit share.
 CPPIA_BUILT=0
 
-ALL="eval-interp cpp-interp cppia cppia-jit"
+ALL="eval-interp hxcpp-interp hxcpp-cppia hxcpp-cppia-jit hl-interp hl-bytecode"
 MODES=${*:-$ALL}
 
 # Builds a mode, unless it shares a binary with one already built.
@@ -54,23 +57,31 @@ build() {
 		eval-interp)
 			return 0
 			;;
-		cpp-interp)
-			# The same build as `cppia` apart from the emitter, and that matters more than it looks.
+		hxcpp-interp)
+			# The same build as `hxcpp-cppia` apart from the emitter, and that matters more than it looks.
 			# Built without `-dce no` this column loses the standard-library members a script reaches
 			# by reflection, and then every row where compiled code linked one directly reads as the
 			# compiler disagreeing with the interpreter. Three rows were that and nothing else.
-			haxe $CP $KEEP -D scriptable -dce no -main ConformanceProbe -cpp "$OUT/cpp-interp"
+			haxe $CP $KEEP -D scriptable -dce no -main ConformanceProbe -cpp "$OUT/hxcpp-interp"
 			;;
-		cppia|cppia-jit)
+		hxcpp-cppia|hxcpp-cppia-jit)
 			# Built once for the two modes that share it, and once per RUN rather than once ever.
 			# Testing for the binary alone skipped the build whenever a previous run had left one,
 			# so both columns were collected from whatever the branch looked like then: the first
 			# reading taken this way was 38 rows out, every one of them a case shifted by one
 			# because the stale binary had a shorter list.
 			[ "$CPPIA_BUILT" = "1" ] && return 0
-			rm -rf "$OUT/cppia"
-			haxe $CP $KEEP -D scriptable -D hxscript_cppia -dce no -main ConformanceProbe -cpp "$OUT/cppia"
+			rm -rf "$OUT/hxcpp-cppia"
+			haxe $CP $KEEP -D scriptable -D hxscript_cppia -dce no -main ConformanceProbe -cpp "$OUT/hxcpp-cppia"
 			CPPIA_BUILT=1
+			;;
+		hl-interp)
+			# One argument, split on the way in. Passed as two it arrives as `-D` alone, the define
+			# is dropped, and what builds is a program with no main that prints nothing.
+			hlc "$1" "-D hxscript_no_jit"
+			;;
+		hl-bytecode)
+			hlc "$1"
 			;;
 		*)
 			echo "conformance.sh: no mode called '$1'" >&2
@@ -79,22 +90,48 @@ build() {
 	esac
 }
 
+# Generates C for the probe and links it natively.
+#
+# Through the setup a host gets from `-lib hxscript` rather than through the build script beside the
+# sources, so that what is tested is the route a host actually takes: one haxe command, and the
+# native module compiled into the binary by the same macro that wired everything else in.
+hlc() {
+	dir="$OUT/$1"
+	rm -rf "$dir"
+
+	HLPATH="$HL" haxe $CP $KEEP -D hxscript_hl -D hl-ver=1.16.0 -D no-compilation \
+		${2:-} -main ConformanceProbe -hl "$dir/main.c"
+
+	# Nothing here names the binary. `-D hxscript_hl` is the whole of what a host writes, and what it
+	# leaves is the C file's own name, so this checks for that rather than for a name it asked for.
+	[ -f "$dir/main.exe" ] || { echo "no binary was linked for $1" >&2; exit 1; }
+
+	# The binary links libhl by path and then has to find it again when it runs. The `|| true` is not
+	# decoration: the last name in the list is absent on every platform but one, so without it the
+	# loop leaves a failure behind and `set -e` ends the run after a successful build.
+	for lib in libhl.dll libhl.so libhl.dylib; do
+		[ -f "$HL/$lib" ] && cp "$HL/$lib" "$dir/" || true
+	done
+}
+
 # The command that runs a mode, and the directory to run it from. Run from beside the binary,
 # because that is where each looks for what it needs.
 where() {
 	case "$1" in
 		eval-interp) echo "$ROOT" ;;
-		cpp-interp) echo "$OUT/cpp-interp" ;;
-		cppia|cppia-jit) echo "$OUT/cppia" ;;
+		hxcpp-interp) echo "$OUT/hxcpp-interp" ;;
+		hxcpp-cppia|hxcpp-cppia-jit) echo "$OUT/hxcpp-cppia" ;;
+		hl-interp|hl-bytecode) echo "$OUT/$1" ;;
 	esac
 }
 
 runner() {
 	case "$1" in
 		eval-interp) echo "haxe $CP $KEEP -main ConformanceProbe --interp" ;;
-		cpp-interp) echo "./ConformanceProbe.exe" ;;
-		cppia) echo "./ConformanceProbe.exe --nojit" ;;
-		cppia-jit) echo "./ConformanceProbe.exe" ;;
+		hxcpp-interp) echo "./ConformanceProbe.exe" ;;
+		hxcpp-cppia) echo "./ConformanceProbe.exe --nojit" ;;
+		hxcpp-cppia-jit) echo "./ConformanceProbe.exe" ;;
+		hl-interp|hl-bytecode) echo "./main.exe" ;;
 	esac
 }
 

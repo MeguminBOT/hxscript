@@ -24,6 +24,9 @@ interface IScriptedInstance extends ICustomReflection extends ICustomClassType {
 	/** The instance's variable slots. */
 	private var __vars:Map<String, hxscript.runtime.Variable>;
 
+	/** The same slots by position, for a compiled body that reaches one without asking for it by name. */
+	private var __slots:haxe.ds.Vector<hxscript.runtime.Variable>;
+
 	/** Whether instance-method errors are caught rather than thrown. */
 	private var __safe:Bool;
 

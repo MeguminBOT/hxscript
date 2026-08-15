@@ -76,7 +76,7 @@ class Expose {
 			var exposedTypes:Array<String> = hxscript.macro.Expose.ambient();
 			var exposedStatics:Array<String> = hxscript.macro.Expose.statics();
 
-			#if hxscript_cppia
+			#if (hxscript_cppia || hxscript_hl)
 			hxscript.compile.Compiler.ambient = exposedTypes;
 			hxscript.compile.Compiler.statics = exposedStatics;
 			#end

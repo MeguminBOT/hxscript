@@ -182,6 +182,14 @@ and never reaches that stage.
   `@:snapshot`, `@:safe`, `@:enumAbstract`, `@:enum`, `@:keep`, `@:coreType`. Anything else parses
   and does nothing.
 - **Interfaces carry no default implementations**, signatures only.
+- **A short call is placed by type, for a constructor.** Haxe lets a call leave out an optional
+  parameter that is not the last one, and decides which one by asking what each argument is: that is
+  how `new Mesh(prim, parent)` reaches `(primitive, ?material, ?parent)`, which is the shape every
+  scene graph is built on. Answering it needs the parameter types, and nothing at runtime carries a
+  constructor's signature, so the build's own type table records them for the constructors it can
+  matter for and `hxscript.types.ArgumentTools` asks. It covers `new` and `super(...)`, not method
+  calls: a method call short in the middle still binds in order. On cppia a module containing such a
+  call is refused and interpreted instead, because the placing cannot be written as an instruction.
 - **No `@:structInit` or `@:multiType`.** `Map` is the one special-cased multi-type
   (its implementation is picked from the key type). `@:op` and `@:arrayAccess` are honored on native
   abstracts only; see section 3.

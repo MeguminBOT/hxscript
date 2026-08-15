@@ -50,13 +50,29 @@ class Bridges {
 		var taken:Map<String, String> = [];
 
 		var every:Array<String> = [];
+		var listed:Map<String, Bool> = [];
+
+		/**
+		 * Each base once, however many ways it arrived. A curated preset and a package scan name the
+		 * same class routinely, and the second arrival matched a name already taken by itself, so
+		 * every bridged base warned that it was being skipped for colliding with itself. Nothing was
+		 * lost, since the bridge was made on the first arrival, but ten such lines per build read as
+		 * ten bridges missing.
+		 */
+		function want(base:String):Void {
+			if (listed.exists(base))
+				return;
+
+			listed.set(base, true);
+			every.push(base);
+		}
 
 		for (lib in libs)
 			for (base in lib.bases)
-				every.push(base);
+				want(base);
 
 		for (base in scanned(libs))
-			every.push(base);
+			want(base);
 
 		{
 			for (base in every) {
@@ -70,6 +86,16 @@ class Bridges {
 
 					continue;
 				}
+
+				/**
+				 * Two bases with the same simple name are ordinary, not exotic. heaps has `h2d.Object`
+				 * and `h3d.scene.Object`, and a bridge named after the last segment alone meant the
+				 * second was dropped with a warning nobody reads, so a scripted 3D project could not
+				 * exist. Whichever comes first keeps the short name, since bridges are indexed by the
+				 * base they extend rather than by what they are called and only a person reads these.
+				 */
+				if (taken.exists(name) && taken.get(name) != base)
+					name = 'Scripted' + flatten(base);
 
 				if (taken.exists(name)) {
 					Context.warning('hxscript: bridge name $name already taken by ${taken.get(name)}; skipping $base', pos);
@@ -102,6 +128,19 @@ class Bridges {
 		}
 
 		return refs;
+	}
+
+	/**
+	 * @param path A type path.
+	 * @return It as one capitalised word, so `h3d.scene.Object` becomes `H3dSceneObject`.
+	 */
+	static function flatten(path:String):String {
+		var out:String = '';
+
+		for (part in path.split('.'))
+			out += part.length == 0 ? '' : part.charAt(0).toUpperCase() + part.substr(1);
+
+		return out;
 	}
 
 	/** Types a scan found and would not bridge, and why, for the verbose report. */

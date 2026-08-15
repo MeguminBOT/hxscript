@@ -21,3 +21,10 @@
 #
 # -D hxscript_no_autowire turns this off.
 --macro hxscript.setup.Autowire.run()
+
+# One block saying the library is in this build, what it wired, and whether scripts will be compiled
+# or interpreted. A library that wires itself in has to say what it wired.
+#
+# -D hxscript_no_banner, or HXSCRIPT_NO_BANNER=1, prints nothing. NO_COLOR keeps it and drops the
+# escapes.
+--macro hxscript.macro.Banner.show()

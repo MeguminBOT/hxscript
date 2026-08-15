@@ -31,17 +31,19 @@ class Environment {
 	/** Callbacks run once `start` finishes; returning false removes the callback. */
 	public var onInitialized:Array<Map<String, IScriptedType>->Bool> = [];
 
-	#if hxscript_cppia
+	#if (hxscript_cppia || hxscript_hl)
 	/** Native classes the host compiled from this world's scripted ones, keyed by scripted path. */
 	public var compiled:Map<String, Class<Dynamic>> = [];
-
-	/** What `booleansOf` has answered so far, including the empty answers. */
-	var booleans:Map<String, Map<String, Bool>> = [];
 
 	/**
 	 * Whether a compiled class may stand in for the scripted one it was built from.
 	 */
 	public var substituting:Bool = false;
+	#end
+
+	#if hxscript_cppia
+	/** What `booleansOf` has answered so far, including the empty answers. */
+	var booleans:Map<String, Map<String, Bool>> = [];
 
 	/**
 	 * Which members of a class this world declares were written `Bool`.

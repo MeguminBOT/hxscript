@@ -41,6 +41,7 @@ class Scripted {
 		'__func',
 		'__fields',
 		'__vars',
+		'__slots',
 		'instanceFields',
 		'inlinedFields',
 		'unexposedFields',
@@ -167,6 +168,10 @@ class Scripted {
 
 		var constructorExpr:Expr = null;
 		var hasConstructor:Bool = false;
+
+		/** Set when the base must be constructed by Haxe rather than rebuilt, and with what arguments. */
+		var nativeSuper:Bool = false;
+		var nativeSuperArgs:Array<{name:String, opt:Bool, t:Type}> = null;
 		var hasToString:Bool = false;
 
 		/**
@@ -271,7 +276,72 @@ class Scripted {
 				}
 
 				/**
-				 * Repairs the three things `Context.getTypedExpr` cannot round-trip.
+				 * Puts the concrete type in place of a base's parameter, which a rebuilt body still names.
+				 *
+				 * `new FlxTypedGroup<T>(size)` in a constructor being re-emitted keeps its `T`, and the
+				 * bridge is not generic, so the name means nothing there.
+				 *
+				 * @param t A type the rebuilt body mentions.
+				 * @return It, with any parameter of the base replaced by what was bound for it.
+				 */
+				function boundFor(name:String):Null<ComplexType> {
+					if (generics.exists(name))
+						return generics.get(name);
+
+					var short:String = name.substr(name.lastIndexOf('.') + 1);
+					if (generics.exists(short))
+						return generics.get(short);
+
+					/** A parameter is keyed by whatever declared it, so `T` and `Owner.T` are one name. */
+					for (key => bound in generics)
+						if (key.substr(key.lastIndexOf('.') + 1) == short)
+							return bound;
+
+					return null;
+				}
+
+				function bindType(t:ComplexType):ComplexType {
+					return switch (t) {
+						case TPath(p):
+							var bound:Null<ComplexType> = (p.pack.length == 0 && p.sub == null && p.params.length == 0) ? boundFor(p.name) : null;
+
+							if (bound != null)
+								bound;
+							else
+								TPath({
+									pack: p.pack,
+									name: p.name,
+									sub: p.sub,
+									params: [
+										for (q in p.params)
+											switch (q) {
+												case TPType(inner): TPType(bindType(inner));
+												default: q;
+											}
+									]
+								});
+
+						case TOptional(inner): TOptional(bindType(inner));
+						case TNamed(n, inner): TNamed(n, bindType(inner));
+						case TFunction(from, to): TFunction([for (a in from) bindType(a)], bindType(to));
+						case TParent(inner): TParent(bindType(inner));
+						default: t;
+					}
+				}
+
+				/** @param params A type path's parameters. @return Them, with the base's bound. */
+				function bindParams(params:Array<TypeParam>):Array<TypeParam> {
+					return [
+						for (q in params)
+							switch (q) {
+								case TPType(inner): TPType(bindType(inner));
+								default: q;
+							}
+					];
+				}
+
+				/**
+				 * Repairs the things `Context.getTypedExpr` cannot round-trip.
 				 *
 				 * @param typed The expression as the typer left it.
 				 * @param e The same expression re-emitted as syntax.
@@ -331,12 +401,36 @@ class Scripted {
 
 					function fix(x:Expr):Expr {
 						return switch (x.expr) {
-							case ENew(t, params) if (t.pack.length == 0 && t.sub == null && qualified.exists(t.name)):
-								var q:TypePath = qualified.get(t.name);
-								{pos: x.pos, expr: ENew({pack: q.pack, name: q.name, sub: q.sub, params: t.params}, [for (p in params) fix(p)])};
+							case ENew(t, params):
+								var q:TypePath = (t.pack.length == 0 && t.sub == null && qualified.exists(t.name)) ? qualified.get(t.name) : t;
+								{
+									pos: x.pos,
+									expr: ENew({pack: q.pack, name: q.name, sub: q.sub, params: bindParams(t.params)}, [for (p in params) fix(p)])
+								};
+
+							case ECheckType(inner, t):
+								{pos: x.pos, expr: ECheckType(fix(inner), bindType(t))};
+
+							case ECast(inner, t) if (t != null):
+								{pos: x.pos, expr: ECast(fix(inner), bindType(t))};
 
 							case EField(owner, member, kind) if (implName(owner) != null && abstractOf.exists(implName(owner))):
 								{pos: x.pos, expr: EField(macro $p{abstractOf.get(implName(owner))}, member, kind)};
+
+							/**
+							 * Puts back the `untyped` that typing took off a target's own magic.
+							 *
+							 * HashLink's `Std.int` is `untyped $int(x)`, and once inlined into a rebuilt
+							 * constructor `$int` is a name no source outside `untyped` may write.
+							 */
+							case ECall({expr: EConst(CIdent(name))}, params) if (name.startsWith('$')):
+								{
+									pos: x.pos,
+									expr: EUntyped({
+										pos: x.pos,
+										expr: ECall({pos: x.pos, expr: EConst(CIdent(name))}, [for (p in params) fix(p)])
+									})
+								};
 
 							case EConst(CIdent(name)) if (name.indexOf('`') >= 0):
 								{pos: x.pos, expr: EConst(CIdent(name.replace('`', '_')))};
@@ -348,7 +442,7 @@ class Scripted {
 										for (v in vars)
 											{
 												name: v.name.replace('`', '_'),
-												type: v.type,
+												type: v.type == null ? null : bindType(v.type),
 												expr: v.expr == null ? null : fix(v.expr),
 												isFinal: v.isFinal,
 												isStatic: v.isStatic,
@@ -363,6 +457,73 @@ class Scripted {
 					}
 
 					return fix(e);
+				}
+
+				/**
+				 * @param type A class being bridged.
+				 * @return The arguments of the nearest constructor at or above it, which is what a `super`
+				 *         call written in its own bridge has to pass.
+				 */
+				function superArgumentsOf(type:ClassType):Array<{name:String, opt:Bool, t:Type}> {
+					var at:Null<ClassType> = type;
+
+					while (at != null) {
+						if (at.constructor != null) {
+							var found:Null<Array<{name:String, opt:Bool, t:Type}>> = switch (at.constructor.get().type) {
+								case TFun(fargs, _): fargs;
+								case TLazy(lazy):
+									switch (lazy()) {
+										case TFun(fargs, _): fargs;
+										default: null;
+									}
+								default: null;
+							}
+
+							if (found != null)
+								return found;
+						}
+
+						at = at.superClass == null ? null : at.superClass.t.get();
+					}
+
+					return [];
+				}
+
+				/**
+				 * @param path A dotted type path.
+				 * @return It with every segment capitalised and the dots dropped, as `Bridges` names them.
+				 */
+				function flatten(path:String):String {
+					var out:String = '';
+
+					for (part in path.split('.'))
+						out += part.length == 0 ? '' : part.charAt(0).toUpperCase() + part.substr(1);
+
+					return out;
+				}
+
+				/**
+				 * @param type A base whose constructor cannot be rebuilt.
+				 * @return The path of a hand-written initializer for it, or null when there is none.
+				 */
+				function shimFor(type:ClassType):Null<Array<String>> {
+					var path:String = 'hxscript.shim.' + flatten(typePath(type.module, type.name));
+
+					/**
+					 * Asked inside a `try`, because a type that is not there is an error rather than a
+					 * null, and having no shim is the ordinary case for every base that never needed one.
+					 */
+					try {
+						switch (Context.getType(path)) {
+							case TInst(c, _):
+								for (field in c.get().statics.get())
+									if (field.name == 'init')
+										return path.split('.').concat(['init']);
+							default:
+						}
+					} catch (e:Dynamic) {}
+
+					return null;
 				}
 
 				/**
@@ -511,12 +672,24 @@ class Scripted {
 				 * @param type The class whose constructor is rebuilt.
 				 * @return The constructor as a function expression.
 				 */
-				function mapConstructor(type:ClassType):Expr {
+				function mapConstructor(type:ClassType, ?types:Array<Type>):Expr {
+					/**
+					 * The `extends` clause's arguments, bound before this class's body is rebuilt.
+					 *
+					 * A chain is walked up one class at a time and only the class was carried, so a
+					 * parameter bound two levels down was not in scope by the time the body naming it was
+					 * reached: `new FlxTypedGroup<T>(size)` came back out as `T`.
+					 */
+					if (types != null)
+						for (i => given in types)
+							if (i < type.params.length)
+								generics.set(type.params[i].name, bindType(toCT(given)));
+
 					if (type.constructor == null) {
 						var inits:Array<Expr> = fieldInits(type);
 
 						if (type.superClass != null) {
-							switch (mapConstructor(type.superClass.t.get()).expr) {
+							switch (mapConstructor(type.superClass.t.get(), type.superClass.params).expr) {
 								case EFunction(_, fun):
 									inits.push(fun.expr);
 									return {pos: pos, expr: EFunction(FAnonymous, {args: fun.args, expr: macro $b{inits}, ret: fun.ret})};
@@ -546,9 +719,67 @@ class Scripted {
 					var typedConstr:TypedExpr = constr.expr();
 
 					var refusal:Null<String> = reemittableConstructor(typedConstr);
-					if (refusal != null)
-						Context.error('${cls.name}: ${typePath(type.module, type.name)} cannot be extended for scripting, because $refusal. Remove it from the bridged bases; scripts can still import and construct it.',
-							pos);
+
+					if (refusal != null) {
+						/**
+						 * A base whose constructor cannot be rebuilt may still be written out by hand.
+						 *
+						 * Rebuilding turns the compiler's own output back into source, and some of that
+						 * does not survive the trip: `h3d.scene.Object` sets its flags through an abstract
+						 * whose methods mutate `this`, so every flag property inlines to arithmetic on the
+						 * underlying `Int` against a field typed as the abstract, which no source may
+						 * write. None of that is a fact about the class. The same constructor written out
+						 * in ordinary source types perfectly well, because at source level those
+						 * operations are ordinary.
+						 *
+						 * So a base may carry a shim: `hxscript.shim.<its path, flattened>` with a static
+						 * `init` taking the instance and the base constructor's arguments. When one is
+						 * there it becomes the body of `__constructSuper`, and everything downstream is
+						 * unchanged: `super(...)` in a script still calls that, on an instance allocated
+						 * the same way, so nothing about how a bridge is built or constructed moves.
+						 *
+						 * A base with no shim is refused exactly as before, with the reason and the
+						 * remedy.
+						 */
+						var shim:Null<Array<String>> = shimFor(type);
+
+						if (shim == null) {
+							/**
+							 * Nothing to rebuild it from, so it is not rebuilt: Haxe constructs it.
+							 *
+							 * The bridge gets a real constructor calling a real `super`, and the instance
+							 * is allocated through it rather than emptily. What that costs is that the
+							 * base's arguments must be known before the instance exists, which is why
+							 * `ScriptedClass` evaluates the script's `super(...)` arguments first and
+							 * runs the rest of its constructor after.
+							 */
+							nativeSuper = true;
+							nativeSuperArgs = args;
+
+							return {
+								pos: pos,
+								expr: EFunction(FAnonymous, {
+									args: [for (arg in args) {name: arg.name, opt: arg.opt, type: toCT(arg.t)}],
+									expr: macro throw $v{typePath(type.module, type.name)}
+										+ ' is constructed by Haxe, so its rebuilt constructor must not be called',
+									ret: macro :Void
+								})
+							};
+						}
+
+						var passed:Array<Expr> = [macro this];
+						for (arg in args)
+							passed.push(macro $i{arg.name});
+
+						return {
+							pos: pos,
+							expr: EFunction(FAnonymous, {
+								args: [for (arg in args) {name: arg.name, opt: arg.opt, type: toCT(arg.t)}],
+								expr: {pos: pos, expr: ECall(macro $p{shim}, passed)},
+								ret: macro :Void
+							})
+						};
+					}
 
 					var expr = requalify(typedConstr, Context.getTypedExpr(typedConstr));
 					switch (expr.expr) {
@@ -598,14 +829,14 @@ class Scripted {
 									pos: pos,
 									expr: ECall(switch (e.expr) {
 										case EConst(CIdent('super')):
-											mapConstructor(type.superClass.t.get());
+											mapConstructor(type.superClass.t.get(), type.superClass.params);
 										default:
 											e.map(mapSuper);
 									}, [for (param in newParams) param.map(mapSuper)])
 								}
 
 							case EConst(CIdent('super')):
-								mapConstructor(type.superClass.t.get());
+								mapConstructor(type.superClass.t.get(), type.superClass.params);
 
 							default:
 								e.map(mapSuper);
@@ -655,7 +886,7 @@ class Scripted {
 					};
 				}
 
-				switch (mapConstructor(type).expr) {
+				switch (mapConstructor(type, types).expr) {
 					default:
 					case EFunction(_, fun):
 						hasConstructor = true;
@@ -670,6 +901,45 @@ class Scripted {
 								ret: fun.ret
 							})
 						});
+				}
+
+				/**
+				 * A real constructor, for a base whose own could not be rebuilt.
+				 *
+				 * This is what makes the base run as Haxe compiled it rather than as something turned
+				 * back into source, so nothing about it has to survive that trip. Allocation moves with
+				 * it: `ScriptedClass` builds one of these through `Type.createInstance` instead of
+				 * emptily, which is why it needs the base's arguments before the instance exists.
+				 */
+				if (nativeSuper && !fields.exists(function(f:Field):Bool return f.name == 'new')) {
+					/**
+					 * The signature is the immediate base's, not that of whichever ancestor could not be
+					 * rebuilt. Those are often different: `h3d.scene.Interactive` takes a collider and a
+					 * parent while the `h3d.scene.Object` below it takes only a parent, and generating
+					 * the ancestor's signature made `super(parent)` pass a parent where a collider goes.
+					 */
+					var direct:Array<{name:String, opt:Bool, t:Type}> = superArgumentsOf(type);
+
+					fields.push({
+						pos: pos,
+						access: [APublic],
+						name: 'new',
+						kind: FFun({
+							args: [for (arg in direct) {name: arg.name, opt: arg.opt, type: toCT(arg.t)}],
+							expr: {
+								pos: pos,
+								expr: ECall({pos: pos, expr: EConst(CIdent('super'))}, [for (arg in direct) macro $i{arg.name}])
+							},
+							ret: macro :Void
+						})
+					});
+
+					fields.push({
+						pos: pos,
+						access: [APublic, AStatic],
+						name: '__nativeSuper',
+						kind: FVar(macro :Bool, macro true)
+					});
 				}
 			}
 
@@ -746,32 +1016,41 @@ class Scripted {
 								default: false;
 							}
 							var f:String = field.name;
+							/**
+							 * Every local here is `__` prefixed, because this body is written around a
+							 * method whose parameters it does not choose. One of them was called `r`,
+							 * which is what `h3d.scene.Object` names a colour component, and the
+							 * generated `var r:Dynamic` then shadowed the argument: the call passed the
+							 * uninitialised temp instead of the value, and Haxe caught it as `Local
+							 * variable r used without being initialized`. A name a base cannot plausibly
+							 * use is the whole fix.
+							 */
 							expr = macro {
-								var fname:String = $v{f};
-								if (__interp != null && __func != fname && __interp.locals.exists(fname)) {
-									var prevFunc:String = __func;
-									__func = fname;
-									var r:Dynamic;
+								var __name:String = $v{f};
+								if (__interp != null && __func != __name && __interp.locals.exists(__name)) {
+									var __previous:String = __func;
+									__func = __name;
+									var __result:Dynamic;
 									if (__safe) {
 										__interp.inTry = true;
 										try {
-											r = Reflect.callMethod(__interp, __interp.getLocal(fname), $a{argsArray});
-										} catch (e:Dynamic) {
-											__base.onInstanceError(e, fname, this);
-											r = null;
+											__result = Reflect.callMethod(__interp, __interp.getLocal(__name), $a{argsArray});
+										} catch (__e:Dynamic) {
+											__base.onInstanceError(__e, __name, this);
+											__result = null;
 										}
 									} else {
-										r = Reflect.callMethod(__interp, __interp.getLocal(fname), $a{argsArray});
+										__result = Reflect.callMethod(__interp, __interp.getLocal(__name), $a{argsArray});
 									}
-									__func = prevFunc;
-									${isVoid?macro return:macro return cast r}
+									__func = __previous;
+									${isVoid?macro return:macro return cast __result}
 								}
 
 								if (__safe) {
 									try {
 										${isVoid ? macro super.$f($a{superArgs}) : macro return super.$f($a{superArgs})}
-									} catch (e:Dynamic) {
-										__base.onInstanceError(e, fname, this);
+									} catch (__e:Dynamic) {
+										__base.onInstanceError(__e, __name, this);
 										${isVoid?macro return:macro return cast null}
 									}
 								} else {
@@ -1001,10 +1280,15 @@ class Scripted {
 
 					var f = Reflect.field(this, field);
 					if (Reflect.isFunction(f))
-						superLocals.set(field, {r: f});
+						superLocals.set(field, {ref: f});
 				}
 
-				__interp.locals.set('super', {r: hxscript.runtime.Reference.RSuper(superLocals, __constructSuper)});
+				/** Kept in `__vars` too, since a compiled body asks from outside any frame of the interpreter's. */
+				var __superRef:hxscript.runtime.Variable = {
+					ref: hxscript.runtime.Reference.RSuper(superLocals, __constructSuper, Type.getSuperClass(Type.getClass(this)))
+				};
+				__interp.locals.set('super', __superRef);
+				__vars.set('super', __superRef);
 			}
 			/**
 			 * Binds a scripted class's own fields as interpreter locals.
@@ -1013,6 +1297,15 @@ class Scripted {
 			 * @param isSuper Whether it is being bound as an ancestor rather than the instance itself.
 			 */
 			function setFields(t:hxscript.types.ScriptedClass, isSuper:Bool = false) {
+				/**
+				 * What `super` means inside this class's own bodies, taken before the scope holds
+				 * this class's methods. A compiled body has no closure carrying a lexical `super` and
+				 * has to ask the instance, and asking without saying which class is asking finds the
+				 * nearest answer and calls itself forever.
+				 */
+				if (__interp.locals.exists('super'))
+					__vars.set('super@' + t.path, __interp.locals.get('super'));
+
 				for (field in t.decl.fields) {
 					var f:String = field.name;
 
@@ -1021,14 +1314,14 @@ class Scripted {
 
 					switch (field.kind) {
 						case KFunction(fun):
-							__interp.locals.set(f, {r: null, access: field.access});
+							__interp.locals.set(f, {ref: null, access: field.access});
 
 						case KVar(v):
 							if (instanceFields.contains(f)) {
 								Reflect.setField(this, f, __interp.exprReturn(v.expr));
 							} else {
 								var l:hxscript.runtime.Variable = {
-									r: null,
+									ref: null,
 									access: field.access,
 									get: v.get,
 									set: v.set
@@ -1058,7 +1351,7 @@ class Scripted {
 
 						var f = Reflect.field(this, field);
 						if (Reflect.isFunction(f))
-							superLocals.set(field, {r: f});
+							superLocals.set(field, {ref: f});
 					}
 				}
 
@@ -1073,11 +1366,22 @@ class Scripted {
 					switch (field.kind) {
 						case KFunction(fun):
 							if (f == 'new') {
-								constructor = __interp.buildFunction(f, fun.args, fun.expr, fun.ret, superLocals, true);
+								/**
+								 * Without its `super(...)` when Haxe already ran the base's constructor,
+								 * so the arguments it passes are evaluated once rather than twice. They
+								 * were evaluated before the instance existed, to make it.
+								 */
+								var body:hxscript.syntax.Expr = Reflect.field(Type.getClass(this), '__nativeSuper') == true
+									? hxscript.types.ScriptedTools.withoutSuper(fun.expr) : fun.expr;
+
+								constructor = __interp.buildFunction(f, fun.args, body, fun.ret, superLocals, true);
 								continue;
 							}
 
-							__interp.locals.get(f).r = __interp.buildFunction(f, fun.args, fun.expr, fun.ret, superLocals);
+							/** A backend that compiled this method hands back a closure bound to this instance. */
+							var __compiled:Dynamic = t.boundMember(f, this);
+							__interp.locals.get(f).r = __compiled != null ? __compiled : __interp.buildFunction(f, fun.args, fun.expr, fun.ret,
+								superLocals);
 
 						case KVar(v):
 							if (__interp.locals.exists(f)) {
@@ -1095,8 +1399,18 @@ class Scripted {
 					superLocals.set(f, __interp.locals.get(f));
 				}
 
-				if (isSuper)
-					__interp.locals.set('super', {r: hxscript.runtime.Reference.RSuper(superLocals, constructor ?? __constructSuper)});
+				if (isSuper) {
+					/**
+					 * The base is named only when `__constructSuper` is what will run, since that is the
+					 * one whose parameters belong to the host class rather than to a script.
+					 */
+					var __superRef:hxscript.runtime.Variable = {
+						ref: hxscript.runtime.Reference.RSuper(superLocals, constructor ?? __constructSuper,
+							constructor != null ? null : Type.getSuperClass(Type.getClass(this)))
+					};
+					__interp.locals.set('super', __superRef);
+					__vars.set('super', __superRef);
+				}
 			}
 
 			/**
@@ -1120,6 +1434,10 @@ class Scripted {
 
 			setSuperFields(base.extending);
 			setFields(base);
+
+			/** Built before the constructor runs, so a compiled constructor body can reach a slot too. */
+			if (hxscript.types.ScriptedTools.wantsSlots)
+				__slots = hxscript.types.ScriptedTools.slotsFor(base, __vars);
 
 			var entry:Dynamic = (constructor ?? __constructSuper);
 
@@ -1190,6 +1508,11 @@ class Scripted {
 				pos: pos,
 				name: '__vars',
 				kind: FVar(macro :Map<String, hxscript.runtime.Variable>),
+			},
+			{
+				pos: pos,
+				name: '__slots',
+				kind: FVar(macro :haxe.ds.Vector<hxscript.runtime.Variable>),
 			},
 			{
 				pos: pos,
@@ -1314,14 +1637,24 @@ class Scripted {
 				name: 'reflectListFields',
 				kind: FFun({
 					args: [],
+					/**
+						A method is not a field. `Reflect.fields` answers with what an instance
+						stores, and the slots carry a class's methods beside its variables, so
+						listing every slot named methods that no other spelling of the same question
+						has ever listed. A backend that replaces the class agrees with `Reflect`
+						rather than with the slots, which is how this was found.
+					**/
 					expr: macro {
 						var fields = [
 							for (f in Reflect.fields(this))
 								if (!hxscript.macro.Scripted.ignoreFields.contains(f)) f
 						];
 						for (f in __vars.keys()) {
-							if (!hxscript.macro.Scripted.ignoreFields.contains(f) && !fields.contains(f))
-								fields.push(f);
+							if (hxscript.macro.Scripted.ignoreFields.contains(f) || fields.contains(f))
+								continue;
+							if (__base != null && __base.declaresMethod(f))
+								continue;
+							fields.push(f);
 						}
 						return fields;
 					},

@@ -1,0 +1,6 @@
+{
+	"title": "Conformance",
+	"kind": "plain",
+	"entry": "Objects",
+	"description": "Host interop, asked as a list. Every class here offers a `cases()` naming its own no-argument statics, and `--conform` runs each one interpreted and again compiled and compares the answers. The shared corpus tests the language against a bare host; this tests the half a real project spends its time in: extending h2d.Object, reading and writing its fields, reaching heaps' statics, and carrying its instances in containers."
+}

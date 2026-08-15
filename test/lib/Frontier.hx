@@ -37,13 +37,22 @@ class Frontier {
 	 *
 	 * @param probe What to do with one.
 	 */
-	public static function run(probe:Probe):Void {
+	public static function run(probe:Probe, ?section:String -> Void):Void {
+		var at:String -> Void = section == null ? function(_:String):Void {} : section;
+
+		at('numbers');
 		wholeNumbers(probe);
+		at('reflection');
 		reflection(probe);
+		at('refusals');
 		refusals(probe);
+		at('host');
 		hostReach(probe);
+		at('stdlib');
 		library(probe);
+		at('syntax');
 		language(probe);
+		at('shapes');
 		shapes(probe);
 	}
 
@@ -71,7 +80,26 @@ class Frontier {
 		probe('Reflect.fields of a structure', 'var o = {a: 1, b: 2}; var f = Reflect.fields(o); f.sort(function(x, y) return x < y ? -1 : 1); return f.join(",");');
 		probe('Reflect.hasField', 'var o = {a: 1}; return Std.string(Reflect.hasField(o, "a")) + "/" + Std.string(Reflect.hasField(o, "z"));');
 		probe('Reflect.callMethod on a scripted static', 'return Std.string(Reflect.callMethod(null, twice, [21]));', 'static function twice(n:Int):Int return n * 2;');
+		// Reaching through a null of a class the script named is not here, and the reason is worth
+		// writing down: cppia takes the process down on all three of read, write and call, so a case
+		// for them would make every run of this suite crash and resume three times. HashLink throws
+		// a catchable `Null access` for each. Both are stricter than the interpreter, which answers
+		// null for the read.
+		// An annotated array is read as the annotation says, which is what makes a sweep over one
+		// fast. A script that defeats its own annotation with a `cast` is outside what Haxe promises
+		// and the two answer differently: `var all:Array<T> = cast [1, 2]; all[0].v` reads null
+		// interpreted and 0 compiled, because a field known to be an `Int` comes back as one. Not a
+		// case, because there is nothing there for a compiler to be held to.
+		probe('a typed array of a scripted class', 'var all:Array<T> = [new T(), new T()]; all[1].v = 5; return Std.string(all[0].v + all[1].v);',
+			'public var v:Int = 2; public function new() {}');
+		probe('a typed array holding a null', 'var all:Array<T> = [null]; return Std.string(all[0]);',
+			'public var v:Int = 0; public function new() {}');
+		probe('Reflect.fields of a scripted instance',
+			'var f = Reflect.fields(new T()); f.sort(function(x, y) return x < y ? -1 : 1); return f.join(",");',
+			'public var a:Int = 1; public var b:String = "x"; public function new() {} public function m():Int return 2;');
 		probe('Std.string of a scripted instance', 'return Std.string(new T()).length > 0 ? "something" : "nothing";', 'public function new() {}');
+		probe('a scripted toString is what renders it', 'return Std.string(new T());',
+			'public var n:Int = 3; public function new() {} public function toString():String return "T(" + n + ")";');
 		probe('Std.string of an enum value', 'return Std.string(One);', null, 'enum E { One; Two(n:Int); }');
 	}
 
@@ -125,11 +153,88 @@ class Frontier {
 
 	/** Reaching the host, which is where the two compilers differ most in mechanism. */
 	static function hostReach(probe:Probe):Void {
+		/*
+			A host abstract with an `inline function new`, which is what every geometry type in a game
+			framework is: `h3d.Vector`, `h3d.Matrix` and `h2d.col.Point` are all this shape, and between
+			them they are what every position, transform and bounds test is written in.
+
+			All of these pass interpreted, on all three interpreters. The constructor assigns to
+			`this`, so it has nowhere to live as a method and Haxe emits it as a static `_new` on the
+			implementation class, which is what the wrapper now names and `AbstractTools` now calls.
+
+			Both compilers decline a module that constructs one, so these read as refusals rather than
+			as answers. Construction is not what is missing: a bare `@:forward` generates no member per
+			forwarded field, so `v.x` is a question asked at access time, and compiled code resolves an
+			offset and finds nothing there. Reaching a forwarded member from compiled code is what
+			would let these compile, and until then declining is what keeps them from answering 0 where
+			the interpreter answers 7.
+		*/
+		probe('a host abstract constructed', 'var v = new HostVec(3, 4); return Std.string(v);', null, 'import HostVec;');
+		probe('a host abstract property', 'var v = new HostVec(3, 4); return Std.string(v.length);', null, 'import HostVec;');
+		probe('a host abstract field', 'var v = new HostVec(3, 4); return Std.string(v.x + v.y);', null, 'import HostVec;');
+		probe('a host abstract operator', 'var v = new HostVec(2, 3); return Std.string(v * 2);', null, 'import HostVec;');
+		probe('a host abstract in an array', 'var all = [new HostVec(1, 1), new HostVec(2, 2)]; return Std.string(all[1]);', null,
+			'import HostVec;');
+
+		// An operator on a value bound as a parameter rather than declared as a local, which was put
+		// down as a second gap behind the first and was not one: binding keeps the wrapper, so making
+		// construction work made these work with it.
+		probe('an abstract operator on a parameter', 'return Std.string(twice(new HostVec(1, 2)));',
+			'static function twice(v:HostVec):HostVec { return v * 2; }', 'import HostVec;');
+		probe('an abstract method taking its own abstract', 'var a = new HostVec(1, 2); return Std.string(a.plus(a));', null, 'import HostVec;');
+		probe('a field of an abstract bound as a parameter', 'return Std.string(first(new HostVec(3, 4)));',
+			'static function first(v:HostVec):Float { return v.x; }', 'import HostVec;');
+		probe('an abstract returned through a declared return type', 'return Std.string(make(2, 5));',
+			'static function make(x:Float, y:Float):HostVec { return new HostVec(x, y); }', 'import HostVec;');
+		/*
+			An own method called by bare name from inside a closure, which is what every event handler
+			in an interface is: `hit.onClick = function(e) tapped();`. A lambda is emitted with no
+			receiver, so a name that is a member of the class around it resolves to nothing and the
+			module is refused. Written out because the sandbox's widgets template is refused for
+			exactly this and it is the most ordinary line in it.
+		*/
+		probe('an own method called from a closure', 'var t = new T(); var f = t.go(); f(); f(); return Std.string(t.count);',
+			'public var count:Int = 0;
+public function new() {}
+function bump():Void { count++; }
+public function go():Dynamic { return function() { bump(); }; }');
+		probe('an own field read from a closure', 'var t = new T(); return Std.string(t.read()());',
+			'var held:Int = 7;
+public function new() {}
+public function read():Dynamic { return function() { return held; }; }');
+		/*
+			A host enum abstract's constructor, named three ways. The sandbox reads one of these as
+			null on HashLink and the same constant written out in full as the constant, so what these
+			separate is the naming rather than the type: bare after an import, through the type after
+			an import, and through the type without one.
+		*/
+		probe('an enum abstract constructor, bare', 'return Std.string(Add);', null, 'import HostFlag;');
+		probe('an enum abstract constructor, through an import', 'return Std.string(HostFlag.Add);', null, 'import HostFlag;');
+		probe('an enum abstract constructor, unimported', 'return Std.string(HostFlag.Add);');
+		/*
+			The same table read a second way. An enum abstract's constant is not the only thing an
+			import binds as a mirror rather than as a value: `import Pack.Type.field` binds one too,
+			and so does every module-level field. These separate the two halves of what a backend has
+			to do with one, because they are opposites: a constant may be taken once and kept, and a
+			static something writes may not, and reading the mirror itself is wrong for both.
+		*/
+		probe('a host static by bare name after a static import', 'return Std.string(step);', null, 'import HostDial.step;');
+		probe('a host static written then read by bare name', 'HostDial.turns = 5; return Std.string(turns);', null, 'import HostDial.turns;');
+		probe('a host static written then read qualified', 'HostDial.turns = 6; return Std.string(HostDial.turns);');
 		probe('a host static read', 'return Std.string(Math.PI > 3);');
 		probe('a host static that changes', 'var a = Std.string(Date.now().getTime() > 0); return a;');
 		probe('a host method on a value', 'return "ab".toUpperCase();');
 		probe('a host class constructed', 'var b = new StringBuf(); b.add("hi"); return b.toString();');
 		probe('a host enum value', 'return Std.string(haxe.ds.Option.None);');
+		/*
+			The same enum named three shorter ways. The sandbox reads `BlendMode.Add` as null after
+			importing it and the same constructor written out in full as the constructor, and
+			`h2d.BlendMode` is an ordinary enum rather than the enum abstract it was first put down
+			as, so what these ask about is a plain enum reached by a short name.
+		*/
+		probe('a host enum through an import', 'return Std.string(Option.None);', null, 'import haxe.ds.Option;');
+		probe('a host enum constructor bare after an import', 'return Std.string(None);', null, 'import haxe.ds.Option;');
+		probe('a host enum constructor with arguments through an import', 'return Std.string(Option.Some(3));', null, 'import haxe.ds.Option;');
 		probe('a host enum matched', 'var o = haxe.ds.Option.Some(7); switch (o) { case Some(v): return Std.string(v); case None: return "none"; }');
 		probe('an abstract Map through its alias', 'var m:Map<String, Int> = new Map(); m.set("a", 1); return Std.string(m.get("a"));');
 		probe('Lambda over an array', 'return Std.string(Lambda.count([1, 2, 3]));');

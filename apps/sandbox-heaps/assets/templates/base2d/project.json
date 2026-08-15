@@ -1,0 +1,6 @@
+{
+	"title": "Base 2D",
+	"kind": "heaps",
+	"entry": "Base2D",
+	"description": "A ring of additively blended sprites turning around a centre, with text over it. After the Heaps sample of the same name, adapted to this app's project lifecycle. The tile comes off disk through hxd.Res, so this is also what an asset looks like from a script."
+}

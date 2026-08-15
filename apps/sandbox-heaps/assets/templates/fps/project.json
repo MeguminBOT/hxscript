@@ -1,0 +1,6 @@
+{
+	"title": "Shooter",
+	"kind": "heaps",
+	"entry": "Shooter",
+	"description": "A first person town with targets that come apart when shot, crates that take the hit and slide, and dummies that stay up to take another. Laid out as a project rather than a file: `world` holds the simulation and imports no scene graph, `view` holds what is drawn. So every rule the game follows is asked without a window, and --conform fps runs 31 cases over the physics itself."
+}

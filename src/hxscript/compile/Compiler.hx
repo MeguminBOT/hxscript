@@ -26,6 +26,8 @@ import hxscript.Environment;
 import hxscript.Module;
 #if hxscript_cppia
 import hxscript.cppia.Backend;
+#elseif hxscript_hl
+import hxscript.hl.Backend;
 #end
 
 /**
@@ -44,7 +46,7 @@ class Compiler {
 
 	/** @return Whether a backend for this target is in this build. */
 	static function get_available():Bool {
-		#if hxscript_cppia
+		#if (hxscript_cppia || hxscript_hl)
 		return Backend.available;
 		#else
 		return false;
@@ -60,14 +62,16 @@ class Compiler {
 	 * @return One sentence naming what is wrong and what would fix it, or null when nothing is.
 	 */
 	public static function unavailable():Null<String> {
-		#if hxscript_cppia
+		#if (hxscript_cppia || hxscript_hl)
 		return Backend.unavailable();
+		#elseif hl
+		return 'this build carries no compiler; add -D hxscript_hl on HashLink';
 		#else
 		return 'this build carries no compiler; add -D hxscript_cppia on hxcpp';
 		#end
 	}
 
-	#if hxscript_cppia
+	#if (hxscript_cppia || hxscript_hl)
 	/**
 	 * Types a script may name without importing them, as full paths.
 	 *
@@ -95,7 +99,11 @@ class Compiler {
 		return Backend.statics = v;
 	}
 
-	/** Whether to turn the target's JIT on before the first module loads. */
+	/**
+	 * Whether to turn the target's JIT on before the first module loads.
+	 *
+	 * HashLink jits everything it loads, so this reads true there and setting it changes nothing.
+	 */
 	public static var jit(get, set):Bool;
 
 	static function get_jit():Bool {
@@ -112,6 +120,18 @@ class Compiler {
 	 */
 	public static function isCompiled(path:String):Bool {
 		return Backend.isCompiled(path);
+	}
+
+	/**
+	 * @param path A scripted class path.
+	 * @return The class that stands in for it, or null when the scripted one is what runs.
+	 *
+	 * Both backends replace a class outright, so what a host must reach afterwards is the
+	 * replacement. Asking is still what a host should do rather than assuming: a class the emitter
+	 * refused is one the interpreter still runs, and that answers null.
+	 */
+	public static function substitute(path:String):Dynamic {
+		return Backend.substitute(path);
 	}
 
 	/**

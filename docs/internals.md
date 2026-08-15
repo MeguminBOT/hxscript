@@ -532,6 +532,7 @@ incomplete one.
 | `hxscript_no_shims` | step 4 off |
 | `hxscript_setup_only=a,b` | only these libraries |
 | `hxscript_setup_skip=a,b` | everything except these |
+| `hxscript_setup_skip=heaps3d` | heaps without its 3D half, which is nine of its eleven bridges |
 | `hxscript_host=pack` | also bridge the host's own `@:scriptable` classes |
 | `hxscript_verbose` | print what each step did |
 

@@ -173,6 +173,23 @@ the same record is read by the macro that wires the build and by the code that r
 the two halves cannot drift apart. A record whose `define` matches a shipped preset replaces it, so
 overriding one of the presets is the same gesture as adding one.
 
+**A record may also describe half of a library**, by naming a define nothing sets and saying what
+really switches it on:
+
+```haxe
+{define: 'heaps3d', requires: 'heaps', ...}
+```
+
+That is how heaps ships as two: `heaps` is the 2D half, `heaps3d` is the scene graph, both arrive
+with `-lib heaps`, and `-D hxscript_setup_skip=heaps3d` drops the second. It is worth doing wherever
+one library holds two things a project picks between, because the halves are rarely the same size:
+heaps' 3D half is nine of its eleven bridges and **about a megabyte of binary**, and a 2D project
+pays all of it for a scene graph it never builds into.
+
+Nothing forces the split to be even. `h3d.Vector`, `h3d.Matrix` and `h3d.mat.Texture` stay in the 2D
+record, because `h2d.Drawable` declares `colorAdd` and `colorMatrix` as the first two and `h2d.Tile`
+is a region of the third. The cut follows what one half names, not what the packages are called.
+
 The four subsections below are what each field means and how to work out its contents.
 
 ### Step 1: `include`, not `keep`

@@ -369,12 +369,10 @@ class Emitter {
 				case DPackage(path):
 					pack = path.join('.');
 				case DImport(path, mode):
-					var full:String = path.join('.');
-					var short:String = switch (mode) {
+					recordImport(path, switch (mode) {
 						case IAsName(alias): alias;
 						case _: path[path.length - 1];
-					}
-					typePaths.set(short, full);
+					});
 				case DClass(c) | DInterface(c):
 					var full:String = pack.length > 0 ? pack + '.' + c.name : c.name;
 					typePaths.set(c.name, full);
@@ -637,11 +635,10 @@ class Emitter {
 					pack = path.join('.');
 
 				case DImport(path, mode):
-					var full:String = path.join('.');
-					typePaths.set(switch (mode) {
+					recordImport(path, switch (mode) {
 						case IAsName(alias): alias;
 						case _: path[path.length - 1];
-					}, full);
+					});
 
 				case DClass(c) | DInterface(c):
 					typePaths.set(c.name, pack.length > 0 ? pack + '.' + c.name : c.name);
@@ -1225,7 +1222,24 @@ class Emitter {
 					return;
 				}
 
+				/**
+				 * A host abstract has no runtime class to make, and cppia does not report that: the
+				 * generated `NEW` names a type its loader cannot find and the process ends, silently
+				 * and with a success code, part way through whatever it was doing. Refusing the module
+				 * hands it to the interpreter, which fails the same construct with a message somebody
+				 * can read.
+				 *
+				 * Only a host one. An abstract a script declared is built above this, through the
+				 * constructor the batch emitted for it.
+				 */
+				if (hxscript.types.AbstractTools.resolve(cl) != null)
+					throw new Unsupported('new ' + cl + ', which is an abstract the host compiled and so has no class to make', e.pos);
+
 				var built:String = (cl == 'Map' || cl == 'haxe.ds.Map') && !typePaths.exists(cl) ? 'hxscript.runtime.AnyMap' : resolveType(cl, e.pos);
+
+				if (shortOfMiddle(built, params.length))
+					throw new Unsupported('new ' + cl + ', which leaves out a parameter that is not its last', e.pos);
+
 				var wantedNew:Int = padArgs(declaredClass(built), 'new', params.length);
 				w.pos(line);
 				w.token('NEW');
@@ -1753,6 +1767,10 @@ class Emitter {
 
 			case EIdent('super'):
 				var supplied:Int = params.length;
+
+				if (superArgs >= 0 && shortOfMiddle(currentSuper, supplied))
+					throw new Unsupported('super(...), which leaves out a parameter of ' + currentSuper + ' that is not its last', pos);
+
 				var wanted:Int = superArgs > supplied ? superArgs : supplied;
 
 				w.pos(line);
@@ -3211,6 +3229,49 @@ class Emitter {
 	}
 
 	/**
+	 * Whether a call leaves out a parameter of a host constructor that is not the last one.
+	 *
+	 * Everything here pads from the right, and for most constructors that is what Haxe does too. It
+	 * is not what Haxe does for one whose optional parameter has another parameter behind it: `new
+	 * Mesh(prim, parent)` against `(primitive, ?material, ?parent)` is placed by asking what each
+	 * argument is, and the answer is a `null` in the middle rather than one on the end. Padding it
+	 * here writes the parent into the material.
+	 *
+	 * Nothing in an instruction can ask that question, and the interpreter can, so the module is
+	 * refused and interpreted instead: slower, and the answer the script was written for.
+	 *
+	 * **Only where a skip is possible at all.** A call is placed in order for as long as the
+	 * parameters it reaches are required ones, since a required parameter is never the one dropped.
+	 * So `new Mesh(prim)` is padded here as it always was, and it is `new Mesh(prim, parent)`, whose
+	 * second parameter may be skipped, that has to go elsewhere to be decided.
+	 *
+	 * @param path The host class's full path.
+	 * @param given How many arguments the call wrote.
+	 * @return Whether this call is one padding cannot complete.
+	 */
+	function shortOfMiddle(path:String, given:Int):Bool {
+		var infos:Array<hxscript.types.TypeCollection.TypeInfo> = hxscript.types.TypeCollection.main.fromCompilePath(path);
+		if (infos == null || infos.length == 0)
+			infos = hxscript.types.TypeCollection.main.fromPath(path);
+		if (infos == null || infos.length == 0)
+			return false;
+
+		var written:Null<String> = infos[0].ctorSkip;
+		if (written == null)
+			return false;
+
+		var params:Array<String> = written.split('|');
+		if (given >= params.length)
+			return false;
+
+		for (i in 0...given)
+			if (params[i].charAt(0) == '?')
+				return true;
+
+		return false;
+	}
+
+	/**
 	 * What an abstract from this batch boxes, given the type name as written.
 	 *
 	 * @param path The declared type name or path.
@@ -3689,6 +3750,37 @@ class Emitter {
 		w.type(target.substr(0, split));
 		w.str(target.substr(split + 2));
 		return true;
+	}
+
+	/**
+	 * Records what an `import` puts in scope, which is a type or a static of one.
+	 *
+	 * `import pack.Type.field` binds a name that is a field of something rather than a type. Read as
+	 * a type it named a path with no class behind it, and what was emitted for it was `CLASSOF` of
+	 * that path, which evaluates to null: the script's name answered null with nothing said about it,
+	 * where the interpreter answered the field's value.
+	 *
+	 * Resolving the shorter path is what separates the two. A path that answers nothing stays a type
+	 * import, so a name that really is unknown is still refused where it is used rather than here.
+	 *
+	 * @param path The imported path's segments.
+	 * @param short The name it binds.
+	 */
+	function recordImport(path:Array<String>, short:String):Void {
+		var full:String = path.join('.');
+
+		if (path.length > 1 && hxscript.types.TypeTools.resolve(full) == null) {
+			var owner:String = path.slice(0, path.length - 1).join('.');
+			var field:String = path[path.length - 1];
+			var held:Dynamic = hxscript.types.TypeTools.resolve(owner);
+
+			if (held != null && Type.getClassFields(held).indexOf(field) >= 0) {
+				ambientMembers.set(short, owner + '::' + field);
+				return;
+			}
+		}
+
+		typePaths.set(short, full);
 	}
 
 	/**

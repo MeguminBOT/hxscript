@@ -1,0 +1,6 @@
+{
+	"title": "Heaps 3D",
+	"kind": "heaps",
+	"entry": "World",
+	"description": "A scripted h3d.scene.Object, added to the 3D scene and drawn by being in it. Meshes, primitives, materials, lights and the camera are reachable by name, and the vectors and matrices they are written in are real abstracts rather than wrappers around nothing."
+}

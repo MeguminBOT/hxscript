@@ -1,6 +1,6 @@
 package hxscript.compile;
 
-#if hxscript_cppia
+#if (hxscript_cppia || hxscript_hl)
 import hxscript.syntax.Expr;
 
 /**

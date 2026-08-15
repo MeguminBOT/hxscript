@@ -31,6 +31,30 @@ script.variables.get("greeted");   // 1
 That is a working embed. If the build also has lime, openfl, flixel, flixel-addons, flixel-ui or
 heaps in it, that same line wires the library for scripting as well.
 
+The build says so, once, in one block:
+
+```
+      _                             _         _
+     | |__  __  __ ___   ___  _ __ (_) _ __  | |_
+     | '_ \ \ \/ // __| / __|| '__|| || '_ \ | __|
+     | | | | >  < \__ \| (__ | |   | || |_) || |_
+     |_| |_|/_/\_\|___/ \___||_|   |_|| .__/  \__|
+                                      |_|
+     hxscript 2.0.0   hashlink   HashLink bytecode compiler
+     wired    heaps
+     reach    52 type(s), 4 abstract(s), 14 global(s), 3 bridge(s)
+     native   built export/hlc/Sandbox.exe
+```
+
+The line that matters most is the third one. **A compiled backend is opt-in on both targets that
+have one**, and a build meaning to have one and not having it is a program running scripts at a
+fraction of the speed it was measured at, with nothing anywhere saying so. That line says which of
+the two you got.
+
+`-D hxscript_no_banner`, or `HXSCRIPT_NO_BANNER=1` in the environment, prints nothing. `NO_COLOR`
+keeps the block and drops the escapes. `-D hxscript_verbose` is separate and still prints the
+per-item detail underneath.
+
 ## Giving scripts your own code
 
 Two defines and two pieces of metadata cover most of it.
@@ -103,7 +127,8 @@ Everything the library reads. Only the first group is likely to concern you.
 | --- | --- |
 | `-lib hxscript` | the whole of the setup, including for a game library already in the build |
 | `-D hxscript_host=<packages>` | comma-separated packages to scan for `@:scriptable` and `@:scriptAmbient` |
-| `-D hxscript_verbose` | print what the setup wired |
+| `-D hxscript_verbose` | print every type, bridge and abstract the setup touched, under the block it already prints |
+| `-D hxscript_no_banner` | print nothing at all. `HXSCRIPT_NO_BANNER=1` does the same from the environment |
 | `-dce no` | keep the standard-library members scripts reach by reflection. See [dead code elimination](#dead-code-elimination) |
 
 ### Behaviour
@@ -116,12 +141,45 @@ Everything the library reads. Only the first group is likely to concern you.
 
 ### Compiling at runtime
 
+Two targets can run a script as their own bytecode, and each takes one flag.
+
 | Flag | Effect |
 | --- | --- |
-| `-D hxscript_cppia` | compile the emitter into the build. Without it every module reports as skipped |
+| `-D hxscript_cppia` | on hxcpp, compile the emitter into the build. Without it every module reports as skipped |
 | `-D scriptable` | hxcpp's own flag, which makes your types reachable from bytecode |
+| `-D hxscript_hl` | on HashLink, the same, and build the native module the loader needs |
 
-Both are hxcpp-only. On any other target the compiler does not exist and every script is interpreted.
+On any other target the compiler does not exist and every script is interpreted.
+
+HashLink needs one thing hxcpp does not: a native module, because the VM's bytecode loader is
+compiled into `hl.exe` rather than into `libhl` and a program has no way to reach it. **`-lib
+hxscript -D hxscript_hl` builds it for you**, from the sources the library carries, against whatever
+HashLink your `HLPATH` or your path points at. Where it goes depends on which HashLink output you
+write:
+
+| Output | What happens |
+| --- | --- |
+| `-hl game.hl` | `hxscript.hdll` is built beside it, which is where the VM looks |
+| `-hl out/game.c` | the module is compiled in and `out/game` is linked, since HL/C has nowhere to put a library |
+
+Either way the flag is the whole of it, the way `-D hxscript_cppia` is on hxcpp.
+
+It is skipped when it is already there and was built for the same HashLink, which is recorded beside
+it rather than guessed from timestamps: an upgraded VM leaves a module whose struct offsets are
+silently wrong, and that is the one failure this is all arranged to avoid.
+
+**Nothing here can fail your build.** No HashLink, no compiler, or a version the carried loader does
+not match, and you get one warning naming the thing to install. The natives are declared optional to
+HashLink, so the program starts exactly as it would have and interprets every script.
+
+| Flag | Effect |
+| --- | --- |
+| `-D hxscript_native_out=<path>` | link the HL/C binary somewhere other than beside its C |
+| `-D hxscript_no_native` | never build it; you are producing it yourself |
+| `-D hxscript_no_jit` | build the runtime without the loader, so every script is interpreted |
+
+`src/hxscript/hl/native/build.sh` does the same by hand, and takes `--src <hashlink tree>` for
+building against a HashLink the carried loader does not match.
 
 ### Turning parts of the setup off
 
@@ -134,6 +192,16 @@ Each disables one step, for a host that would rather do it itself or is minimisi
 | `-D hxscript_no_bridges` | generating a bridge per scriptable base. The expensive step |
 | `-D hxscript_no_abstracts` | giving native abstracts a runtime form |
 | `-D hxscript_no_shims` | registering emulations for members with no runtime form |
+| `-D hxscript_no_native` | building HashLink's native module, which only a `-D hxscript_hl` build does |
+
+Those are all or nothing per step. **`-D hxscript_setup_skip=<name>` is the finer instrument**, and
+drops one library's wiring while leaving the rest: `-D hxscript_setup_skip=flixel-ui` for a build
+that has the library but no scripted UI.
+
+heaps ships as two records so this reaches half of it. `-D hxscript_setup_skip=heaps3d` keeps every
+`h2d` type, `h3d.Vector`, `h3d.Matrix` and `h3d.mat.Texture`, and drops the 3D scene graph: **eleven
+bridges become two, and the sandbox binary goes from 8.68 MB to 7.56 MB.** Worth having for a 2D
+project, and nothing to do for a 3D one, which is why it is off by default rather than on.
 
 ## Metadata
 
@@ -579,6 +647,8 @@ load failure as "recompile from source", which is cheap and always correct.
 | `Type not found: X` thrown out of `new Script(...)`, uncaught | a global import that cannot resolve | guard the registration; check the type is in the build and not blacklisted |
 | `Unknown identifier: X` | the type was never compiled in | name its package in `hxscript_host`, or force it in |
 | `Class X can't be extended for scripting` | no bridge | `@:scriptable` on it, or a hand-written bridge kept in the build |
+| `X cannot be extended for scripting, because it inlines an abstract's constructor` | a bridge re-emits the constructor it extends, and an abstract's assigns to `this` | it cannot be a base. Scripts still import and construct it, so reach it by holding one rather than by being one |
+| `bridge name ScriptedX already taken` | two bases share a simple name | nothing to do since 2.0.1; the second takes its path flattened. Older versions dropped it |
 | `Cannot call null` | dead code elimination removed the member | `-dce no`, or `@:keep` |
 | `Cannot call null` on an `inline extern` | it has no runtime form at all | register a closure in `Config.callShims` |
 | A native abstract's members do nothing | no runtime form | `@:build(hxscript.macro.Abstract.build())` on it |

@@ -23,6 +23,13 @@ class Autowire {
 	 * Called from `extraParams.hxml`, so no build file has to name it.
 	 */
 	public static function run():Void {
+		/**
+		 * The native module first, and outside the autowire switch. What it produces is what lets a
+		 * HashLink host compile a script at all, which is a different question from which game
+		 * library's types to wire in, and a build that turned the wiring off still wants the module.
+		 */
+		Native.run();
+
 		if (Context.defined('hxscript_no_autowire'))
 			return;
 
@@ -48,8 +55,10 @@ class Autowire {
 		Context.onAfterInitMacros(function():Void {
 			var forced:{refs:Array<Expr>, args:Array<FunctionArg>, named:Array<String>} = reference(libs);
 			var bridges:Array<Expr> = Bridges.generate(libs);
+			var titles:Array<String> = [for (lib in libs) lib.title];
 
-			manifest(bridges, forced, globals, abstracts, [for (lib in libs) lib.title]);
+			manifest(bridges, forced, globals, abstracts, titles);
+			hxscript.macro.Banner.wired(titles, bridges.length, forced.named.length, abstracts.length, globals.length);
 		});
 	}
 

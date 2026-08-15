@@ -53,7 +53,7 @@ s;
 ```
 
 Each library supplies two closures to
-[`XBench.run`](../test/xbench/XBench.hx) and nothing else, so the harness never touches a library's
+[`XBench.run`](../test/bench/xbench/XBench.hx) and nothing else, so the harness never touches a library's
 internals:
 
 - **`prepare(src)`** parses and builds whatever that library needs, and is **untimed**.
@@ -129,7 +129,7 @@ time. `SCALES="25000 100000 500000"` checks it again after a change that could p
 
 ## Results
 
-<!-- BEGIN GENERATED: test/xbench/collate.py -->
+<!-- BEGIN GENERATED: test/bench/xbench/collate.py -->
 ### Every case, microseconds per iteration at 100,000
 
 One row per case, and the only per-case table in this document. `kind` is which average the
@@ -297,10 +297,10 @@ Every figure is single-threaded: the thread count built the binaries, it did not
 
 ## Reproducing
 
-The harness is in [`../test/xbench`](../test/xbench). In short:
+The harness is in [`../test/bench/xbench`](../test/bench/xbench). In short:
 
 ```sh
-LIBS=/path/to/library/checkouts sh test/xbench/run.sh
+LIBS=/path/to/library/checkouts sh test/bench/xbench/run.sh
 ```
 
 `LIBS` wants checkouts named `insanity`, `hscript`, `improved`, `iris`, `rulescript` and
@@ -312,7 +312,7 @@ Scales default to `100000` and are settable. Passing more than one also brings b
 scale-stability table:
 
 ```sh
-SCALES="25000 100000 500000" LIBS=... sh test/xbench/run.sh
+SCALES="25000 100000 500000" LIBS=... sh test/bench/xbench/run.sh
 ```
 
 They must be multiples of 1000, which is the array length `forArray` walks.
@@ -325,7 +325,7 @@ compiler flags actually gets, which is a different and also useful question.
 summaries, so a re-run replaces all of it in one go and there is nothing to keep in sync.
 
 Every hscript-derived library is built twice, once with
-[`hscript-pos.hxml`](../test/xbench/hscript-pos.hxml) and once without. Do not drop the
+[`hscript-pos.hxml`](../test/bench/xbench/hscript-pos.hxml) and once without. Do not drop the
 position-tracking builds when comparing against hxScript: without that define those libraries record
 no source positions at all, and hxScript cannot work that way.
 

@@ -1,0 +1,32 @@
+{
+	"$schema": "https://raw.githubusercontent.com/HaxeCheckstyle/haxe-formatter/master/resources/hxformat-schema.json",
+
+	"excludes": [
+		"\\.haxelib",
+		"\\.git",
+		"node_modules",
+		"[/\\\\]bin(_[a-z]+)?[/\\\\]",
+		"[/\\\\]export[/\\\\]",
+		"[/\\\\]projects[/\\\\]"
+	],
+
+	"indentation": {
+		"character": "\t",
+		"tabWidth": 4,
+		"trailingWhitespace": false
+	},
+
+	"lineEnds": {
+		"leftCurly": "after",
+		"rightCurly": "both"
+	},
+
+	"wrapping": {
+		"maxLineLength": 120,
+
+		"methodChain": {
+			"defaultWrap": "noWrap",
+			"rules": []
+		}
+	}
+}

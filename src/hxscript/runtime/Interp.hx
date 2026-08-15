@@ -1511,6 +1511,33 @@ class Interp {
 	}
 
 	/**
+	 * Materializes a mirror standing for a constant, and answers nothing for one that is not.
+	 *
+	 * The import table holds a `Reference` wherever a name stands for something that is not a plain
+	 * value, so anything reading that table to find out what a name means gets the mirror unless it
+	 * asks through here. A compiler is the caller that needs it: a name it reads straight is answered
+	 * with the mirror itself.
+	 *
+	 * **A property is deliberately not answered.** An enum's constructor and an enum abstract's
+	 * constant are fixed, so taking one and keeping it is right. A property has storage because
+	 * something may write it, and a compiler that took one here would read it once and never see the
+	 * write; that name has to be compiled as a read of its owner instead.
+	 *
+	 * @param v The stored value or mirror.
+	 * @return The value, unchanged when it was never a mirror, or null for a mirror of a property.
+	 */
+	public function constantMirror(v:Dynamic):Dynamic {
+		if (!(v is Reference))
+			return v;
+
+		return switch (cast(v, Reference)) {
+			case REnumValue(t, i): resolveEnumValue(t, i);
+			case RAbstractEnumValue(t, i): createAbstractEnum(t, i);
+			case _: null;
+		}
+	}
+
+	/**
 	 * Resolves a bare identifier to a value, checking imports first, then top-level variables, and
 	 * materializing any mirror it finds.
 	 *
@@ -2010,9 +2037,9 @@ class Interp {
 				declaredOld.push(locals.get(name));
 
 				if (i == params.length - 1 && hasRest) {
-					locals.set(name, {r: args.slice(params.length - 1)});
+					locals.set(name, {ref: args.slice(params.length - 1)});
 				} else {
-					locals.set(name, {r: tryCast(args[i], params[i].t), t: params[i].t});
+					locals.set(name, {ref: tryCast(args[i], params[i].t), t: params[i].t});
 				}
 			}
 
@@ -2053,14 +2080,14 @@ class Interp {
 			if (stack.length > 1) {
 				declaredNames.push(name);
 				declaredOld.push(locals.get(name));
-				var ref:Variable = {r: f};
+				var ref:Variable = {ref: f};
 				locals.set(name, ref);
 				capturedLocals.set(name, ref);
 			} else {
 				if (defineGlobals) {
 					variables.set(name, f);
 				} else {
-					locals.set(name, {r: f});
+					locals.set(name, {ref: f});
 				}
 			}
 		}
@@ -2481,7 +2508,7 @@ class Interp {
 			function runCatch(cn:String, ce:Expr):Dynamic {
 				declaredNames.push(cn);
 				declaredOld.push(locals.get(cn));
-				locals.set(cn, {r: raw});
+				locals.set(cn, {ref: raw});
 				var rv:Dynamic = expr(ce);
 				restore(old);
 				return rv;
@@ -2756,8 +2783,20 @@ class Interp {
 						}
 					}
 
+					/**
+					 * Through `fromType`, because an import answered here may be an enum and a
+					 * constructor of one reads like a static without being one. This is the short
+					 * path, taken whenever a chain's first segment is a name already in scope, and it
+					 * answered by reflection alone: `haxe.ds.Option.None` is resolved segment by
+					 * segment and was built, `Option.None` after importing it came through here and
+					 * was not.
+					 *
+					 * On HashLink that was a null where the constructor belonged, with nothing said
+					 * about it. `Option.Some(3)` was right throughout, being a call rather than a
+					 * read, which is what made it look like a problem with the name.
+					 */
 					if (base != null)
-						return get(base, f, m);
+						return fromType(base, f, m);
 				default:
 			}
 		}
@@ -2859,7 +2898,18 @@ class Interp {
 					}
 				}
 			} else {
-				got = get(got, field, maybe);
+				/**
+				 * Through `fromType`, because what a chain has already resolved may be an enum, and a
+				 * constructor of one reads like a static without being one. `haxe.ds.Option.None` was
+				 * built and `Option.None` after importing it was not: the first is a path resolved
+				 * segment by segment, the second an import answered whole, and only the first reached
+				 * the question that builds the value.
+				 *
+				 * On HashLink that showed as a null where the constructor belonged, with nothing said
+				 * about it. `Option.Some(3)` was right throughout, being a call rather than a read,
+				 * which is what made it look like a problem with the name.
+				 */
+				got = fromType(got, field, maybe);
 			}
 		}
 
@@ -3037,7 +3087,7 @@ class Interp {
 		if (t != null)
 			v = tryCast(v, t);
 
-		var l:Variable = (AbstractTools.isAbstract(v) ? {r: v.__a, a: v} : {r: v});
+		var l:Variable = (AbstractTools.isAbstract(v) ? {ref: v.__a, a: v} : {ref: v});
 		if (t != null)
 			l.t = t;
 		return l;
@@ -3273,7 +3323,7 @@ class Interp {
 		var it = makeIterator(expr(it));
 
 		while (it.hasNext()) {
-			locals.set(n, {r: it.next()});
+			locals.set(n, {ref: it.next()});
 
 			if (!loopRun(ef))
 				break;
@@ -3307,8 +3357,8 @@ class Interp {
 			if (v.value == null)
 				error(EUnknownField(v, 'value'));
 
-			locals.set(vk, {r: v.key});
-			locals.set(vv, {r: v.value});
+			locals.set(vk, {ref: v.key});
+			locals.set(vv, {ref: v.value});
 
 			if (!loopRun(ef))
 				break;
@@ -3481,7 +3531,7 @@ class Interp {
 
 		if (o is Reference) {
 			switch (cast(o, Reference)) {
-				case RSuper(locals, _):
+				case RSuper(locals, _, _):
 					if (locals == null) {
 						error(EHasNoSuper);
 					} else if (locals.exists(f)) {
@@ -3589,12 +3639,14 @@ class Interp {
 			return read;
 
 		/**
-		 * `getEnumName` rather than `getEnumConstructs` as the test, because the first answers null
-		 * for anything that is not an enum and the second is only defined for one. `get` already
-		 * asks it of arbitrary values a few lines above, so it is known to be safe here.
+		 * `is Enum` rather than asking reflection anything, because reflection is what is dangerous
+		 * here. `Type.getEnumName` stood in this place and it ends the hxcpp process for a value that
+		 * is not an enum, which was survivable only while this was reached with a resolved type and
+		 * nothing else. It is now reached with whatever a name in scope resolved to, and the first
+		 * ordinary thing to arrive was a scripted instance with a null field: `t.maybe == null` took
+		 * the process down. A value test cannot.
 		 */
-		var named:Null<String> = try Type.getEnumName(t) catch (e:Dynamic) null;
-		if (named == null)
+		if (!(t is Enum))
 			return read;
 
 		var names:Array<String> = HaxeType.getEnumConstructs(t);
@@ -3767,6 +3819,17 @@ class Interp {
 		}
 
 		if (!Reflect.isFunction(fun)) {
+			/**
+			 * A constructor of a host enum, which is not a field of the enum on every target: hxcpp
+			 * answers with a function and HashLink answers with nothing, so asking the enum to make
+			 * one is what agrees everywhere.
+			 */
+			if (o is Enum || o is ScriptedEnum) {
+				var at:Int = Type.getEnumConstructs(o).indexOf(f);
+				if (at >= 0)
+					return Type.createEnum(o, f, args);
+			}
+
 			for (t in usings) {
 				var fun = get(t, f, true);
 				if (!Reflect.isFunction(fun))
@@ -3820,13 +3883,21 @@ class Interp {
 
 		if (f is Reference) {
 			switch (cast(f, Reference)) {
-				case RSuper(locals, constructor):
+				case RSuper(locals, constructor, rebuilt):
 					if (constructor == null) {
 						error(EHasNoSuper);
 					} else if (!superConstructorAllowed) {
 						error(ECustom('Cannot call super constructor outside class constructor'));
 					} else {
 						f = constructor;
+
+						/**
+						 * A rebuilt base's constructor takes the host class's parameters, so the same
+						 * placing a `new` of that class gets applies here: `super(label, held)` against
+						 * `(label, ?tint, ?held)` means the first and the last.
+						 */
+						if (rebuilt != null)
+							args = ArgumentTools.forConstructor(rebuilt, args);
 					}
 				default:
 			}
@@ -3847,7 +3918,7 @@ class Interp {
 	 * @return The compiled class standing in for it, or `o` unchanged.
 	 */
 	function staticHost(o:Dynamic):Dynamic {
-		#if hxscript_cppia
+		#if (hxscript_cppia || hxscript_hl)
 		if (environment != null && environment.substituting && o is ScriptedClass) {
 			var native:Class<Dynamic> = environment.compiled.get((cast o : ScriptedClass).path);
 			if (native != null)
@@ -3868,7 +3939,7 @@ class Interp {
 	 * @return Whether the value is that type's compiled form.
 	 */
 	function isCompiledAs(t:Dynamic, e:Dynamic):Bool {
-		#if hxscript_cppia
+		#if (hxscript_cppia || hxscript_hl)
 		if (environment == null || !environment.substituting || !(t is ScriptedClass))
 			return false;
 
@@ -3899,7 +3970,7 @@ class Interp {
 		if (canDefer && c is IScriptedType && !c.initialized)
 			throw DDefer;
 
-		#if hxscript_cppia
+		#if (hxscript_cppia || hxscript_hl)
 		if (c is ScriptedClass && environment != null && environment.substituting) {
 			var native:Class<Dynamic> = environment.compiled.get((cast c : ScriptedClass).path);
 			if (native != null)
@@ -3910,7 +3981,11 @@ class Interp {
 		if (c is ScriptedAbstract)
 			return (cast c : ScriptedAbstract).create(args);
 
-		return Type.createInstance(c, args);
+		var boxed:Dynamic = AbstractTools.construct(c, args);
+		if (boxed != null)
+			return boxed;
+
+		return Type.createInstance(c, ArgumentTools.forConstructor(c, args));
 	}
 }
 
