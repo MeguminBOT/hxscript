@@ -99,10 +99,9 @@ class Api {
 	 * The 3D scene to build into.
 	 *
 	 * heaps keeps two scene graphs and a project may want either. A 2D project becomes an
-	 * `h2d.Object` and is drawn by being one; a 3D project cannot, because `h3d.scene.Object`
-	 * inlines an abstract's constructor and a generated bridge has to re-emit the constructor it
-	 * extends. So a 3D project asks for the scene and puts things in it, which reaches all of heaps'
-	 * 3D and needs nothing generated.
+	 * `h2d.Object` and is drawn by being one, and a 3D project can become an `h3d.scene.Object` the
+	 * same way, since that base is bridged. Most do not: what a 3D project owns is a world of
+	 * objects rather than one object, so it asks for the scene and puts things in it.
 	 *
 	 * Asking is what turns that scene on: a project that never calls this costs nothing.
 	 *

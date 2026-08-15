@@ -49,6 +49,16 @@ class ProjectInfo {
 	/** Why the project cannot be loaded, when it cannot. Null when it is fine. */
 	public var problem:Null<String>;
 
+	/**
+	 * Whether this is one of the shipped examples rather than the user's own.
+	 *
+	 * An example lives in the application folder and is read where it lies. It runs, reloads and can
+	 * be read like any other project; what it is not is somewhere to keep work, because the next
+	 * build writes over it. **Duplicate** is the way out: it copies the example into the projects
+	 * folder, where it belongs to whoever copied it.
+	 */
+	public var example:Bool = false;
+
 	/** @return The name, with the title after it when they differ. */
 	public function toString():String {
 		return title == name ? name : '$name  ($title)';

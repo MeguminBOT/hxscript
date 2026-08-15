@@ -60,6 +60,14 @@ class Shell {
 	static var listTitle:Label;
 	static var filter:TextInput;
 	static var list:List;
+
+	/** The examples, in their own box above the user's own projects. */
+	static var exampleList:List;
+
+	static var exampleTitle:Label;
+
+	/** Copies the selected example into the projects folder. */
+	static var duplicateButton:Button;
 	static var newButton:Button;
 
 	static var detail:Panel;
@@ -87,7 +95,12 @@ class Shell {
 
 	static var projects:Array<ProjectInfo> = [];
 	static var found:Array<ProjectInfo> = [];
-	static var selected:Int = -1;
+
+	/** The shipped examples, and the ones the filter leaves showing. */
+	static var examples:Array<ProjectInfo> = [];
+
+	static var shown:Array<ProjectInfo> = [];
+	static var selected:ProjectInfo = null;
 	static var resolved:{cls:ScriptedClass, kind:EntryKind} = null;
 
 	static var lastError:Null<Diagnostic> = null;
@@ -141,14 +154,20 @@ class Shell {
 		});
 
 		sidebar = new Panel(Theme.panel, Theme.border, panes);
-		listTitle = new Label('projects', 12, Secondary, panes);
+		exampleTitle = new Label('examples', 12, Secondary, panes);
+		listTitle = new Label('my projects', 12, Secondary, panes);
 
 		filter = new TextInput('filter', '', function(_:String):Void applyFilter(), panes);
 
+		exampleList = new List(panes);
+		exampleList.onSelect = pickExample;
+		exampleList.onActivate = function(_:Int):Void run();
+
 		list = new List(panes);
-		list.onSelect = pick;
+		list.onSelect = pickOwn;
 		list.onActivate = function(_:Int):Void run();
 
+		duplicateButton = new Button('Duplicate to my projects', duplicateOne, Quiet, panes);
 		newButton = new Button('New project', createOne, Normal, panes);
 
 		detail = new Panel(Theme.panel, Theme.border, panes);
@@ -187,15 +206,35 @@ class Shell {
 
 		sidebar.place(pad, pad, side, top - pad);
 
+		var left:Float = pad + Theme.px(10);
+		var wideEnough:Float = side - Theme.px(20);
+
+		filter.controlWidth = wideEnough - Theme.px(FILTER_LABEL);
+		filter.place(left, pad + Theme.px(8), wideEnough, Theme.px(26));
+
+		/**
+		 * The two boxes share what is left after the filter and the buttons, and the examples take
+		 * the smaller share. There are a fixed number of them and they never grow, while the other
+		 * box is where somebody's work accumulates, so the space belongs to that one.
+		 */
+		var buttons:Float = Theme.px(72);
+		var room:Float = top - pad - Theme.px(46) - buttons;
+		var forExamples:Float = Math.min(room * 0.42, Theme.px(190));
+
+		exampleTitle.rescale();
+		exampleTitle.x = left;
+		exampleTitle.y = pad + Theme.px(42);
+
+		exampleList.place(left, pad + Theme.px(60), wideEnough, forExamples);
+
 		listTitle.rescale();
-		listTitle.x = pad + Theme.px(10);
-		listTitle.y = pad + Theme.px(8);
+		listTitle.x = left;
+		listTitle.y = pad + Theme.px(70) + forExamples;
 
-		filter.controlWidth = side - Theme.px(20) - Theme.px(FILTER_LABEL);
-		filter.place(pad + Theme.px(10), pad + Theme.px(28), side - Theme.px(20), Theme.px(26));
+		list.place(left, pad + Theme.px(88) + forExamples, wideEnough, room - forExamples - Theme.px(26));
 
-		list.place(pad + Theme.px(10), pad + Theme.px(62), side - Theme.px(20), top - pad - Theme.px(112));
-		newButton.place(pad + Theme.px(10), top - pad - Theme.px(38), side - Theme.px(20), Theme.px(28));
+		duplicateButton.place(left, top - pad - Theme.px(72), wideEnough, Theme.px(28));
+		newButton.place(left, top - pad - Theme.px(38), wideEnough, Theme.px(28));
 
 		var right:Float = pad + side + pad;
 		var wide:Float = w - right - pad;
@@ -232,11 +271,12 @@ class Shell {
 
 	/** Looks at the projects folder again. */
 	static function rescan():Void {
+		examples = Projects.examples();
 		projects = Projects.all();
 		applyFilter();
 
 		if (projects.length == 0)
-			note('no projects found in ${Projects.root}');
+			note('no projects of your own yet; Duplicate an example, or put a folder with a scripts/ folder in ${Projects.root}');
 
 		refreshStatus();
 		takeAutoRun();
@@ -256,77 +296,127 @@ class Shell {
 		var wanted:String = autoRun;
 		autoRun = null;
 
-		var at:Int = -1;
+		/** Either list, since `--run` takes a name and an example has one like anything else. */
+		for (i in 0...shown.length)
+			if (shown[i].name == wanted) {
+				note('--run $wanted');
+				exampleList.index = i;
+				pickExample(i);
+				run();
+				return;
+			}
+
 		for (i in 0...found.length)
-			if (found[i].name == wanted)
-				at = i;
+			if (found[i].name == wanted) {
+				note('--run $wanted');
+				list.index = i;
+				pickOwn(i);
+				run();
+				return;
+			}
 
-		if (at < 0) {
-			note('--run $wanted: no project of that name');
-			return;
-		}
-
-		note('--run $wanted');
-		list.index = at;
-		pick(at);
-		run();
+		note('--run $wanted: no project of that name');
 	}
 
-	/** Narrows the list to what the filter matches. */
+	/** Narrows both lists to what the filter matches. */
 	static function applyFilter():Void {
 		var needle:String = filter == null ? '' : filter.value.toLowerCase();
 
-		found = needle.length == 0 ? projects.copy() : [
-			for (project in projects)
-				if (project.name.toLowerCase().indexOf(needle) >= 0 || project.title.toLowerCase().indexOf(needle) >= 0) project
-		];
+		shown = matching(examples, needle);
+		found = matching(projects, needle);
 
+		exampleList.setItems([for (project in shown) project.title]);
 		list.setItems([for (project in found) project.title]);
 
-		if (found.length == 0) {
-			selected = -1;
+		/**
+		 * The examples are offered first when nothing is selected, because on a first run they are
+		 * the only thing there is: the projects folder starts empty and is filled by its owner.
+		 */
+		if (shown.length > 0) {
+			exampleList.index = 0;
+			list.index = -1;
+			pickExample(0);
+		} else if (found.length > 0) {
+			list.index = 0;
+			exampleList.index = -1;
+			pickOwn(0);
+		} else {
+			selected = null;
 			describe();
-			return;
 		}
-
-		list.index = 0;
-		pick(0);
 	}
 
 	/**
-	 * Takes a row as the selection.
+	 * @param from A list of projects.
+	 * @param needle What the filter holds, lower-cased.
+	 * @return Those whose name or title contains it, all of them when it is empty.
+	 */
+	static function matching(from:Array<ProjectInfo>, needle:String):Array<ProjectInfo> {
+		if (needle.length == 0)
+			return from.copy();
+
+		return [
+			for (project in from)
+				if (project.name.toLowerCase().indexOf(needle) >= 0 || project.title.toLowerCase().indexOf(needle) >= 0) project
+		];
+	}
+
+	/**
+	 * Takes a row of the examples as the selection, and clears the other list's.
+	 *
+	 * Two lists and one selection, so picking in either has to unpick the other. Without that both
+	 * draw a highlighted row and only one of them is what Run would run.
 	 *
 	 * @param row Which one.
 	 */
-	static function pick(row:Int):Void {
-		if (row < 0 || row >= found.length) {
-			selected = -1;
-			describe();
-			return;
-		}
-
-		selected = indexOf(found[row]);
-		describe();
-		refreshStatus();
+	static function pickExample(row:Int):Void {
+		list.index = -1;
+		take(row < 0 || row >= shown.length ? null : shown[row]);
 	}
 
-	/** @return Where a project sits in the unfiltered list. */
-	static function indexOf(project:ProjectInfo):Int {
-		for (i in 0...projects.length)
-			if (projects[i] == project)
-				return i;
-		return -1;
+	/**
+	 * Takes a row of the user's own projects as the selection, and clears the examples'.
+	 *
+	 * @param row Which one.
+	 */
+	static function pickOwn(row:Int):Void {
+		exampleList.index = -1;
+		take(row < 0 || row >= found.length ? null : found[row]);
+	}
+
+	/**
+	 * @param project What is now selected, or null for nothing.
+	 */
+	static function take(project:ProjectInfo):Void {
+		selected = project;
+		describe();
+
+		if (project != null)
+			refreshStatus();
+	}
+
+	/**
+	 * Replaces a project in a list, wherever it appears in one.
+	 *
+	 * @param within The list.
+	 * @param name The project's name.
+	 * @param fresh What to put in its place.
+	 */
+	static function swap(within:Array<ProjectInfo>, name:String, fresh:ProjectInfo):Void {
+		for (i in 0...within.length)
+			if (within[i].name == name)
+				within[i] = fresh;
 	}
 
 	/** Rewrites the detail pane for the selection. */
 	static function describe():Void {
-		if (selected < 0 || selected >= projects.length) {
+		if (selected == null) {
 			heading.text = 'no project selected';
 			summary.text = 'Put a folder with a scripts/ folder in it beside this application, then Rescan.';
 			return;
 		}
 
-		var project:ProjectInfo = projects[selected];
+		var project:ProjectInfo = selected;
 		heading.text = project.title;
 
 		var facts:Array<String> = [
@@ -375,10 +465,10 @@ class Shell {
 
 	/** Runs the selection. */
 	static function run():Void {
-		if (selected < 0 || selected >= projects.length)
+		if (selected == null)
 			return;
 
-		var project:ProjectInfo = projects[selected];
+		var project:ProjectInfo = selected;
 
 		if (project.problem != null) {
 			note('${project.name} cannot run: ${project.problem}');
@@ -406,22 +496,25 @@ class Shell {
 
 	/** Reloads the selection from disk, and restarts it when it was running. */
 	static function reload():Void {
-		if (selected < 0 || selected >= projects.length)
+		if (selected == null)
 			return;
 
 		var wasRunning:Bool = Launcher.running;
-		var name:String = projects[selected].name;
-		var path:String = projects[selected].path;
+		var name:String = selected.name;
+		var path:String = selected.path;
 
 		Launcher.stop();
 
 		var fresh:ProjectInfo = Projects.read(name, path);
-		projects[selected] = fresh;
+		fresh.example = selected.example;
 		resolved = null;
 
-		for (i in 0...found.length)
-			if (found[i].name == name)
-				found[i] = fresh;
+		swap(projects, name, fresh);
+		swap(examples, name, fresh);
+		swap(found, name, fresh);
+		swap(shown, name, fresh);
+
+		selected = fresh;
 
 		if (fresh.problem == null) {
 			Sandbox.load(fresh, wasRunning);
@@ -510,13 +603,53 @@ class Shell {
 	}
 
 	/** Opens the new-project sheet. */
+	/**
+	 * Copies the selected example into the projects folder, where it can be edited and kept.
+	 *
+	 * The way out of an example being the application's rather than yours. An example is read where
+	 * it lies and the next build writes over it, so anything worth keeping has to leave first, and
+	 * this is that step with a name on it.
+	 */
+	static function duplicateOne():Void {
+		if (selected == null || !selected.example) {
+			note('pick an example to duplicate');
+			return;
+		}
+
+		var from:ProjectInfo = selected;
+		var wanted:String = from.name;
+		var n:Int = 2;
+
+		/** A name that is free, so duplicating twice is two projects rather than an error. */
+		while (Projects.find(wanted) != null) {
+			wanted = from.name + '-' + n;
+			n++;
+		}
+
+		var born:ProjectInfo = Projects.duplicate(from, wanted);
+
+		if (born == null) {
+			note('could not copy ${from.name}');
+			return;
+		}
+
+		note('copied ${from.name} to ${born.path}');
+		rescan();
+
+		for (i in 0...found.length)
+			if (found[i].name == born.name) {
+				list.index = i;
+				pickOwn(i);
+			}
+	}
+
 	static function createOne():Void {
 		if (sheet != null)
 			return;
 
 		var made:Modal = new Modal('New project', root.above);
-		made.panelWidth = 360;
-		made.panelHeight = 210;
+		made.panelWidth = 380;
+		made.panelHeight = 330;
 		sheet = made;
 
 		var room = made.inner();
@@ -525,16 +658,32 @@ class Shell {
 		name.controlWidth = room.width - Theme.px(60);
 		name.place(0, 0, room.width, Theme.px(28));
 
+		/** A build with no examples beside it can still start a project, with nothing in it. */
 		var templates:Array<String> = Projects.templates();
 		if (templates.length == 0)
-			templates = ['plain'];
+			templates = [Projects.EMPTY];
 
-		var kind:SegmentedControl = new SegmentedControl(templates, 0, null, made.content);
-		kind.place(0, Theme.px(44), room.width, Theme.px(30));
+		var fromLabel:Label = new Label('start from', 12, Secondary, made.content);
+		fromLabel.place(0, Theme.px(42), room.width, Theme.px(16));
+
+		/**
+		 * A list rather than a row of segments.
+		 *
+		 * A `SegmentedControl` divides its width by however many entries it is given, which is fine
+		 * for two or three and unreadable for eight: the labels overlapped into one another and the
+		 * dialog could not be made wide enough to fix it, because each new example makes every
+		 * segment narrower again. A list is the same widget the sidebar uses, it scrolls, and it
+		 * costs the same room whatever ships.
+		 */
+		var kind:List = new List(made.content);
+		kind.setItems(templates);
+		kind.index = 0;
+		kind.place(0, Theme.px(62), room.width, Theme.px(150));
 
 		made.addButton('Create', function():Void {
 			var wanted:String = name.value;
-			var born:ProjectInfo = Projects.create(wanted, templates[kind.index]);
+			var chosen:Int = kind.index < 0 ? 0 : kind.index;
+			var born:ProjectInfo = Projects.create(wanted, templates[chosen]);
 			closeSheet();
 
 			if (born == null)
@@ -559,10 +708,10 @@ class Shell {
 
 	/** Opens the selected project where the file manager can see it. */
 	static function reveal():Void {
-		if (selected < 0 || selected >= projects.length)
+		if (selected == null)
 			return;
 
-		open(projects[selected].path);
+		open(selected.path);
 	}
 
 	/** Opens the file the last error came from. */

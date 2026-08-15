@@ -157,6 +157,9 @@ class Launcher {
 		kind = found.kind;
 		layer = into;
 
+		/** Its own `res/` if it has one, the app's otherwise, before a line of it runs. */
+		host.Assets.useFor(project.path);
+
 		Api.onQuit = stop;
 
 		switch (kind) {
@@ -372,8 +375,23 @@ class Launcher {
 		if (layer != null)
 			layer.removeChildren();
 
-		if (world != null)
+		/**
+		 * The camera goes back too, not just the objects.
+		 *
+		 * A 3D project has to point the camera at what it built, so it is the one piece of the scene
+		 * that a project changes without adding anything, and emptying the children leaves it wherever
+		 * the last project put it. The next one then opens looking somewhere chosen by a project that
+		 * is no longer running, which reads as its own bug.
+		 */
+		if (world != null) {
 			world.removeChildren();
+
+			var view:h3d.Camera = (cast world : h3d.scene.Scene).camera;
+			view.fovY = 25;
+			view.pos.set(2, 3, 4);
+			view.target.set(0, 0, 0);
+			view.up.set(0, 0, 1);
+		}
 
 		if (onWorld != null)
 			onWorld(false);

@@ -25,9 +25,16 @@ using StringTools;
  *     assets/          optional, reachable from the project by path
  * ```
  *
- * On a first run the folder does not exist, and an empty project list is a bad first thing to show
- * somebody. So it is created and seeded from the templates shipped inside the application, which
- * means a fresh download has three projects that run in it before its owner has written anything.
+ * **Two lists, kept apart.** The examples this build ships are read where they lie, inside the
+ * application folder, and the projects folder holds only what its owner put there. It used to be one
+ * list: the examples were copied in on a first run, and from then on nothing could tell an example
+ * from somebody's work, so a new build either wrote over their edits or left a stale example in
+ * their list forever. An example is now plainly the application's, and copying one into the projects
+ * folder is a deliberate act with a button on it.
+ *
+ * So the projects folder starts empty, which is a worse first screen than three projects and a
+ * better arrangement than the one that produced them. The examples box is never empty, and that is
+ * what the first screen shows.
  */
 class Projects {
 	/** The folder projects are read from and written to. */
@@ -51,14 +58,119 @@ class Projects {
 		try {
 			if (!FileSystem.exists(root))
 				mkdirs(root);
-
-			if (FileSystem.readDirectory(root).length == 0)
-				seed();
 		} catch (e:haxe.Exception) {
 			return false;
 		}
 
 		return FileSystem.exists(root) && FileSystem.isDirectory(root);
+	}
+
+	/**
+	 * The examples this build ships, read where they lie.
+	 *
+	 * **They are not copied into the projects folder any more, and the reason is that they were.**
+	 * Seeding put the shipped examples and the user's own work in one list with nothing telling them
+	 * apart, so the next build either wrote over somebody's edits or left an old example sitting
+	 * there forever. Read in place, an example is plainly the application's and the projects folder
+	 * is plainly the user's.
+	 *
+	 * @return The examples, in name order, empty when the build has no template folder beside it.
+	 */
+	public static function examples():Array<ProjectInfo> {
+		#if openfl
+		/** Embedded assets have no directory to read in place, so there is nothing to list here. */
+		return [];
+		#else
+		var dir:String = templateDir();
+
+		if (dir == null)
+			return [];
+
+		while (dir.length > 1 && (dir.charAt(dir.length - 1) == '/' || dir.charAt(dir.length - 1) == '\\'))
+			dir = dir.substr(0, dir.length - 1);
+
+		var found:Array<ProjectInfo> = [];
+
+		for (name in templates()) {
+			var path:String = dir + '/' + name;
+
+			if (!FileSystem.exists(path) || !FileSystem.isDirectory(path))
+				continue;
+
+			var info:ProjectInfo = read(name, path);
+			info.example = true;
+			found.push(info);
+		}
+
+		return found;
+		#end
+	}
+
+	/**
+	 * Copies an example into the projects folder, so it can be edited and kept.
+	 *
+	 * @param from The example.
+	 * @param name What to call the copy.
+	 * @return The new project, or null when the name is taken or nothing could be written.
+	 */
+	public static function duplicate(from:ProjectInfo, name:String):ProjectInfo {
+		var path:String = '$root/$name';
+
+		if (name.length == 0 || FileSystem.exists(path))
+			return null;
+
+		return copyTemplate(from.name, path) ? read(name, path) : null;
+	}
+
+	/**
+	 * @param name A project, example or conformance-fixture name.
+	 * @return The one that answers to it, the user's own first, or null when nothing does.
+	 */
+	public static function find(name:String):ProjectInfo {
+		for (candidate in all())
+			if (candidate.name == name)
+				return candidate;
+
+		for (candidate in examples())
+			if (candidate.name == name)
+				return candidate;
+
+		for (candidate in fixtures())
+			if (candidate.name == name)
+				return candidate;
+
+		return null;
+	}
+
+	/**
+	 * The conformance projects, when this build carries them.
+	 *
+	 * **Found but never listed**, which is the whole point of them being separate. `conform` has no
+	 * window to draw in and `heaps3d` and `widgets` carry a `SelfTest` naming cases for `--conform`
+	 * to run: they are how the app is tested, not things to show somebody who opened it. They shipped
+	 * as examples once and put three test harnesses in every build's list.
+	 *
+	 * `./build.sh --with-tests` copies them in; an ordinary build has none and this answers empty.
+	 *
+	 * @return The fixtures, in name order, empty when the build was made without them.
+	 */
+	public static function fixtures():Array<ProjectInfo> {
+		var dir:String = beside('assets/conformance');
+
+		if (!FileSystem.exists(dir) || !FileSystem.isDirectory(dir))
+			return [];
+
+		var found:Array<ProjectInfo> = [];
+
+		for (name in FileSystem.readDirectory(dir)) {
+			var path:String = dir + '/' + name;
+
+			if (FileSystem.exists(path + '/scripts'))
+				found.push(read(name, path));
+		}
+
+		found.sort(function(a:ProjectInfo, b:ProjectInfo):Int return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0));
+		return found;
 	}
 
 	/**
@@ -175,11 +287,29 @@ class Projects {
 		if (name.length == 0 || FileSystem.exists(path))
 			return null;
 
+		/**
+		 * A project with nothing in it, for a build carrying no examples to copy. A folder with a
+		 * `scripts/` in it is the whole of what makes a project, so this is a real one; it just has
+		 * nothing to run yet, which is a better answer than refusing to make one.
+		 */
+		if (kind == EMPTY) {
+			try {
+				mkdirs(path + '/scripts');
+			} catch (e:haxe.Exception) {
+				return null;
+			}
+
+			return read(name, path);
+		}
+
 		if (!copyTemplate(kind, path))
 			return null;
 
 		return read(name, path);
 	}
+
+	/** The template name meaning "no template", offered when the build ships none. */
+	public static inline var EMPTY:String = 'empty';
 
 	/** Names of the templates this build ships. */
 	public static function templates():Array<String> {
@@ -200,12 +330,6 @@ class Projects {
 
 		found.sort(function(a:String, b:String):Int return a < b ? -1 : (a > b ? 1 : 0));
 		return found;
-	}
-
-	/** Writes every shipped template out as a project, for a folder that has just been created. */
-	static function seed():Void {
-		for (name in templates())
-			copyTemplate(name, '$root/$name');
 	}
 
 	/**
