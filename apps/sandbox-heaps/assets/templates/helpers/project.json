@@ -1,0 +1,6 @@
+{
+	"title": "Helpers",
+	"kind": "heaps",
+	"entry": "Helpers",
+	"description": "Axes and a floor grid drawn with h3d.scene.Graphics, around a turning cube lit by three oscillating point lights. After the Heaps sample of the same name. Graphics is the object to reach for when something has to be seen rather than shipped."
+}

@@ -1,0 +1,6 @@
+{
+	"title": "Shadows",
+	"kind": "heaps",
+	"entry": "Shadows",
+	"description": "Spheres on a floor under a directional light that circles the scene, so the shadows sweep with it. After the Heaps sample of the same name. The shadow map lives on the renderer rather than on the light, and its settings are the whole of the look."
+}

@@ -1,0 +1,6 @@
+{
+	"title": "Point lights",
+	"kind": "heaps",
+	"entry": "PointLights",
+	"description": "A field of white cubes lit by coloured point lights orbiting through it, with a slow directional fill. After the Heaps sample of the same name. What it shows is how much of a scene's look is the lights rather than the geometry."
+}
