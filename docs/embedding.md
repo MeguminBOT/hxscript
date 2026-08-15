@@ -194,6 +194,15 @@ Each disables one step, for a host that would rather do it itself or is minimisi
 | `-D hxscript_no_shims` | registering emulations for members with no runtime form |
 | `-D hxscript_no_native` | building HashLink's native module, which only a `-D hxscript_hl` build does |
 
+Those are all or nothing per step. **`-D hxscript_setup_skip=<name>` is the finer instrument**, and
+drops one library's wiring while leaving the rest: `-D hxscript_setup_skip=flixel-ui` for a build
+that has the library but no scripted UI.
+
+heaps ships as two records so this reaches half of it. `-D hxscript_setup_skip=heaps3d` keeps every
+`h2d` type, `h3d.Vector`, `h3d.Matrix` and `h3d.mat.Texture`, and drops the 3D scene graph: **eleven
+bridges become two, and the sandbox binary goes from 8.68 MB to 7.56 MB.** Worth having for a 2D
+project, and nothing to do for a 3D one, which is why it is off by default rather than on.
+
 ## Metadata
 
 | Mark | Goes on | Effect |

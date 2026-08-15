@@ -63,6 +63,13 @@ that names it.
   and flixel whose projects are folders of `.hx` files read at runtime.
 - **Per-library shim packages**: `hxscript.stdlib`, `hxscript.flixel`, `hxscript.openfl` and
   `hxscript.python` hold the closures standing in for members a target cannot reflect on.
+- **heaps ships as two presets, so a 2D project can stop paying for the scene graph.** `heaps` is
+  the 2D half and `heaps3d` the 3D one; both arrive with `-lib heaps` and nothing changes by
+  default. `-D hxscript_setup_skip=heaps3d` drops the second: eleven bridges become two, and the
+  sandbox binary goes from 8.68 MB to 7.56 MB. `h3d.Vector`, `h3d.Matrix` and `h3d.mat.Texture` stay
+  in the 2D half, because `h2d.Drawable` and `h2d.Tile` name them. A `Library` record can now say
+  `requires` where the define that switches it on is not its own name, which is what lets a preset
+  describe half of a library.
 - **A constructor call short in the middle is placed by type, the way Haxe places it.**
   `new Mesh(prim, parent)` against `(primitive, ?material, ?parent)` means the first parameter and
   the last, and binding it in order put the parent in the material and failed on a cast naming two
