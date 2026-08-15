@@ -4,6 +4,7 @@
 #   ./build.sh                 build it
 #   ./build.sh run             build, then launch it
 #   ./build.sh bundle          build, then assemble a folder that runs on a machine without HashLink
+#   ./build.sh --with-tests    including the conformance projects, which test/all.sh drives
 #   ./build.sh --no-jit        without the loader, which is the build an arm64 target gets
 #   ./build.sh --debug         debug build
 #   ./build.sh --clean         wipe the build output first
@@ -36,16 +37,18 @@ clean="no"
 launch="no"
 bundle="no"
 jit="yes"
+tests="no"
 
 for arg in "$@"; do
 	case "$arg" in
 		run) launch="yes" ;;
 		bundle) bundle="yes" ;;
 		--no-jit) jit="no" ;;
+		--with-tests) tests="yes" ;;
 		--debug|-debug) mode="debug" ;;
 		--clean|-clean) clean="yes" ;;
 		--help|-h)
-			sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+			sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 			exit 0
 			;;
 		*)
@@ -169,12 +172,21 @@ sh "$lib_path/src/hxscript/hl/native/build.sh" "${native_flags[@]}"
 # deleted from a template stayed in the build output forever. One did, and it declared a second
 # class that won a name over the template's own. That reads as the library resolving a type
 # wrongly across modules, and it cost a rebuild at an older commit to find that it was not.
-rm -rf export/hlc/assets/templates
+rm -rf export/hlc/assets/templates export/hlc/assets/res export/hlc/assets/conformance
 mkdir -p export/hlc/assets
 cp -r assets/templates export/hlc/assets/
+cp -r assets/res export/hlc/assets/
+
+# The conformance projects are fixtures rather than examples: `conform` has no window to draw in and
+# `heaps3d` and `widgets` carry a `SelfTest` naming cases for `--conform` to run. Shipping them put
+# three test harnesses in the example list of every build, so they are copied only when asked for.
+if [ "$tests" = "yes" ]; then
+	cp -r test/projects export/hlc/assets/conformance
+fi
 runtime_into export/hlc
 
 echo "Built export/hlc/Sandbox.exe"
+[ "$tests" = "yes" ] && echo "  with the conformance projects, so test/all.sh can drive them"
 [ "$jit" = "no" ] && echo "  without the loader, so every script will be interpreted"
 
 out="export/hlc"
@@ -196,6 +208,7 @@ if [ "$bundle" = "yes" ]; then
 	esac
 
 	cp -r assets/templates "$dest/assets/"
+	cp -r assets/res "$dest/assets/"
 	runtime_into "$dest"
 
 	echo "Bundled into $dest"

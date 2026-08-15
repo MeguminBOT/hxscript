@@ -12,18 +12,23 @@ import hxd.Key;
 /**
  * A heaps 3D project, built into the scene rather than being part of it.
  *
- * **A 2D project becomes an `h2d.Object`; a 3D one cannot become an `h3d.scene.Object`, and the
- * reason is worth knowing.** Extending a compiled class goes through a generated bridge, and a
- * bridge re-emits the constructor it extends. `h3d.scene.Object` inlines an abstract's constructor,
- * which assigns to `this`, and that has no meaning anywhere but inside the abstract. So the library
- * refuses to bridge it rather than generating something that would not compile.
+ * **Which of the two a project is, is a choice rather than a limit.** `h3d.scene.Object` is bridged,
+ * so a script may extend it and be in the graph; `SelfTest` has three that do. This one is written
+ * the other way because most 3D projects are: what a project owns is a world of its own objects, and
+ * being one of them buys it nothing.
  *
- * Nothing else is lost. `world()` hands over the scene, everything below is heaps' own class, and
- * what is added is drawn because it is in the graph. The launcher empties the scene when the run
- * ends, so nothing here has to clean up after itself.
+ * So `world()` hands over the scene, everything below is heaps' own class, and what is added is
+ * drawn because it is in the graph. The launcher empties the scene when the run ends, so nothing
+ * here has to clean up after itself.
  */
 class World extends host.Project {
 	static inline var RING:Int = 12;
+
+	/** How far out the scene reaches from the middle: the floor's half-width, which is the widest of it. */
+	static inline var REACH:Float = 8;
+
+	/** The lens, in degrees. Wider than heaps' own 25, which is narrow enough to read as a zoom. */
+	static inline var FOV:Float = 45;
 
 	var spinners:Array<Spinner> = [];
 	var pivot:Object;
@@ -46,7 +51,7 @@ class World extends host.Project {
 			spinners.push(new Spinner(pivot, i, Math.cos(at) * 6, Math.sin(at) * 6));
 		}
 
-		var floor:Mesh = new Mesh(new Cube(14, 14, 0.4, true), root);
+		var floor:Mesh = new Mesh(lit(new Cube(14, 14, 0.4, true), true), root);
 		floor.z = -2;
 		floor.material.color.setColor(0x1E1E28);
 
@@ -56,6 +61,42 @@ class World extends host.Project {
 		var lamp:PointLight = new PointLight(root);
 		lamp.color.setColor(0x4466FF);
 		lamp.setPosition(0, 0, 5);
+
+		frame();
+	}
+
+	/**
+	 * Points the camera at what this built.
+	 *
+	 * **A 3D project has to do this and a 2D one never does**, which is the easiest thing to leave
+	 * out. `h3d.Camera` starts at `(2, 3, 4)` looking at the origin through a 25 degree lens, and
+	 * this scene is fourteen units across with a ring of shapes orbiting at six, so the default
+	 * leaves the camera standing inside that ring: something renders, and none of it is what you
+	 * meant to look at.
+	 *
+	 * The distance is worked out rather than guessed. Half of what has to fit is `REACH`, and a lens
+	 * of `fovY` degrees covers that at `REACH / tan(fovY / 2)`, so widening the lens and moving in
+	 * are the same decision made twice. Heaps is z-up, so the camera is pulled back along -y and
+	 * lifted along +z rather than the other way round.
+	 */
+	function frame():Void {
+		var scene:h3d.scene.Scene = world();
+
+		/**
+		 * `world()` answers null where nothing turned a 3D scene on, which is any run without a
+		 * window. The objects above are fine without one, since an object with no parent is still an
+		 * object, and a camera is not: there is nothing to point.
+		 */
+		if (scene == null) {
+			return;
+		}
+
+		var view:h3d.Camera = scene.camera;
+		var away:Float = REACH / Math.tan((FOV * 0.5) * Math.PI / 180);
+
+		view.fovY = FOV;
+		view.pos.set(0, -away * 0.85, away * 0.5);
+		view.target.set(0, 0, 0);
 	}
 
 	/**
@@ -90,9 +131,35 @@ class World extends host.Project {
 		}
 	}
 
-	/** @return How many objects this put in the scene, for the self test. */
+	/** @return How many objects this put in the scene, both levels of it, for the self test. */
 	public function pieces():Int {
-		return root == null ? 0 : root.numChildren;
+		return root == null ? 0 : root.numChildren + pivot.numChildren;
+	}
+
+	/**
+	 * A primitive carrying the normals a lit material needs.
+	 *
+	 * **heaps builds `Cube` and `Sphere` out of positions and indices and nothing else.** A material
+	 * with a light on it wants a normal per vertex, so a mesh made straight from either constructor
+	 * draws nothing and ends the frame with `Missing buffer input 'normal'`. `Sphere` looks like it
+	 * handles this and does not: it overrides `addNormals`, but only its static `defaultUnitSphere`
+	 * ever calls it. `Cylinder` hands its own normals up to `Quads` and needs none of this.
+	 *
+	 * `flat` unindexes first, which is what a cube wants. A normal belongs to a face there rather
+	 * than to a corner, and an indexed cube shares each corner between three faces, so normals
+	 * averaged across them light it as though it were round.
+	 *
+	 * @param prim The primitive to prepare.
+	 * @param flat Whether its faces should be lit flat rather than smoothed across shared corners.
+	 * @return The same primitive, ready to draw.
+	 */
+	public static function lit(prim:h3d.prim.Polygon, flat:Bool = false):h3d.prim.Polygon {
+		if (flat) {
+			prim.unindex();
+		}
+
+		prim.addNormals();
+		return prim;
 	}
 }
 
@@ -128,11 +195,15 @@ class Spinner {
 		return body.z;
 	}
 
-	/** @param seed Which one it is. @return A primitive, so all three kinds are built. */
+	/**
+	 * @param seed Which one it is.
+	 * @return A primitive, so all three kinds are built, each lit the way its shape wants: the cube
+	 *         flat, the sphere smoothed, and the cylinder left alone because it brings its own.
+	 */
 	static function shapeFor(seed:Int):h3d.prim.Primitive {
 		return switch (seed % 3) {
-			case 0: new Cube(1.4, 1.4, 1.4, true);
-			case 1: new Sphere(0.9, 12, 10);
+			case 0: World.lit(new Cube(1.4, 1.4, 1.4, true), true);
+			case 1: World.lit(new Sphere(0.9, 12, 10));
 			case _: new Cylinder(10, 0.7, 1.6);
 		}
 	}

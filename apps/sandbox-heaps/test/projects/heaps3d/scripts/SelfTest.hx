@@ -18,8 +18,8 @@ import h3d.scene.Object;
 class SelfTest {
 	public static function cases():Array<String> {
 		return [
-			'vector', 'vectorMaths', 'matrix', 'quat', 'bounds', 'primitives', 'mesh', 'material', 'nested', 'moved',
-			'stepped', 'extended', 'extendedMoved', 'extendedOwn', 'extendedMesh', 'extendedLight'
+			'vector', 'vectorMaths', 'matrix', 'quat', 'bounds', 'primitives', 'normals', 'mesh', 'material', 'nested',
+			'moved', 'stepped', 'extended', 'extendedMoved', 'extendedOwn', 'extendedMesh', 'extendedLight'
 		];
 	}
 
@@ -73,6 +73,23 @@ class SelfTest {
 		return (cube != null) + ' ' + (sphere != null) + ' ' + (cylinder != null);
 	}
 
+	/**
+	 * The normals a lit material needs, which a primitive's constructor does not supply.
+	 *
+	 * **The one thing about 3D that a conformance pass cannot see.** Everything else here is a
+	 * question about reach, and this is a question about a buffer: a `Cube` or a `Sphere` built and
+	 * put in the scene is a perfectly good scene graph that draws nothing, and says so only once
+	 * there is a window, as `Missing buffer input 'normal'`. So it is asked of the primitive here,
+	 * where no window is needed to answer it.
+	 */
+	public static function normals():Dynamic {
+		var bare:Cube = new Cube(1, 1, 1, true);
+		var block:h3d.prim.Polygon = World.lit(new Cube(1, 1, 1, true), true);
+		var ball:h3d.prim.Polygon = World.lit(new h3d.prim.Sphere(1, 8, 6));
+
+		return 'bare ' + (bare.normals == null) + ' cube ' + (block.normals != null) + ' sphere ' + (ball.normals != null);
+	}
+
 	/** A mesh in a scene graph, which is the object a project spends its time on. */
 	public static function mesh():Dynamic {
 		var root:Object = new Object();
@@ -114,13 +131,16 @@ class SelfTest {
 	}
 
 	/**
-	 * The project's own frame loop, driven without a window.
+	 * The project's own scene, built and then driven, without a window.
 	 *
-	 * `start` is not called, because it builds into the 3D scene and a conformance pass has no
-	 * window to have one. What this drives is the part that would run every frame regardless.
+	 * `world()` answers null where nothing turned a scene on, and an object with no parent is an
+	 * object still, so `start` builds exactly the graph a run would and this drives it. That reaches
+	 * what a 3D project is made of and nothing here reaches twice: a mesh given a parent and no
+	 * material, two kinds of light, a material colour, and a transform written every frame.
 	 */
 	public static function stepped():Dynamic {
 		var w:World = new World();
+		w.start();
 
 		for (i in 0...30) {
 			w.step(1 / 60);
@@ -198,10 +218,15 @@ class Marker extends Object {
 	}
 }
 
-/** A scripted `h3d.scene.Mesh`, two levels below the scene object. */
+/**
+ * A scripted `h3d.scene.Mesh`, two levels below the scene object.
+ *
+ * `super(prim, parent)` leaves the material out, which is the middle parameter rather than the last
+ * one, so this is also the bridge's own version of what `mesh` asks of the base class.
+ */
 class Blob extends Mesh {
 	public function new(prim:h3d.prim.Primitive, ?parent:Object) {
-		super(prim, null, parent);
+		super(prim, parent);
 	}
 }
 

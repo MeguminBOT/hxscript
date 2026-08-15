@@ -174,15 +174,42 @@ started. So the app owns the `App` and hands the same lifecycle down. `h2d`, `h3
 When more than one class qualifies, the order is: `entry` in `project.json`, then a class marked
 `public static var entry:Bool = true`, then scene, object, `host.Project`, `main`.
 
-### The two that ship
+### The examples that ship
 
-`projects/` is created beside the executable on first run and seeded with these, so a fresh build has
-something that runs in it before you have written anything.
+**Two lists, and they are kept apart.** The examples below are read where they lie, inside the
+application folder, and `projects/` holds only what you put there. So `projects/` starts empty:
+**Duplicate to my projects** copies an example into it, and from then on that copy is yours and a
+new build cannot write over it.
 
 | | |
 | --- | --- |
 | `heaps` | a scripted `h2d.Object` with forty drifting squares, plus a scripted enum and a scripted abstract with an operator |
-| `plain` | a `static main()`: no framework at all, printing what a script can reach |
+| `base2d` | a ring of additively blended sprites turning around a centre, with text over it, and a tile loaded through `hxd.Res` |
+| `base3d` | a textured cube and a plain one above it, lit and circled by the camera: `unindex`, `addNormals` and `addUVs` in one place |
+| `pointlight` | white cubes lit entirely by coloured point lights moving through them |
+| `helpers` | axes and a floor grid drawn with `h3d.scene.Graphics`, around a turning cube |
+| `lights` | a field of cubes and orbiting spheres under a directional light and two point lights, each switchable |
+| `shadows` | spheres on a floor under a light that circles, dragging the shadows with it |
+| `gpuparticles` | ten thousand particles as one description rather than ten thousand objects, with their bounds drawn |
+
+The last six are after the Heaps samples of the same names, adapted to this app's lifecycle. Heaps is
+MIT licensed, © 2013 Nicolas Cannasse.
+
+### The conformance projects, which do not ship
+
+`conform`, `heaps3d`, `widgets` and `plain` live in `test/projects/` and are fixtures rather than
+examples: `conform` has no window to draw in, `plain` prints a report, and each of the first three
+declares a `SelfTest` naming cases. `Sandbox.exe --conform <name>` runs those cases interpreted and
+again compiled and compares the two, which is what `sh test/all.sh` ends by doing.
+
+An ordinary build leaves them out, so nobody opening the app finds three test harnesses in the
+example list. Build with them when you mean to run the suite:
+
+```
+./build.sh --with-tests
+```
+
+Without that, the host part of `test/all.sh` reports itself skipped and says so.
 
 ### If a project behaves differently once it is compiled
 
@@ -194,7 +221,7 @@ else.
 > JIT is turned on, so there the two are worth separating. HashLink jits whatever it loads, so
 > bytecode here is already machine code and a third setting would be a control that did nothing.
 
-### All three templates compile, and the log says so
+### Every template compiles, and the log says so
 
 Every shipped template is taken by the compiler in full. That was not always true: HashLink used to
 model no `extends` at all, so a class with a base was compiled as if it had none and `super` had

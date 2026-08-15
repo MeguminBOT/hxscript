@@ -4,6 +4,7 @@ rem
 rem   build.bat                 build it
 rem   build.bat run             build, then launch it
 rem   build.bat bundle          build, then assemble a folder that runs on a machine without HashLink
+rem   build.bat --with-tests    including the conformance projects, which test/all.sh drives
 rem   build.bat --no-jit        without the loader, which is the build an arm64 target gets
 rem   build.bat --debug         debug build
 rem   build.bat --clean         wipe the build output first
@@ -30,11 +31,13 @@ set "CLEAN=0"
 set "LAUNCH=0"
 set "BUNDLE=0"
 set "JIT=1"
+set "TESTS=0"
 
 :args
 if "%~1"=="" goto args_done
 if /i "%~1"=="run" ( set "LAUNCH=1" & shift & goto args )
 if /i "%~1"=="bundle" ( set "BUNDLE=1" & shift & goto args )
+if /i "%~1"=="--with-tests" ( set "TESTS=1" & shift & goto args )
 if /i "%~1"=="--no-jit" ( set "JIT=0" & shift & goto args )
 if /i "%~1"=="--debug" ( set "MODE=debug" & shift & goto args )
 if /i "%~1"=="--clean" ( set "CLEAN=1" & shift & goto args )
@@ -111,7 +114,13 @@ if errorlevel 1 exit /b 1
 rem The templates are read from disk beside the executable rather than embedded, so the folder has
 rem to be there for projects\ to be seeded on a first run.
 if not exist "export\hlc\assets" mkdir "export\hlc\assets"
+if exist "export\hlc\assets\conformance" rmdir /s /q "export\hlc\assets\conformance"
 xcopy /e /i /y /q "assets\templates" "export\hlc\assets\templates" >nul
+xcopy /e /i /y /q "assets\res" "export\hlc\assets\res" >nul
+
+rem The conformance projects are fixtures rather than examples, so they are copied only when asked
+rem for. Without this every build shows three test harnesses in its example list.
+if "%TESTS%"=="1" xcopy /e /i /y /q "test\projects" "export\hlc\assets\conformance" >nul
 call :runtime "export\hlc"
 
 echo Built export\hlc\Sandbox.exe
@@ -131,6 +140,7 @@ if "%BUNDLE%"=="1" (
 	copy /y "export\hlc\Sandbox.exe" "bundle\Sandbox.exe" >nul
 
 	xcopy /e /i /y /q "assets\templates" "bundle\assets\templates" >nul
+	xcopy /e /i /y /q "assets\res" "bundle\assets\res" >nul
 	call :runtime "bundle"
 
 	echo Bundled bundle\ - copy it anywhere and run the executable in it

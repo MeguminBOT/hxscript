@@ -5,6 +5,9 @@
 #   sh test/all.sh --quick          skip the cross-target matrix, which is most of the time
 #   sh test/all.sh --no-sandbox     skip the heaps app, which needs HashLink and a checkout
 #
+# The host suite drives the sandbox's conformance projects, which an ordinary build of that app does
+# not carry: build it with `./build.sh --with-tests` or this part reports itself skipped.
+#
 # There are three suites and they answer three different questions, which is why one command that
 # only ran one of them was never enough:
 #
@@ -92,7 +95,13 @@ if [ "$SANDBOX" = "1" ]; then
 
 	if [ ! -x "$app" ]; then
 		note "host" "skipped, no build at apps/sandbox-heaps/export/hlc"
-		echo "  build it with: cd apps/sandbox-heaps && ./build.sh"
+		echo "  build it with: cd apps/sandbox-heaps && ./build.sh --with-tests"
+	elif [ ! -d "$ROOT/apps/sandbox-heaps/export/hlc/assets/conformance" ]; then
+		# The conformance projects are fixtures rather than shipped examples, so an ordinary build
+		# leaves them out. Said plainly here, because "did not report" three times reads as the app
+		# being broken rather than as the build not carrying what this drives.
+		note "host" "skipped, built without the conformance projects"
+		echo "  rebuild with: cd apps/sandbox-heaps && ./build.sh --with-tests"
 	else
 		for project in conform widgets heaps3d; do
 			line=$(cd "$(dirname "$app")" && ./Sandbox.exe --conform "$project" 2>/dev/null | grep -E '^== ' || true)

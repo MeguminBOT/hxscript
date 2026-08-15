@@ -41,13 +41,11 @@ class Conform {
 	public static function run(name:String):Void {
 		Sink.listen(function(d:Diagnostic):Void say('  ' + d.toString().split('\n').join('\n  ')));
 
-		var project:ProjectInfo = null;
-		for (candidate in Projects.all())
-			if (candidate.name == name)
-				project = candidate;
+		/** The examples too, since every case this runs lives in one of them. */
+		var project:ProjectInfo = Projects.find(name);
 
 		if (project == null) {
-			say('no project named "$name" in ' + Projects.root);
+			say('no project or example named "$name"');
 			Sys.exit(2);
 		}
 
