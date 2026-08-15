@@ -10,7 +10,7 @@ None. Every case with a written answer produced it in every column that ran it.
 
 ## Compiled against interpreted, per target
 
-**hl-bytecode** against `hl-interp`: 314 agree, **0 differ**, 9 refused, 0 fell back to the interpreter, 0 killed the process.
+**hl-bytecode** against `hl-interp`: 323 agree, **0 differ**, 0 refused, 0 fell back to the interpreter, 0 killed the process.
 
 **hxcpp-cppia** against `hxcpp-interp`: 309 agree, **0 differ**, 14 refused, 0 fell back to the interpreter, 0 killed the process.
 
@@ -52,7 +52,7 @@ rather than correctness. **Bold** marks a part where something is actually wrong
 | arguments | 6 | 6/6 | 6/6 | 6/6 | 6/6 | 6/6 | 6/6 |
 | reflection | 14 | 14/14 | 14/14 | 14/14 | 14/14 | 14/14 | 14/14 |
 | refusals | 25 | 25/25 | 25/25 | 25/25 | 25/25 | 25/25 | 25/25 |
-| host | 30 | **29/30** | 30/30 | 30/30 +14r | 30/30 +14r | 30/30 | 30/30 +9r |
+| host | 30 | **29/30** | 30/30 | 30/30 +14r | 30/30 +14r | 30/30 | 30/30 |
 
 ## Where the interpreter itself reads differently per target
 
@@ -331,15 +331,15 @@ rather than correctness. **Bold** marks a part where something is actually wrong
 | 260 | rest arguments | 6 | 6 | 6 | 6 | 6 | 6 |
 | 261 | a static extension on an unknown receiver | abab | abab | abab | abab | abab | abab |
 | 262 | a typed catch on a scripted class | caught | caught | caught | caught | caught | caught |
-| 263 | a host abstract constructed | 3:4 | 3:4 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 3:4 | refused: new HostVec, which is an abstract the host compiled and whose forwa... |
-| 264 | a host abstract property | 5 | 5 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 5 | refused: new HostVec, which is an abstract the host compiled and whose forwa... |
-| 265 | a host abstract field | 7 | 7 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 7 | refused: new HostVec, which is an abstract the host compiled and whose forwa... |
-| 266 | a host abstract operator | 4:6 | 4:6 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 4:6 | refused: new HostVec, which is an abstract the host compiled and whose forwa... |
-| 267 | a host abstract in an array | 2:2 | 2:2 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 2:2 | refused: new HostVec, which is an abstract the host compiled and whose forwa... |
-| 268 | an abstract operator on a parameter | 2:4 | 2:4 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 2:4 | refused: new HostVec, which is an abstract the host compiled and whose forwa... |
-| 269 | an abstract method taking its own abstract | 2:4 | 2:4 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 2:4 | refused: new HostVec, which is an abstract the host compiled and whose forwa... |
-| 270 | a field of an abstract bound as a parameter | 3 | 3 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 3 | refused: new HostVec, which is an abstract the host compiled and whose forwa... |
-| 271 | an abstract returned through a declared return type | 2:5 | 2:5 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 2:5 | refused: new HostVec, which is an abstract the host compiled and whose forwa... |
+| 263 | a host abstract constructed | 3:4 | 3:4 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 3:4 | 3:4 |
+| 264 | a host abstract property | 5 | 5 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 5 | 5 |
+| 265 | a host abstract field | 7 | 7 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 7 | 7 |
+| 266 | a host abstract operator | 4:6 | 4:6 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 4:6 | 4:6 |
+| 267 | a host abstract in an array | 2:2 | 2:2 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 2:2 | 2:2 |
+| 268 | an abstract operator on a parameter | 2:4 | 2:4 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 2:4 | 2:4 |
+| 269 | an abstract method taking its own abstract | 2:4 | 2:4 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 2:4 | 2:4 |
+| 270 | a field of an abstract bound as a parameter | 3 | 3 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 3 | 3 |
+| 271 | an abstract returned through a declared return type | 2:5 | 2:5 | refused: new HostVec, which is an abstract the host compiled and so has no c... | refused: new HostVec, which is an abstract the host compiled and so has no c... | 2:5 | 2:5 |
 | 272 | an own method called from a closure | 2 | 2 | 2 | 2 | 2 | 2 |
 | 273 | an own field read from a closure | 7 | 7 | 7 | 7 | 7 | 7 |
 | 274 | an enum abstract constructor, bare | 1 | 1 | refused: unresolved identifier Add | refused: unresolved identifier Add | 1 | 1 |

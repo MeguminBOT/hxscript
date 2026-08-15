@@ -554,7 +554,7 @@ class Abstract {
 									name: arg.name,
 									meta: arg.meta
 								});
-								stuff.push(macro $p{[arg.name]});
+								stuff.push(macro hxscript.types.AbstractTools.underlying($p{[arg.name]}));
 							}
 
 							var setterExpr = null;
@@ -727,6 +727,111 @@ class Abstract {
 			access: [APublic, AStatic],
 			kind: FVar(macro :Array<String>, macro $v{forwards})
 		});
+
+		switch (Context.follow(ab.type)) {
+			case TInst(ref, _):
+				var underlyingCT = Context.toComplexType(ab.type);
+				var taken:Map<String, Bool> = new Map();
+
+				for (existing in cls.fields)
+					taken.set(existing.name, true);
+
+				for (f in ref.get().fields.get()) {
+					if (!f.isPublic || taken.exists(f.name))
+						continue;
+					if (!forwardAll && !forwards.contains(f.name))
+						continue;
+
+					switch (f.kind) {
+						case FVar(read, write):
+							if (read == AccNever || read == AccInline)
+								continue;
+
+							var writable = (write == AccNormal || write == AccCall);
+							taken.set(f.name, true);
+
+							cls.fields.push({
+								name: f.name,
+								pos: pos,
+								access: [APublic],
+								kind: FProp('get', writable ? 'set' : 'never', macro :Dynamic)
+							});
+							cls.fields.push({
+								name: 'get_' + f.name,
+								pos: pos,
+								access: [APrivate],
+								kind: FFun({
+									args: [],
+									expr: macro {
+										var held:$underlyingCT = cast __a;
+										return $p{['held', f.name]};
+									},
+									ret: macro :Dynamic
+								})
+							});
+
+							if (writable)
+								cls.fields.push({
+									name: 'set_' + f.name,
+									pos: pos,
+									access: [APrivate],
+									kind: FFun({
+										args: [{name: 'v', type: macro :Dynamic}],
+										expr: macro {
+											var held:$underlyingCT = cast __a;
+											return $p{['held', f.name]} = v;
+										},
+										ret: macro :Dynamic
+									})
+								});
+
+						case FMethod(_):
+							/**
+							 * A method arrives as a closure the caller then applies, rather than as a
+							 * method of matching arity.
+							 *
+							 * Its arity is only in its signature, and asking for that is what cannot be
+							 * done from here: a member's type arrives lazy, and resolving one mid-build
+							 * makes the compiler complete the abstract it is already building, which
+							 * heaps reports as `h3d.Vector does not have a constructor` for each of its
+							 * own that forwards to a same-module implementation. Reading the name and
+							 * the kind forces nothing, so this uses only those and lets the arity be
+							 * whatever the call supplies.
+							 */
+							var named:String = f.name;
+
+							taken.set(f.name, true);
+
+							cls.fields.push({
+								name: f.name,
+								pos: pos,
+								access: [APublic],
+								kind: FProp('get', 'never', macro :Dynamic)
+							});
+							cls.fields.push({
+								name: 'get_' + f.name,
+								pos: pos,
+								access: [APrivate],
+								kind: FFun({
+									args: [],
+									expr: macro {
+										var held:$underlyingCT = cast __a;
+										return Reflect.makeVarArgs(function(given:Array<Dynamic>):Dynamic {
+											var passed:Array<Dynamic> = [];
+
+											for (one in given)
+												passed.push(hxscript.types.AbstractTools.underlying(one));
+
+											return Reflect.callMethod(held, Reflect.field(held, $v{named}), passed);
+										});
+									},
+									ret: macro :Dynamic
+								})
+							});
+					}
+				}
+			case _:
+		}
 
 		var opEntries:Array<Expr> = [];
 		for (op => m in opMap)
