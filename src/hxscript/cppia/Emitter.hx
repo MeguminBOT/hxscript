@@ -952,7 +952,20 @@ class Emitter {
 
 		w.pos(pos == null ? 0 : pos.line);
 		w.token('FUN');
-		w.type(ret == null ? '' : typeName(ret));
+
+		/**
+		 * A `Bool` return is written as untyped here, the way the `FUNCTION` above it already writes
+		 * one, because the two have to agree about the same method and they did not.
+		 *
+		 * The declaration says a `Bool`-returning method returns nothing in particular, and the body
+		 * said it returns a native boolean. What the body actually produces is neither: `RETVAL`
+		 * writes its value untyped and boxes it, since cppia has no boolean of its own and an
+		 * unboxed one is an integer. So the header was the only party claiming a native bool, and a
+		 * caller that believed it read the integer 1 as an object and dereferenced it. That is a
+		 * segmentation fault inside a virtual call, with no Haxe frame to catch it and nothing
+		 * written down.
+		 */
+		w.type(ret == null || Backend.isBool(ret) ? '' : typeName(ret));
 		w.int(args.length);
 
 		for (a in args) {
