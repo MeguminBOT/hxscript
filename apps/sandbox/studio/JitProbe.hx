@@ -80,6 +80,13 @@ class JitProbe {
 		var interpreted:Bool = Sys.args().indexOf('--interp') >= 0;
 
 		#if hxscript_cppia
+		/**
+		 * `--echo Class.method` prints the instructions emitted for one method. A fault in bytecode
+		 * leaves nothing behind, so once a batch has been narrowed to the module carrying it, reading
+		 * what was written for it is the only way left to see what is wrong with it.
+		 */
+		hxscript.cppia.Backend.echoTarget = argument('--echo');
+
 		if (!interpreted) {
 			var jit:Bool = Sys.args().indexOf('--nojit') < 0;
 			hxscript.compile.Compiler.jit = jit;
@@ -93,6 +100,11 @@ class JitProbe {
 			say('SURVIVED  compiled ${report.compiled.length}, skipped ${report.skipped.length}, '
 				+ 'failed ${report.failed.length}, ${report.bytes} bytes, '
 				+ Math.round(report.ms * 10) / 10 + 'ms');
+
+			if (hxscript.cppia.Backend.echoTarget != null) {
+				say('--- ' + hxscript.cppia.Backend.echoTarget + ' ---');
+				say(hxscript.cppia.Backend.echoed == null ? '(nothing emitted for it)' : hxscript.cppia.Backend.echoed);
+			}
 
 			for (skip in report.skipped)
 				say('  skipped ' + skip);
@@ -108,6 +120,86 @@ class JitProbe {
 		var call:String = argument('--call');
 		if (call != null)
 			invoke(call);
+
+		var made:String = argument('--make');
+		if (made != null)
+			construct(made);
+	}
+
+	/**
+	 * Constructs a scripted class, which is what a project's entry gets before anything renders.
+	 *
+	 * `--call` only reaches a static, and a project usually starts by being built rather than called:
+	 * a flixel state is constructed and handed to `switchState`. So a fault while constructing one is
+	 * reachable with no window, and that is the half worth reaching, because a fault in emitted
+	 * bytecode ends the process rather than reporting anything.
+	 *
+	 * @param name The class, by its short name or its path.
+	 */
+	static function construct(name:String):Void {
+		var cls:hxscript.types.ScriptedClass = null;
+
+		for (candidate in Sandbox.classes())
+			if (candidate.name == name || candidate.path == name)
+				cls = candidate;
+
+		if (cls == null) {
+			say('no class named $name');
+			return;
+		}
+
+		say('--- constructing $name ---');
+
+		var made:Dynamic = Sandbox.make(cls);
+
+		say(made == null ? '--- $name did not construct ---' : '--- $name constructed ---');
+
+		if (made == null)
+			return;
+
+		/**
+		 * Then the two a frame loop would call. Constructing a state proved clean while running the
+		 * project did not, so what is left is what flixel does next, and reaching it here rather than
+		 * through a window is what makes the fault bisectable.
+		 */
+		var ticks:Int = Std.parseInt(argument('--tick') == null ? '0' : argument('--tick'));
+
+		if (ticks <= 0)
+			return;
+
+		step(made, 'create', []);
+
+		for (i in 0...ticks)
+			step(made, 'update', [0.016]);
+
+		say('--- ticked $ticks time(s) ---');
+	}
+
+	/**
+	 * Calls one method on a scripted instance, saying so before it runs.
+	 *
+	 * Said before rather than after on purpose: a fault in emitted bytecode ends the process, so the
+	 * last line printed is the only evidence of where it was.
+	 *
+	 * @param on The instance.
+	 * @param name The method.
+	 * @param args What to pass.
+	 */
+	static function step(on:Dynamic, name:String, args:Array<Dynamic>):Void {
+		var fn:Dynamic = Reflect.field(on, name);
+
+		if (!Reflect.isFunction(fn)) {
+			say('  (no $name)');
+			return;
+		}
+
+		say('  calling $name ...');
+
+		try {
+			Reflect.callMethod(on, fn, args);
+		} catch (e:Dynamic) {
+			say('  $name THREW ' + Std.string(e));
+		}
 	}
 
 	/**
