@@ -1144,6 +1144,21 @@ class Runtime {
 			return (type : hxscript.types.ScriptedAbstract).create((args : Array<Dynamic>));
 
 		/**
+		 * A class another module compiled is built the way that module builds it.
+		 *
+		 * A scripted class has two shapes: the layout an emitted module holds, and `ScriptedObject`.
+		 * A module builds its own with `ONew` and the interpreter substitutes in `Interp.cnew`; this
+		 * asked the scripted class and got the other shape, so anything declared as that class refused
+		 * it. Keyed through the table `isOfType` answers from, so `new` and `is` cannot drift apart.
+		 */
+		if (type is ScriptedClass) {
+			var stood:Null<Replacement> = replacements.get(cast(type, ScriptedClass).path);
+
+			if (stood != null && stood.value != null)
+				return Type.createInstance(stood.value, (args : Array<Dynamic>));
+		}
+
+		/**
 		 * The same question the interpreter asks, through the same helper. An abstract the host
 		 * compiled keeps its constructor as a static on its implementation class, and building the
 		 * wrapper directly boxes the first argument instead: compiled code threw `Can't cast Int to
