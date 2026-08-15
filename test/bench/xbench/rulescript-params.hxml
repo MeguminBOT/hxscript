@@ -10,7 +10,11 @@
 
 --macro addMetadata('@:build(rulescript.macro.ExprMacro.buildInterpDefaults())', 'hscript.Interp')
 
---macro addMetadata('@:build(rulescript.macro.ExprMacro.buildToolsDefaults())', 'hscript.Ast')
+# `hscript.Tools`, which is what RuleScript's own extraParams.hxml names and what both hscript
+# checkouts actually declare. Naming `hscript.Ast` here put the build metadata on a type that does
+# not exist, so `Tools` never got the cases generated for RuleScript's added constructors and the
+# build failed with `Unmatched patterns: EImport | EPackage | EProp | EUsing`.
+--macro addMetadata('@:build(rulescript.macro.ExprMacro.buildToolsDefaults())', 'hscript.Tools')
 
 --macro addMetadata('@:build(rulescript.macro.ExprMacro.buildPrinterDefaults())', 'hscript.Printer')
 
