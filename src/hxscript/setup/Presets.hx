@@ -24,7 +24,18 @@ class Presets {
 			'haxe.io.BytesOutput',
 			'haxe.io.BytesInput'
 		],
-		bases: [],
+		bases: [
+			'h2d.Object',
+			'h3d.scene.Object',
+			'h3d.scene.Mesh',
+			'h3d.scene.Graphics',
+			'h3d.scene.Box',
+			'h3d.scene.Sphere',
+			'h3d.scene.Interactive',
+			'h3d.scene.CameraController',
+			'h3d.scene.fwd.DirLight',
+			'h3d.scene.fwd.PointLight'
+		],
 		abstractPackages: [],
 		abstracts: [],
 		abstractExclude: [],
@@ -258,31 +269,30 @@ class Presets {
 			'h3d.col.Bounds'
 		],
 		/**
-		 * `h3d.scene.Object` is deliberately not here, and putting it here is answered rather than
-		 * left to fail: the build stops with the reason and the remedy, which was checked by doing it.
+		 * The 3D scene graph is bridgeable because a base no longer has to be rebuilt to be extended.
 		 *
-		 * A bridge re-emits the constructor of the class it extends rather than calling it, because a
-		 * scripted subclass calls `super` from interpreted code and Haxe cannot defer a real one. The
-		 * reason given is that this constructor inlines an abstract's constructor, and there are two
-		 * layers to that, only the first of which is what it sounds like.
+		 * A bridge used to copy the constructor of the class it extends, by turning the compiler's own
+		 * output back into source, and this branch does not survive that: `ObjectFlags` is an abstract
+		 * whose methods mutate `this`, so every flag property becomes arithmetic on the underlying `Int`
+		 * against a field typed as the abstract, which no source may write.
 		 *
-		 * The first is `flags = new ObjectFlags(0x8000)`, which inlines to a local literally named
-		 * `this`. That one is separable and foldable: the real `this` is `TConst(TThis)` and this is a
-		 * `TLocal`, so identity tells them apart before the body is turned back into source, after
-		 * which both are the same token. Folding it was written and measured and it works.
-		 *
-		 * The second is why that is not enough. `ObjectFlags` also has methods that mutate `this`
-		 * (`set` does `this |= f.toInt()`), and every flag property of this class goes through one, so
-		 * `posChanged = false` inlines to arithmetic on the underlying `Int` while the field is typed
-		 * as the abstract. Re-emitted as source that does not type: `ObjectFlags should be Int` and
-		 * `Int should be ObjectFlags`, both ways, once per flag. Making this base scriptable needs
-		 * inlined abstract arithmetic to survive a round trip through source, which is a real piece of
-		 * work and not a name that can be added here.
-		 *
-		 * Scripts reach 3D by building into the scene rather than by being part of it, which is what
-		 * `world()` is for.
+		 * Such a base is constructed by Haxe instead. The bridge gets a real constructor calling a real
+		 * `super`, and the instance is made through it, which means the base runs exactly as compiled and
+		 * nothing about it has to survive a round trip. Scripts can be part of the 3D scene rather than
+		 * only building into it.
 		 */
-		bases: ['h2d.Object'],
+		bases: [
+			'h2d.Object',
+			'h3d.scene.Object',
+			'h3d.scene.Mesh',
+			'h3d.scene.Graphics',
+			'h3d.scene.Box',
+			'h3d.scene.Sphere',
+			'h3d.scene.Interactive',
+			'h3d.scene.CameraController',
+			'h3d.scene.fwd.DirLight',
+			'h3d.scene.fwd.PointLight'
+		],
 		abstractPackages: [],
 		/**
 		 * `h2d.col.Point` is here because it is an `@:forward abstract` over `PointImpl`, so it has no

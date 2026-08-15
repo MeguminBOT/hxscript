@@ -19,7 +19,7 @@ class SelfTest {
 	public static function cases():Array<String> {
 		return [
 			'vector', 'vectorMaths', 'matrix', 'quat', 'bounds', 'primitives', 'mesh', 'material', 'nested', 'moved',
-			'stepped'
+			'stepped', 'extended', 'extendedMoved', 'extendedOwn', 'extendedMesh', 'extendedLight'
 		];
 	}
 
@@ -127,5 +127,94 @@ class SelfTest {
 		}
 
 		return 'pieces ' + w.pieces();
+	}
+
+	/** A scripted class that really is an `h3d.scene.Object`, which needs a bridge for the base. */
+	public static function extended():Dynamic {
+		var m:Marker = new Marker();
+		return 'made ' + (m != null) + ' visible ' + m.visible;
+	}
+
+	/** A field of the base, written and read back through the subclass. */
+	public static function extendedMoved():Dynamic {
+		var root:Object = new Object();
+		var m:Marker = new Marker(root);
+		m.x = 5;
+		m.y = 6;
+
+		var at:Vector = m.getAbsPos().getPosition();
+		return at.x + ',' + at.y + ' in ' + root.numChildren;
+	}
+
+	/** A subclass of `h3d.scene.Mesh`, which is two levels down the scene graph. */
+	public static function extendedMesh():Dynamic {
+		var root:Object = new Object();
+		var b:Blob = new Blob(new Cube(1, 1, 1, true), root);
+		b.z = 3;
+
+		return 'material ' + (b.material != null) + ' in ' + root.numChildren + ' at ' + b.getAbsPos().getPosition().z;
+	}
+
+	/** A subclass of a light, which is a different branch of the same graph. */
+	public static function extendedLight():Dynamic {
+		var root:Object = new Object();
+		var l:Lamp = new Lamp(root);
+
+		return 'lit ' + l.tally() + ' in ' + root.numChildren;
+	}
+
+	/** Its own field and method, beside the ones it inherited. */
+	public static function extendedOwn():Dynamic {
+		var m:Marker = new Marker();
+		m.bump();
+		m.bump();
+		return m.tag + ' ' + m.count();
+	}
+}
+
+/**
+ * A scripted class extending the 3D scene object.
+ *
+ * The base's constructor cannot be rebuilt from the compiler's own output, so Haxe constructs it
+ * instead: the bridge carries a real `super` call and the instance is made rather than allocated
+ * empty. What that buys is this: a script can be part of the scene graph rather than only building
+ * into it.
+ */
+class Marker extends Object {
+	public var tag:String = 'marker';
+
+	var bumps:Int = 0;
+
+	public function new(?parent:Object) {
+		super(parent);
+	}
+
+	public function bump():Void {
+		bumps++;
+	}
+
+	public function count():Int {
+		return bumps;
+	}
+}
+
+/** A scripted `h3d.scene.Mesh`, two levels below the scene object. */
+class Blob extends Mesh {
+	public function new(prim:h3d.prim.Primitive, ?parent:Object) {
+		super(prim, null, parent);
+	}
+}
+
+/** A scripted light, on another branch of the same graph. */
+class Lamp extends h3d.scene.fwd.PointLight {
+	var seen:Int = 0;
+
+	public function new(?parent:Object) {
+		super(parent);
+		seen = 1;
+	}
+
+	public function tally():Int {
+		return seen;
 	}
 }

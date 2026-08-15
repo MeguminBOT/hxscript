@@ -19,6 +19,76 @@ class ScriptedTools {
 	public static var wantsSlots:Bool = false;
 
 	/**
+	 * Finds the `super(...)` call a scripted constructor opens with.
+	 *
+	 * Only at the top level of the body, and only before anything that could touch the instance.
+	 * That is not a restriction this invents: Haxe forbids reaching `this` before `super`, so a
+	 * constructor whose `super` is anywhere else is one Haxe would not have compiled either.
+	 *
+	 * @param body The constructor's body.
+	 * @return The statements before it and the arguments it passes, or null when there is no `super`
+	 *         call to be found and the base must be constructed with none.
+	 */
+	public static function opensWithSuper(body:Expr):Null<{before:Array<Expr>, args:Array<Expr>}> {
+		var statements:Array<Expr> = switch (ExprTools.expr(body)) {
+			case EBlock(list): list;
+			case _: [body];
+		}
+
+		var before:Array<Expr> = [];
+
+		for (statement in statements) {
+			switch (ExprTools.expr(statement)) {
+				case ECall(callee, args):
+					switch (ExprTools.expr(callee)) {
+						case EIdent('super'):
+							return {before: before, args: args};
+						case _:
+					}
+
+				case _:
+			}
+
+			before.push(statement);
+		}
+
+		return null;
+	}
+
+	/**
+	 * @param body A constructor's body.
+	 * @return It without the `super(...)` call, for a base that has already been constructed.
+	 *
+	 * The call is dropped rather than made a no-op so that its arguments are evaluated once. They
+	 * were already evaluated to construct the base, and evaluating them again would run whatever
+	 * they do a second time.
+	 */
+	public static function withoutSuper(body:Expr):Expr {
+		var statements:Array<Expr> = switch (ExprTools.expr(body)) {
+			case EBlock(list): list;
+			case _: [body];
+		}
+
+		var kept:Array<Expr> = [];
+
+		for (statement in statements) {
+			var isSuper:Bool = switch (ExprTools.expr(statement)) {
+				case ECall(callee, _):
+					switch (ExprTools.expr(callee)) {
+						case EIdent('super'): true;
+						case _: false;
+					}
+				case _: false;
+			}
+
+			if (!isSuper)
+				kept.push(statement);
+		}
+
+		return ({e: EBlock(kept), pos: body.pos} : Expr);
+	}
+
+	/**
 	 * Lays an instance's variables out in the order its class holds them.
 	 *
 	 * The first instance of a class decides the order, which is the order the bridge bound the

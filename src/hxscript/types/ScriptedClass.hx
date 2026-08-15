@@ -551,9 +551,72 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 		if (hxscript.debug.Metrics.on)
 			hxscript.debug.Metrics.instances++;
 
+		/**
+		 * A base Haxe has to construct is constructed in two phases.
+		 *
+		 * Most bases are rebuilt: the bridge carries a copy of the base's constructor as an ordinary
+		 * method, so an empty instance can be allocated and that method run on it whenever the script
+		 * says `super(...)`. Some constructors cannot be rebuilt, and those bases get a real Haxe
+		 * constructor instead, which can only run as the instance is made.
+		 *
+		 * So the arguments have to be known first. The script's own `super(...)` arguments are
+		 * evaluated with its constructor's parameters bound and no instance in scope, which is legal
+		 * because Haxe forbids reaching `this` before `super` anyway; the instance is made with them;
+		 * and the rest of the script's constructor runs afterwards with the `super` call dropped, so
+		 * those arguments are evaluated once rather than twice.
+		 */
+		if (Reflect.field(instanceClass, '__nativeSuper') == true) {
+			var inst:IScriptedInstance = Type.createInstance(instanceClass, superArguments(arguments));
+			inst.__scriptConstruct(this, arguments);
+			return inst;
+		}
+
 		var inst:IScriptedInstance = Type.createEmptyInstance(instanceClass);
 		inst.__scriptConstruct(this, arguments);
 		return inst;
+	}
+
+	/**
+	 * Works out what to hand the base's real constructor.
+	 *
+	 * The script's constructor is read for the `super(...)` it opens with, and everything up to and
+	 * including that call's arguments is evaluated with the constructor's own parameters bound and
+	 * nothing else. There is no instance yet, and there cannot be: this is what decides how to make
+	 * one.
+	 *
+	 * @param arguments What the script's constructor was called with.
+	 * @return What the base's constructor should be called with.
+	 */
+	function superArguments(arguments:Array<Dynamic>):Array<Dynamic> {
+		var found:Null<FunctionDecl> = null;
+
+		for (field in decl.fields)
+			if (field.name == 'new')
+				switch (field.kind) {
+					case KFunction(fun): found = fun;
+					case _:
+				}
+
+		/**
+		 * A class declaring no constructor of its own, or one that never calls `super`, gets the base
+		 * built with no arguments. That is what Haxe does with an omitted `super()` too, and a base
+		 * whose constructor needs arguments will say so itself.
+		 */
+		if (found == null)
+			return [];
+
+		var opening:Null<{before:Array<Expr>, args:Array<Expr>}> = ScriptedTools.opensWithSuper(found.expr);
+		if (opening == null)
+			return [];
+
+		var body:Array<Expr> = opening.before.copy();
+		body.push(({e: EArrayDecl(opening.args), pos: found.expr.pos} : Expr));
+
+		var evaluate:Dynamic = interp.buildFunction('__superArguments', found.args, ({e: EBlock(body), pos: found.expr.pos} : Expr), null,
+			interp.locals);
+
+		var given:Dynamic = Reflect.callMethod(null, evaluate, arguments);
+		return (given is Array) ? (given : Array<Dynamic>) : [];
 	}
 
 	/**

@@ -168,6 +168,10 @@ class Scripted {
 
 		var constructorExpr:Expr = null;
 		var hasConstructor:Bool = false;
+
+		/** Set when the base must be constructed by Haxe rather than rebuilt, and with what arguments. */
+		var nativeSuper:Bool = false;
+		var nativeSuperArgs:Array<{name:String, opt:Bool, t:Type}> = null;
 		var hasToString:Bool = false;
 
 		/**
@@ -456,6 +460,73 @@ class Scripted {
 				}
 
 				/**
+				 * @param type A class being bridged.
+				 * @return The arguments of the nearest constructor at or above it, which is what a `super`
+				 *         call written in its own bridge has to pass.
+				 */
+				function superArgumentsOf(type:ClassType):Array<{name:String, opt:Bool, t:Type}> {
+					var at:Null<ClassType> = type;
+
+					while (at != null) {
+						if (at.constructor != null) {
+							var found:Null<Array<{name:String, opt:Bool, t:Type}>> = switch (at.constructor.get().type) {
+								case TFun(fargs, _): fargs;
+								case TLazy(lazy):
+									switch (lazy()) {
+										case TFun(fargs, _): fargs;
+										default: null;
+									}
+								default: null;
+							}
+
+							if (found != null)
+								return found;
+						}
+
+						at = at.superClass == null ? null : at.superClass.t.get();
+					}
+
+					return [];
+				}
+
+				/**
+				 * @param path A dotted type path.
+				 * @return It with every segment capitalised and the dots dropped, as `Bridges` names them.
+				 */
+				function flatten(path:String):String {
+					var out:String = '';
+
+					for (part in path.split('.'))
+						out += part.length == 0 ? '' : part.charAt(0).toUpperCase() + part.substr(1);
+
+					return out;
+				}
+
+				/**
+				 * @param type A base whose constructor cannot be rebuilt.
+				 * @return The path of a hand-written initializer for it, or null when there is none.
+				 */
+				function shimFor(type:ClassType):Null<Array<String>> {
+					var path:String = 'hxscript.shim.' + flatten(typePath(type.module, type.name));
+
+					/**
+					 * Asked inside a `try`, because a type that is not there is an error rather than a
+					 * null, and having no shim is the ordinary case for every base that never needed one.
+					 */
+					try {
+						switch (Context.getType(path)) {
+							case TInst(c, _):
+								for (field in c.get().statics.get())
+									if (field.name == 'init')
+										return path.split('.').concat(['init']);
+							default:
+						}
+					} catch (e:Dynamic) {}
+
+					return null;
+				}
+
+				/**
 				 * Why a native constructor cannot be rebuilt in the bridge, or null when it can.
 				 *
 				 * @param e The typed constructor body.
@@ -648,9 +719,67 @@ class Scripted {
 					var typedConstr:TypedExpr = constr.expr();
 
 					var refusal:Null<String> = reemittableConstructor(typedConstr);
-					if (refusal != null)
-						Context.error('${cls.name}: ${typePath(type.module, type.name)} cannot be extended for scripting, because $refusal. Remove it from the bridged bases; scripts can still import and construct it.',
-							pos);
+
+					if (refusal != null) {
+						/**
+						 * A base whose constructor cannot be rebuilt may still be written out by hand.
+						 *
+						 * Rebuilding turns the compiler's own output back into source, and some of that
+						 * does not survive the trip: `h3d.scene.Object` sets its flags through an abstract
+						 * whose methods mutate `this`, so every flag property inlines to arithmetic on the
+						 * underlying `Int` against a field typed as the abstract, which no source may
+						 * write. None of that is a fact about the class. The same constructor written out
+						 * in ordinary source types perfectly well, because at source level those
+						 * operations are ordinary.
+						 *
+						 * So a base may carry a shim: `hxscript.shim.<its path, flattened>` with a static
+						 * `init` taking the instance and the base constructor's arguments. When one is
+						 * there it becomes the body of `__constructSuper`, and everything downstream is
+						 * unchanged: `super(...)` in a script still calls that, on an instance allocated
+						 * the same way, so nothing about how a bridge is built or constructed moves.
+						 *
+						 * A base with no shim is refused exactly as before, with the reason and the
+						 * remedy.
+						 */
+						var shim:Null<Array<String>> = shimFor(type);
+
+						if (shim == null) {
+							/**
+							 * Nothing to rebuild it from, so it is not rebuilt: Haxe constructs it.
+							 *
+							 * The bridge gets a real constructor calling a real `super`, and the instance
+							 * is allocated through it rather than emptily. What that costs is that the
+							 * base's arguments must be known before the instance exists, which is why
+							 * `ScriptedClass` evaluates the script's `super(...)` arguments first and
+							 * runs the rest of its constructor after.
+							 */
+							nativeSuper = true;
+							nativeSuperArgs = args;
+
+							return {
+								pos: pos,
+								expr: EFunction(FAnonymous, {
+									args: [for (arg in args) {name: arg.name, opt: arg.opt, type: toCT(arg.t)}],
+									expr: macro throw $v{typePath(type.module, type.name)}
+										+ ' is constructed by Haxe, so its rebuilt constructor must not be called',
+									ret: macro :Void
+								})
+							};
+						}
+
+						var passed:Array<Expr> = [macro this];
+						for (arg in args)
+							passed.push(macro $i{arg.name});
+
+						return {
+							pos: pos,
+							expr: EFunction(FAnonymous, {
+								args: [for (arg in args) {name: arg.name, opt: arg.opt, type: toCT(arg.t)}],
+								expr: {pos: pos, expr: ECall(macro $p{shim}, passed)},
+								ret: macro :Void
+							})
+						};
+					}
 
 					var expr = requalify(typedConstr, Context.getTypedExpr(typedConstr));
 					switch (expr.expr) {
@@ -773,6 +902,45 @@ class Scripted {
 							})
 						});
 				}
+
+				/**
+				 * A real constructor, for a base whose own could not be rebuilt.
+				 *
+				 * This is what makes the base run as Haxe compiled it rather than as something turned
+				 * back into source, so nothing about it has to survive that trip. Allocation moves with
+				 * it: `ScriptedClass` builds one of these through `Type.createInstance` instead of
+				 * emptily, which is why it needs the base's arguments before the instance exists.
+				 */
+				if (nativeSuper && !fields.exists(function(f:Field):Bool return f.name == 'new')) {
+					/**
+					 * The signature is the immediate base's, not that of whichever ancestor could not be
+					 * rebuilt. Those are often different: `h3d.scene.Interactive` takes a collider and a
+					 * parent while the `h3d.scene.Object` below it takes only a parent, and generating
+					 * the ancestor's signature made `super(parent)` pass a parent where a collider goes.
+					 */
+					var direct:Array<{name:String, opt:Bool, t:Type}> = superArgumentsOf(type);
+
+					fields.push({
+						pos: pos,
+						access: [APublic],
+						name: 'new',
+						kind: FFun({
+							args: [for (arg in direct) {name: arg.name, opt: arg.opt, type: toCT(arg.t)}],
+							expr: {
+								pos: pos,
+								expr: ECall({pos: pos, expr: EConst(CIdent('super'))}, [for (arg in direct) macro $i{arg.name}])
+							},
+							ret: macro :Void
+						})
+					});
+
+					fields.push({
+						pos: pos,
+						access: [APublic, AStatic],
+						name: '__nativeSuper',
+						kind: FVar(macro :Bool, macro true)
+					});
+				}
 			}
 
 			for (field in typeFields) {
@@ -848,32 +1016,41 @@ class Scripted {
 								default: false;
 							}
 							var f:String = field.name;
+							/**
+							 * Every local here is `__` prefixed, because this body is written around a
+							 * method whose parameters it does not choose. One of them was called `r`,
+							 * which is what `h3d.scene.Object` names a colour component, and the
+							 * generated `var r:Dynamic` then shadowed the argument: the call passed the
+							 * uninitialised temp instead of the value, and Haxe caught it as `Local
+							 * variable r used without being initialized`. A name a base cannot plausibly
+							 * use is the whole fix.
+							 */
 							expr = macro {
-								var fname:String = $v{f};
-								if (__interp != null && __func != fname && __interp.locals.exists(fname)) {
-									var prevFunc:String = __func;
-									__func = fname;
-									var r:Dynamic;
+								var __name:String = $v{f};
+								if (__interp != null && __func != __name && __interp.locals.exists(__name)) {
+									var __previous:String = __func;
+									__func = __name;
+									var __result:Dynamic;
 									if (__safe) {
 										__interp.inTry = true;
 										try {
-											r = Reflect.callMethod(__interp, __interp.getLocal(fname), $a{argsArray});
-										} catch (e:Dynamic) {
-											__base.onInstanceError(e, fname, this);
-											r = null;
+											__result = Reflect.callMethod(__interp, __interp.getLocal(__name), $a{argsArray});
+										} catch (__e:Dynamic) {
+											__base.onInstanceError(__e, __name, this);
+											__result = null;
 										}
 									} else {
-										r = Reflect.callMethod(__interp, __interp.getLocal(fname), $a{argsArray});
+										__result = Reflect.callMethod(__interp, __interp.getLocal(__name), $a{argsArray});
 									}
-									__func = prevFunc;
-									${isVoid?macro return:macro return cast r}
+									__func = __previous;
+									${isVoid?macro return:macro return cast __result}
 								}
 
 								if (__safe) {
 									try {
 										${isVoid ? macro super.$f($a{superArgs}) : macro return super.$f($a{superArgs})}
-									} catch (e:Dynamic) {
-										__base.onInstanceError(e, fname, this);
+									} catch (__e:Dynamic) {
+										__base.onInstanceError(__e, __name, this);
 										${isVoid?macro return:macro return cast null}
 									}
 								} else {
@@ -1187,7 +1364,15 @@ class Scripted {
 					switch (field.kind) {
 						case KFunction(fun):
 							if (f == 'new') {
-								constructor = __interp.buildFunction(f, fun.args, fun.expr, fun.ret, superLocals, true);
+								/**
+								 * Without its `super(...)` when Haxe already ran the base's constructor,
+								 * so the arguments it passes are evaluated once rather than twice. They
+								 * were evaluated before the instance existed, to make it.
+								 */
+								var body:hxscript.syntax.Expr = Reflect.field(Type.getClass(this), '__nativeSuper') == true
+									? hxscript.types.ScriptedTools.withoutSuper(fun.expr) : fun.expr;
+
+								constructor = __interp.buildFunction(f, fun.args, body, fun.ret, superLocals, true);
 								continue;
 							}
 
