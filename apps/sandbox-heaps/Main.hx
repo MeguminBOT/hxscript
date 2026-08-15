@@ -89,6 +89,19 @@ class Main extends hxd.App {
 		 * method. The window opens and the process ends without ever drawing, which is what makes it
 		 * something a script can drive.
 		 */
+		/**
+		 * A loader before anything can ask for one.
+		 *
+		 * `hxd.Res.loader` throws rather than answering null when nothing has set it, so a script
+		 * that so much as asks whether an asset exists ends the process if this has not run. It used
+		 * to run from `Launcher.start`, which is every way of starting a project except the one the
+		 * conformance pass uses, and that is exactly where it was found missing.
+		 *
+		 * Pointed at the app's own folder here. A project with assets of its own gets it repointed
+		 * when it starts.
+		 */
+		host.Assets.useFor();
+
 		if (conformProject != null) {
 			studio.Conform.run(conformProject);
 			return;

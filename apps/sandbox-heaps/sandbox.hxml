@@ -28,6 +28,16 @@
 # can extend `host.Project`.
 -D hxscript_host=host
 
+# Where heaps looks for resources while compiling. `hxd.Res` carries a build macro that enumerates
+# this folder, so the define is needed by anything that so much as names the class, whether or not it
+# uses a generated accessor.
+#
+# The path it bakes in is not what this app reads from. A project arrives after the build and keeps
+# its assets in its own folder, so `host.Assets` points `hxd.Res.loader` at that folder when the
+# project runs. This is the folder the app's own examples share, and it has to exist here as well so
+# the macro has something to enumerate.
+-D resourcesPath=assets/res
+
 # Compiles scripts to HashLink bytecode at runtime rather than only interpreting them. Without it
 # every script is interpreted and nothing else changes.
 -D hxscript_hl
