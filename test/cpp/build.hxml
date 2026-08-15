@@ -24,7 +24,7 @@
 # and not here, and nothing ran the whole matrix afterwards, so five cases sat failing.
 --macro hxscript.setup.Autowire.run()
 -D hxscript_bridge_types=HostBase,HostQuirk,HostShaped
--D hxscript_keep=haxe.Json,haxe.ds.Option,HostVec,HostVecImpl,HostFlag,HostDial,HostTint
+-D hxscript_keep=haxe.Json,haxe.ds.Option,HostVec,HostVecImpl,HostFlag,HostDial,HostTint,HostAxes
 
 -main AllCommon
 -cpp bin_test/cpp/common
@@ -48,7 +48,7 @@
 # and not here, and nothing ran the whole matrix afterwards, so five cases sat failing.
 --macro hxscript.setup.Autowire.run()
 -D hxscript_bridge_types=HostBase,HostQuirk,HostShaped
--D hxscript_keep=haxe.Json,haxe.ds.Option,HostVec,HostVecImpl,HostFlag,HostDial,HostTint
+-D hxscript_keep=haxe.Json,haxe.ds.Option,HostVec,HostVecImpl,HostFlag,HostDial,HostTint,HostAxes
 
 -main AllCpp
 -cpp bin_test/cpp/cppia
@@ -71,7 +71,7 @@
 # and not here, and nothing ran the whole matrix afterwards, so five cases sat failing.
 --macro hxscript.setup.Autowire.run()
 -D hxscript_bridge_types=HostBase,HostQuirk,HostShaped
--D hxscript_keep=haxe.Json,haxe.ds.Option,HostVec,HostVecImpl,HostFlag,HostDial,HostTint
+-D hxscript_keep=haxe.Json,haxe.ds.Option,HostVec,HostVecImpl,HostFlag,HostDial,HostTint,HostAxes
 
 -main FrontierTest
 -cpp bin_test/cppia

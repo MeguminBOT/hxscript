@@ -249,6 +249,22 @@ class Abstract {
 
 		if (isEnum) {
 			fromExpr.unshift(macro {
+				/**
+				 * Still booting, so the value is its own answer.
+				 *
+				 * A constant whose name collides with an accessor cannot be a lazy property and is
+				 * emitted as a static built with `new`, which runs while the class is booting and
+				 * therefore before `_enumValues` below it has been filled. Reading the table there
+				 * re-entered the boot and the process died on the way up: `flixel.util.FlxAxes`
+				 * declares `X` and `Y` beside properties `x` and `y`, so it took that path and no
+				 * program that reached it started at all.
+				 *
+				 * What arrives here in that window is the constant's own underlying value, which is
+				 * exactly what should be stored, so answering with it is right rather than a way out.
+				 */
+				if (_enumValues == null)
+					return v;
+
 				if (_enumValues.contains(v))
 					return v;
 				else if (_enumMap.exists(v))

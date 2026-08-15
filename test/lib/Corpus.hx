@@ -396,6 +396,11 @@ class Corpus {
 		check('null coalesce into an int', 'var a:Null<Int> = null; var b:Int = a ?? 5; return b;', '5');
 		check('null coalesce into an int, kept', 'var a:Null<Int> = 3; var b:Int = a ?? 5; return b;', '3');
 		check('null coalesce into a float', 'var a:Null<Float> = null; var b:Float = a ?? 2.5; return b;', '2.5');
+
+		// An enum abstract whose constants collide with its own accessors, which forces the wrapper to
+		// build them eagerly while the class is still booting. Reaching one used to end the process
+		// before anything ran, so the value here matters less than the case existing at all.
+		check('an enum abstract whose constant collides with an accessor', 'return Std.string(HostAxes.XY);', '17', null, 'import HostAxes;');
 		check('safe navigation', 'var o:Dynamic = null; return Std.string(o?.x);', 'null');
 		check('arrow function', 'var f = x -> x * 2; return f(4);', '8');
 		check('closure capture', 'var n = 3; var f = function() return n * 2; return f();', '6');

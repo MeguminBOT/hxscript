@@ -208,6 +208,14 @@ public function read():Dynamic { return function() { return held; }; }');
 			separate is the naming rather than the type: bare after an import, through the type after
 			an import, and through the type without one.
 		*/
+		/*
+			An enum abstract's own accessor, read off a value. `HostAxes` declares `x` beside the constant
+			`X`, which is `flixel.util.FlxAxes`'s shape and not a rare one. The interpreter runs the
+			accessor; compiled code reads the wrapper by reflection and gets null, so this is a real
+			difference rather than a refusal, and it is here to be read rather than to pass.
+		*/
+		probe('an enum abstract accessor on a value', 'var a:HostAxes = HostAxes.XY; return Std.string(a.x);', null, 'import HostAxes;');
+
 		probe('an enum abstract constructor, bare', 'return Std.string(Add);', null, 'import HostFlag;');
 		probe('an enum abstract constructor, through an import', 'return Std.string(HostFlag.Add);', null, 'import HostFlag;');
 		probe('an enum abstract constructor, unimported', 'return Std.string(HostFlag.Add);');
