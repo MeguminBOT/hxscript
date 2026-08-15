@@ -26,6 +26,34 @@ class TypeTools {
 	}
 
 	/**
+	 * Whether a resolved type is an enum, portably.
+	 *
+	 * **`v is Enum` decides nothing on hxcpp.** A class and an enum are the same runtime object
+	 * there, so both tests answer true of both kinds, and a chain that asks `is Class` first takes
+	 * every enum down the class branch. That is what left `import haxe.ds.Option;` binding the type
+	 * and none of its constructors: `None` kept whatever meaning something else had given it, and the
+	 * script read a constant of an unrelated enum abstract where every other target read `None`.
+	 *
+	 * The name is what separates them, since only an enum answers `Type.resolveEnum`. Asked of the
+	 * type rather than of a value, which is the safe half of reflection here: `Type.getEnumName` ends
+	 * the hxcpp process for something that is not an enum, and `getClassName` answers for both.
+	 *
+	 * @param v The resolved type.
+	 * @return True if it is an enum.
+	 */
+	public static function isEnumType(v:Dynamic):Bool {
+		if (v == null)
+			return false;
+
+		#if cpp
+		var name:Null<String> = Type.getClassName(v);
+		return name != null && Type.resolveEnum(name) != null;
+		#else
+		return v is Enum;
+		#end
+	}
+
+	/**
 	 * Joins a package and name into a dotted path.
 	 *
 	 * @param name The type or field name.

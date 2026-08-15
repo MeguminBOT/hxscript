@@ -1615,6 +1615,17 @@ class Interp {
 				importEnumValues(t);
 		} else if (t is IScriptedType) {
 			imports.set(name, t);
+		} else if (TypeTools.isEnumType(t)) {
+			/**
+			 * Ahead of the class branch, because on hxcpp that branch would take this. A class and an
+			 * enum are one runtime object there, so `t is Class` is true of an enum too and every
+			 * import of one bound the type and left its constructors unbound: `import haxe.ds.Option;`
+			 * then `None` read whatever else was in scope under that name.
+			 */
+			imports.set(name, t);
+
+			if (enumValueImport)
+				importEnumValues(t);
 		} else if (t is Class) {
 			if (Type.getSuperClass(t) == AbstractValue && t.isEnum) {
 				for (i => construct in AbstractTools.getEnumConstructs(t))
@@ -1624,11 +1635,6 @@ class Interp {
 			}
 
 			imports.set(name, t);
-		} else if (t is Enum) {
-			imports.set(name, t);
-
-			if (enumValueImport)
-				importEnumValues(t);
 		} else if (t != null && Type.getClassName(cast t) != null) {
 			imports.set(name, t);
 		} else {
