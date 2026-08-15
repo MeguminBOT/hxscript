@@ -248,6 +248,8 @@ Two worked examples and two applications, all runnable:
   fooling yourself.
 - [Benchmarks](docs/benchmarks.md) puts six libraries in this family through identical scripts.
 - [Mode benchmarks](docs/mode-benchmarks.md) runs the same corpus interpreted, compiled and jitted.
+- [HashLink benchmarks](docs/hl-benchmarks.md) runs it against the same program compiled by Haxe,
+  which is what a script costs against not scripting it at all.
 - [Static checking](docs/checker.md) sets out the design for a pre-run checker, and its limits.
 - [Internals](docs/internals.md) explains why the parts that are not obvious are the way they are.
 - [Tests](test) holds the suites, which double as executable documentation of behaviour.
