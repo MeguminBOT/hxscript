@@ -14,6 +14,11 @@
 # configuration no consumer builds: under the default -dce std the standard-library members a
 # script reaches by reflection are stripped, and EReg loses its methods.
 --macro hxscript.macro.Keep.run()
+# The abstract scanner reads source text before typing, so what it recognises cannot be checked
+# from a compiled test. `enum abstract` went unmatched once and took forty of flixel's abstracts
+# with it, silently.
+--macro AbstractScan.run()
+
 
 -main AllCommon
 --interp

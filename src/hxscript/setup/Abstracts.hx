@@ -99,11 +99,26 @@ class Abstracts {
 	 */
 	public static function declaredAbstracts(source:String):Array<String> {
 		var found:Array<String> = [];
-		var re:EReg = ~/^[ \t]*(@:[^\n]*[ \t]+)*(private[ \t]+)?abstract[ \t]+([A-Za-z_][A-Za-z0-9_]*)/gm;
+
+		/**
+		 * The modifiers Haxe allows in front of `abstract`, and `enum` is the one that matters.
+		 *
+		 * `enum abstract Foo(Int)` is how every enum abstract has been written since Haxe 4, and this
+		 * pattern only allowed metadata and `private`, so the whole shape was skipped without a word.
+		 * In flixel that is `FlxKey`, `FlxAxes` and every other keyed constant: a script importing one
+		 * got the module registered with no type behind it, and using it failed at run time with
+		 * `Module FlxKey does not define type FlxKey`. Eight of flixel's abstracts were reached and
+		 * the rest were not, which looked like a preset that had missed a few rather than a pattern
+		 * that could not see them.
+		 *
+		 * `extern` is allowed for the same reason: it is legal in front of `abstract` and nothing here
+		 * should turn on which order the modifiers were written in.
+		 */
+		var re:EReg = ~/^[ \t]*(@:[^\n]*[ \t]+)*((private|extern|enum)[ \t]+)*abstract[ \t]+([A-Za-z_][A-Za-z0-9_]*)/gm;
 
 		var at:Int = 0;
 		while (re.matchSub(source, at)) {
-			found.push(re.matched(3));
+			found.push(re.matched(4));
 			var p = re.matchedPos();
 			at = p.pos + p.len;
 		}
