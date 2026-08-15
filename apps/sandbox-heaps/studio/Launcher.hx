@@ -293,9 +293,37 @@ class Launcher {
 				case EPush:
 					var at = canvasPoint(e);
 					made.onMouseDown(at.x, at.y);
+					made.onMouseButton(e.button, true, at.x, at.y);
+
+				case ERelease, EReleaseOutside:
+					var at = canvasPoint(e);
+					made.onMouseButton(e.button, false, at.x, at.y);
 
 				case _:
 			}
+		} catch (ex:haxe.Exception) {
+			Sink.caught(ex, PRun, '${entry.name} input');
+			stop();
+		}
+	}
+
+	/**
+	 * Hands relative pointer movement to the running project.
+	 *
+	 * Called by the app while the pointer is captured, since that is the only mode in which there is
+	 * movement without a position.
+	 *
+	 * @param dx How far across, in window pixels.
+	 * @param dy How far down, in window pixels.
+	 */
+	public static function look(dx:Float, dy:Float):Void {
+		if (!running || kind != KProject || instance == null)
+			return;
+
+		var made:Project = cast instance;
+
+		try {
+			made.onMouseLook(dx, dy);
 		} catch (ex:haxe.Exception) {
 			Sink.caught(ex, PRun, '${entry.name} input');
 			stop();
@@ -371,6 +399,12 @@ class Launcher {
 	static function clear():Void {
 		instance = null;
 		kind = null;
+
+		/**
+		 * The pointer comes back before anything else, so a project that captured it and then failed
+		 * cannot leave somebody unable to reach the window they would fix it in.
+		 */
+		host.Api.captureMouse(false);
 
 		if (layer != null)
 			layer.removeChildren();

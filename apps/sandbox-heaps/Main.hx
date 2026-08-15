@@ -136,6 +136,26 @@ class Main extends hxd.App {
 			Launcher.world = s3d;
 			Launcher.onWorld = function(on:Bool):Void drawing3D = on;
 			Api.onWorld = Launcher.reach3D;
+
+			/**
+			 * The window is the app's, so taking the pointer is too.
+			 *
+			 * `Relative` hides the cursor, holds it inside the window and reports how far it moved
+			 * instead of where it is, which is the only mode a first person camera can use and the
+			 * only one that stops the pointer wandering onto another screen mid turn. A project asks
+			 * through `captureMouse` and the launcher gives it back when the project stops.
+			 */
+			Api.onCapture = function(on:Bool):Void {
+				var window = hxd.Window.getInstance();
+
+				/**
+				 * `Relative` reports through an ordinary event whose `relX` and `relY` hold how far
+				 * the pointer moved rather than where it is, and `restorePos` puts the cursor back
+				 * where it was picked up from when the project lets go.
+				 */
+				window.mouseMode = on ? Relative(function(e:hxd.Event):Void Launcher.look(e.relX, e.relY),
+					true) : Absolute;
+			};
 			Shell.mount(root, surface);
 
 			hxd.Window.getInstance().addEventTarget(function(e:hxd.Event):Void {

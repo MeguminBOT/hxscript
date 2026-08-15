@@ -114,4 +114,27 @@ class Api {
 
 	/** Given by the app, so this class needs no reference to the launcher. */
 	public static var onWorld:Void->Dynamic = null;
+
+	/**
+	 * Takes the pointer, or gives it back.
+	 *
+	 * Held by the host rather than by the project, and that is the point of it being here. Capturing
+	 * hides the cursor and keeps it inside the window, which is what a first person camera needs and
+	 * also what leaves somebody unable to reach anything else if it is never released. The host lets
+	 * go when the project stops, however it stopped, so the worst a project can do is capture it for
+	 * as long as it runs.
+	 *
+	 * While captured, `onMouseLook` receives how far the pointer moved and `onMouseMove` is silent,
+	 * because a captured pointer has no position to report.
+	 *
+	 * @param on Whether to take it.
+	 */
+	@:scriptStatic('captureMouse')
+	public static function captureMouse(on:Bool):Void {
+		if (onCapture != null)
+			onCapture(on);
+	}
+
+	/** Given by the app, for the same reason `onWorld` is. */
+	public static var onCapture:Bool->Void = null;
 }
