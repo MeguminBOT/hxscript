@@ -1,0 +1,9 @@
+{
+    "haxe.configurations": [
+        ["completion.hxml"],
+        ["completion-hl.hxml"]
+    ],
+    "haxe.displayServer": {
+        "arguments": ["--times"]
+    }
+}

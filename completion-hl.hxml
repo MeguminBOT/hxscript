@@ -1,0 +1,10 @@
+# The HashLink half, for working on `src/hxscript/hl`. See `completion.hxml` for why these exist.
+#
+# Note that `hxscript.cppia` does not type under this one: its module references members declared
+# inside its own `#if hxscript_cppia`, so a server pointed here reports errors in `cppia/Backend.hx`
+# that no build sees. Switch configuration rather than chasing them.
+
+-cp src
+
+-hl bin_completion/completion.hl
+-D hxscript_hl

@@ -1,0 +1,25 @@
+# What a language server should use for `src/`, and nothing else.
+#
+# Without this the Haxe extension has no classpath to work from, falls back to the workspace root,
+# and reports two things that are not true of any real build:
+#
+#   `package hxscript.macro;` in src/hxscript/macro/Abstract.hx should be `package src.hxscript.macro;`
+#   Type not found : hxscript.compile.Unsupported
+#
+# Both are the root being on the classpath instead of `src`. `extraParams.hxml` beside this file is
+# not a substitute: it carries the setup macros applied to anyone using `-lib hxscript` and declares
+# no classpath at all.
+#
+# The defines are here because half the library does not exist without them. `hxscript.cppia` and
+# `hxscript.hl` are each behind their own, so a server given neither reports their contents missing.
+# This one is the cppia side, which is hxcpp, which is the reference target. `completion-hl.hxml` is
+# the other.
+#
+# Verified: `haxe completion.hxml --macro include('hxscript') --no-output` types every file under
+# `src/` with no errors.
+
+-cp src
+
+-cpp bin_completion
+-D hxscript_cppia
+-D scriptable
