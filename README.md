@@ -302,8 +302,9 @@ Nine targets, no CI, so every box below was ticked by hand.
 
 **Runs the suite, with known failures.**
 
-- [ ] **neko** — 3, all a scripted abstract forwarding to a native underlying type.
-- [ ] **python** — 3 failures and 3 gaps, mostly `@:forward` over the generated wrapper.
+- [ ] **neko** — 4. Three are a scripted abstract forwarding to a native underlying type; the fourth
+      is a host method reached through an interpreter's `parent` binding answering null.
+- [ ] **python** — 2 failures and 3 gaps. Both failures are `@:forward` over the generated wrapper.
 
 **Generates, but untested in a real application.**
 
