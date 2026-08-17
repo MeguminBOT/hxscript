@@ -23,7 +23,6 @@
 package hxscript.hl;
 
 import hxscript.compile.Unsupported;
-
 import hxscript.Environment;
 import hxscript.compile.Report;
 import hxscript.compile.Skip;
@@ -253,7 +252,10 @@ class Backend {
 		var unreachable:Null<String> = missingOwner(emitter.bindings, module, env);
 
 		if (unreachable != null) {
-			report.skipped.push({name: module.name, reason: 'names ' + unreachable + ', which nothing at runtime answers to'});
+			report.skipped.push({
+				name: module.name,
+				reason: 'names ' + unreachable + ', which nothing at runtime answers to'
+			});
 			return;
 		}
 
@@ -280,7 +282,10 @@ class Backend {
 			var found:Dynamic = hostOwner(link.host, module, env);
 
 			if (found == null || !(found is Class)) {
-				report.skipped.push({name: module.name, reason: 'extends ' + link.host + ', which nothing at runtime answers to'});
+				report.skipped.push({
+					name: module.name,
+					reason: 'extends ' + link.host + ', which nothing at runtime answers to'
+				});
 				return;
 			}
 
@@ -369,7 +374,8 @@ class Backend {
 			path: made.path,
 			value: cls,
 			scripted: (owner is ScriptedClass) ? owner : null,
-			base: made.base == null ? null : (module.pack == null || module.pack.length == 0 ? made.base : module.pack.join('.') + '.' + made.base),
+			base: made.base == null ? null : (module.pack == null
+				|| module.pack.length == 0 ? made.base : module.pack.join('.') + '.' + made.base),
 			host: above == null ? null : (cast above : hl.BaseType).__type__,
 			hostClass: above,
 			construct: cls.__constructor__,

@@ -23,7 +23,6 @@
 package hxscript.cppia;
 
 import hxscript.compile.Unsupported;
-
 #if hxscript_cppia
 import hxscript.compile.Capture;
 import hxscript.compile.Accessors;
@@ -60,10 +59,14 @@ class Emitter {
 	];
 
 	/** Binary operators that map straight through to a cppia token of the same spelling. */
+	// @formatter:off
 	static var BINOPS:Array<String> = [
-		'+', '-', '*', '/', '%', '&', '|', '^', '<<', '>>', '>>>', '==', '!=', '>=', '<=', '>', '<', '&&', '||'
+		'+', '-', '*', '/', '%',                  // arithmetic
+		'&', '|', '^', '<<', '>>', '>>>',         // bitwise
+		'==', '!=', '>=', '<=', '>', '<',         // comparison
+		'&&', '||'                                // logical
 	];
-
+	// @formatter:on
 	/** Compound assignments, which cppia spells the same way but reads as a `SetExpr`. */
 	static var ASSIGN_OPS:Array<String> = ['+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>=', '>>>='];
 
@@ -429,8 +432,7 @@ class Emitter {
 								if (v.set == 'set' || v.set == 'dynamic')
 									propSetters.set(full + ' ' + f.name, true);
 
-								if (backed)
-									vars.set(f.name, v.type == null ? '' : typeName(v.type));
+								if (backed) vars.set(f.name, v.type == null ? '' : typeName(v.type));
 
 							case _:
 						}
@@ -693,7 +695,8 @@ class Emitter {
 	function implementationOf(a:AbstractDecl, pack:String):ClassDecl {
 		var fields:Array<FieldDecl> = [];
 		for (f in a.fields) {
-			var made:FieldDecl = f.access.contains(AStatic) ? f : hxscript.types.ScriptedAbstract.staticForm(f, a.name, a.underlying);
+			var made:FieldDecl = f.access.contains(AStatic) ? f : hxscript.types.ScriptedAbstract.staticForm(f,
+				a.name, a.underlying);
 
 			if (made.name == '@new') {
 				switch (made.kind) {
@@ -1278,7 +1281,8 @@ class Emitter {
 					return;
 				}
 
-				var built:String = (cl == 'Map' || cl == 'haxe.ds.Map') && !typePaths.exists(cl) ? 'hxscript.runtime.AnyMap' : resolveType(cl, e.pos);
+				var built:String = (cl == 'Map' || cl == 'haxe.ds.Map')
+					&& !typePaths.exists(cl) ? 'hxscript.runtime.AnyMap' : resolveType(cl, e.pos);
 
 				/**
 				 * A call that may be leaving out an optional in the middle, which an arity cannot
@@ -1446,14 +1450,18 @@ class Emitter {
 
 		switch (it.e) {
 			case EBinop('...', low, high):
-				outer.push({e: EVar(name, null, {e: ENew('IntIterator', [low, high]), pos: pos}, null, null, false), pos: pos});
+				outer.push({
+					e: EVar(name, null, {e: ENew('IntIterator', [low, high]), pos: pos}, null, null, false),
+					pos: pos
+				});
 
 			case _:
 				var subject:String = tempName('sub');
 				var subjectRef:Expr = {e: EIdent(subject), pos: pos};
 
 				var probe:Expr = {
-					e: ECall({e: EField({e: EIdent('Reflect'), pos: pos}, 'field'), pos: pos}, [subjectRef, {e: EConst(CString('hasNext')), pos: pos}]),
+					e: ECall({e: EField({e: EIdent('Reflect'), pos: pos}, 'field'), pos: pos},
+						[subjectRef, {e: EConst(CString('hasNext')), pos: pos}]),
 					pos: pos
 				};
 				var chosen:Expr = {
@@ -1654,7 +1662,8 @@ class Emitter {
 	 * @param defaultExpr Its default branch, if any.
 	 * @param pos Where it appears.
 	 */
-	function emitSwitch(cond:Expr, cases:Array<{values:Array<Expr>, expr:Expr, ?guard:Expr}>, defaultExpr:Null<Expr>, pos:Position):Void {
+	function emitSwitch(cond:Expr, cases:Array<{values:Array<Expr>, expr:Expr, ?guard:Expr}>, defaultExpr:Null<Expr>,
+			pos:Position):Void {
 		for (c in cases) {
 			var flat:Array<Expr> = [];
 			for (v in c.values)
@@ -1738,7 +1747,8 @@ class Emitter {
 					}
 
 					if (nativeAbstract(asType) != null)
-						throw new Unsupported('$asType.$name, which is a method of an abstract and has no class to be called on', pos);
+						throw new Unsupported('$asType.$name, which is a method of an abstract and has no class to be called on',
+							pos);
 
 					if (!moduleClasses.exists(asType)) {
 						w.pos(line);
@@ -1850,8 +1860,10 @@ class Emitter {
 					var placed:Null<Array<Expr>> = placeSuper(currentSuper, params, pos);
 
 					if (placed == null)
-						throw new Unsupported('super(...), which leaves out a parameter of ' + currentSuper
-							+ ' that is not its last, and whose arguments do not say which', pos);
+						throw new Unsupported('super(...), which leaves out a parameter of '
+							+ currentSuper
+							+ ' that is not its last, and whose arguments do not say which',
+							pos);
 
 					params = placed;
 					supplied = params.length;
@@ -1995,7 +2007,8 @@ class Emitter {
 		for (i in 0...fixed.length) {
 			bound.push({
 				e: EVar(fixed[i].name, fixed[i].t,
-					{e: EArray({e: EIdent(packed), pos: pos}, {e: EConst(CInt(i)), pos: pos}), pos: pos}, null, null, false),
+					{e: EArray({e: EIdent(packed), pos: pos}, {e: EConst(CInt(i)), pos: pos}), pos: pos}, null, null,
+					false),
 				pos: pos
 			});
 		}
@@ -2036,7 +2049,10 @@ class Emitter {
 			popScope();
 		} else {
 			w.int(0);
-			memberInits.push({e: EBinop('=', {e: EField({e: EIdent('this'), pos: pos}, f.name), pos: pos}, made), pos: pos});
+			memberInits.push({
+				e: EBinop('=', {e: EField({e: EIdent('this'), pos: pos}, f.name), pos: pos}, made),
+				pos: pos
+			});
 		}
 
 		w.newline();
@@ -2394,7 +2410,8 @@ class Emitter {
 	 * @param pos Where the switch appears.
 	 * @return A block evaluating to the same branch the switch would have taken.
 	 */
-	function switchAsChain(cond:Expr, cases:Array<{values:Array<Expr>, expr:Expr, ?guard:Expr}>, defaultExpr:Null<Expr>, pos:Position):Expr {
+	function switchAsChain(cond:Expr, cases:Array<{values:Array<Expr>, expr:Expr, ?guard:Expr}>,
+			defaultExpr:Null<Expr>, pos:Position):Expr {
 		var name:String = tempName('sw');
 		var ref:Expr = {e: EIdent(name), pos: pos};
 
@@ -2485,7 +2502,8 @@ class Emitter {
 							e: ECall({e: EField({e: EIdent(ENUMS), pos: pos}, 'enumParameters'), pos: pos}, [ref]),
 							pos: pos
 						};
-						guard = Capture.substitute(guard, bind, {e: EArray(params, {e: EConst(CInt(b)), pos: pos}), pos: pos});
+						guard = Capture.substitute(guard, bind,
+							{e: EArray(params, {e: EConst(CInt(b)), pos: pos}), pos: pos});
 					}
 				}
 
@@ -2671,7 +2689,11 @@ class Emitter {
 			case EIdent('_'):
 				return {e: EIdent('true'), pos: pos};
 
-			case EIdent(name) if (!hxscript.types.TypeTools.isTypeIdentifier(name) && name != 'true' && name != 'false' && name != 'null'):
+			case EIdent(name)
+				if (!hxscript.types.TypeTools.isTypeIdentifier(name)
+					&& name != 'true'
+					&& name != 'false'
+					&& name != 'null'):
 				binds.push({name: name, value: value});
 				return {e: EIdent('true'), pos: pos};
 
@@ -2696,7 +2718,11 @@ class Emitter {
 		for (v in c.values) {
 			switch (v.e) {
 				case EIdent(name):
-					if (name != 'true' && name != 'false' && name != 'null' && !typePaths.exists(name) && enumOwning(name) == null)
+					if (name != 'true'
+						&& name != 'false'
+						&& name != 'null'
+						&& !typePaths.exists(name)
+						&& enumOwning(name) == null)
 						return name;
 				case _:
 			}
@@ -3275,7 +3301,8 @@ class Emitter {
 	function checkAccessorSelf(owner:String, name:String, pos:Position):Void {
 		var key:String = owner + ' ' + name;
 		if (props.exists(key) && !props.get(key) && owner == currentClass && insideAccessor(name))
-			throw new Unsupported(name + ' named inside its own accessor with no field behind it; it wants @:isVar', pos);
+			throw new Unsupported(name + ' named inside its own accessor with no field behind it; it wants @:isVar',
+				pos);
 	}
 
 	/**
@@ -3629,8 +3656,7 @@ class Emitter {
 				switch (params[0]) {
 					case CTPath(path, _):
 						var full:Null<String> = abstractPathOf(path.join('.'));
-						if (full != null)
-							arrayElements.set(name, full);
+						if (full != null) arrayElements.set(name, full);
 					case _:
 				}
 			case _:
@@ -3942,8 +3968,8 @@ class Emitter {
 			return false;
 
 		return switch (known) {
-			case 'Map' | 'haxe.ds.StringMap' | 'haxe.ds.IntMap' | 'haxe.ds.ObjectMap' | 'haxe.ds.EnumValueMap' | 'haxe.ds.WeakMap' |
-				'hxscript.runtime.AnyMap': true;
+			case 'Map' | 'haxe.ds.StringMap' | 'haxe.ds.IntMap' | 'haxe.ds.ObjectMap' | 'haxe.ds.EnumValueMap' |
+				'haxe.ds.WeakMap' | 'hxscript.runtime.AnyMap': true;
 			case _: false;
 		}
 	}

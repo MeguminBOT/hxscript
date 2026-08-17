@@ -1631,7 +1631,8 @@ class Interp {
 	 * @return True if `resolve` would succeed.
 	 */
 	public function isResolvable(id:String):Bool {
-		return ((imports.exists(id) || variables.exists(id)) || (parent != null && parentFields.exists(id)) || packageType(id) != null);
+		return ((imports.exists(id) || variables.exists(id)) || (parent != null && parentFields.exists(id))
+			|| packageType(id) != null);
 	}
 
 	/**
@@ -1713,11 +1714,13 @@ class Interp {
 		if (mode == IAll) {
 			var fullPath:String = path.join('.');
 
-			var cache:Map<String, Array<ImportEntry>> = (environment != null ? environment.importCache : globalImportCache);
+			var cache:Map<String,
+				Array<ImportEntry>> = (environment != null ? environment.importCache : globalImportCache);
 			var entries:Array<ImportEntry> = cache.get(fullPath);
 
 			if (entries == null) {
-				var types:Array<TypeInfo> = TypeTools.listTypesEx(fullPath, true, [TypeCollection.main, environment?.types]);
+				var types:Array<TypeInfo> = TypeTools.listTypesEx(fullPath, true,
+					[TypeCollection.main, environment?.types]);
 
 				if (types == null)
 					return;
@@ -1840,7 +1843,8 @@ class Interp {
 									continue;
 								}
 
-								importType(type.name, type.kind == 'abstract' ? AbstractTools.resolve(type.compilePath()) : type.resolve(environment));
+								importType(type.name,
+									type.kind == 'abstract' ? AbstractTools.resolve(type.compilePath()) : type.resolve(environment));
 							}
 					}
 
@@ -2011,8 +2015,8 @@ class Interp {
 	 * @param su Whether a `super(...)` call is permitted in the body (constructors).
 	 * @return The callable closure.
 	 */
-	public function buildFunction(?name:String, params:Array<Argument>, fexpr:Expr, ?ret:CType, ?id:Int, ?functionLocals:Map<String, Variable>,
-			su:Bool = false) {
+	public function buildFunction(?name:String, params:Array<Argument>, fexpr:Expr, ?ret:CType, ?id:Int,
+			?functionLocals:Map<String, Variable>, su:Bool = false) {
 		var capturedLocals = (functionLocals == null ? duplicate(locals) : null);
 
 		/**
@@ -2308,7 +2312,10 @@ class Interp {
 					} else if (isResolvable(fullPath)) {
 						var t:Dynamic = resolve(fullPath);
 
-						if (t is haxe.ds.IntMap || t is haxe.ds.StringMap || t is haxe.ds.ObjectMap || t is haxe.ds.EnumValueMap)
+						if (t is haxe.ds.IntMap
+							|| t is haxe.ds.StringMap
+							|| t is haxe.ds.ObjectMap
+							|| t is haxe.ds.EnumValueMap)
 							return Type.createInstance(t, []);
 					}
 				default:
@@ -2335,7 +2342,8 @@ class Interp {
 	 * @param mapCompr Whether this sits inside a map comprehension.
 	 * @return The value of the branch that matched, or null when none did.
 	 */
-	function evalSwitch(e:Expr, cases:Array<{values:Array<Expr>, expr:Expr, ?guard:Expr}>, def:Null<Expr>, void:Bool, mapCompr:Bool):Dynamic {
+	function evalSwitch(e:Expr, cases:Array<{values:Array<Expr>, expr:Expr, ?guard:Expr}>, def:Null<Expr>, void:Bool,
+			mapCompr:Bool):Dynamic {
 		var hasCapture:Bool = false;
 
 		/**
@@ -2482,7 +2490,8 @@ class Interp {
 						var v = expr(ce);
 
 						var ev = Reflect.callMethod(null, v, [for (_ in params) null]);
-						if (Type.getEnum(ev) == Type.getEnum(match) && Type.enumConstructor(ev) == Type.enumConstructor(match)) {
+						if (Type.getEnum(ev) == Type.getEnum(match)
+							&& Type.enumConstructor(ev) == Type.enumConstructor(match)) {
 							var matchParams = Type.enumParameters(match);
 
 							for (i => param in params) {
@@ -2535,7 +2544,8 @@ class Interp {
 	/**
 	 * Evaluates a `try`/`catch`, kept out of `expr` deliberately.
 	 */
-	@:noinline function evalTry(e:Expr, n:String, t:Null<CType>, ecatch:Expr, extra:Array<{v:String, t:Null<CType>, expr:Expr}>):Dynamic {
+	@:noinline function evalTry(e:Expr, n:String, t:Null<CType>, ecatch:Expr,
+			extra:Array<{v:String, t:Null<CType>, expr:Expr}>):Dynamic {
 		var old = declaredNames.length;
 		var oldTry = inTry;
 		try {
@@ -2736,7 +2746,8 @@ class Interp {
 						return call(null, expr(e), args);
 				}
 			case EIf(econd, e1, e2):
-				return if (expr(econd)) expr(e1, void, mapCompr) else if (e2 == null) (void ? Interp.void : null) else expr(e2, void, mapCompr);
+				return if (expr(econd)) expr(e1, void,
+					mapCompr) else if (e2 == null) (void ? Interp.void : null) else expr(e2, void, mapCompr);
 			case EWhile(econd, e):
 				whileLoop(econd, e);
 				return null;
@@ -3243,7 +3254,11 @@ class Interp {
 								return error(ECustom('${AbstractTools.resolveName(e)} should be $path'));
 							return e;
 						}
-						if ((t is Class || t is ScriptedClass || t is ScriptedInterface || t is Enum || t is ScriptedEnum)
+						if ((t is Class
+							|| t is ScriptedClass
+							|| t is ScriptedInterface
+							|| t is Enum
+							|| t is ScriptedEnum)
 							&& !Std.isOfType(e, t)) {
 							if (isCompiledAs(t, e))
 								return e;
@@ -3261,7 +3276,8 @@ class Interp {
 						return error(ECustom('${AbstractTools.resolveName(e)} should have field ${f.name}'));
 					}
 					if (!matchesType(Reflect.field(e, f.name), f.t))
-						return error(ECustom('field ${f.name} of ${AbstractTools.resolveName(e)} should be ${new Printer().typeToString(f.t)}'));
+						return
+							error(ECustom('field ${f.name} of ${AbstractTools.resolveName(e)} should be ${new Printer().typeToString(f.t)}'));
 				}
 				return e;
 			case CTFun(_, _):
@@ -3348,7 +3364,10 @@ class Interp {
 	 * @throws InterpException If the value cannot be key-value iterated.
 	 */
 	function makeKeyValueIterator(v:Dynamic):KeyValueIterator<Dynamic, Dynamic> {
-		if ((v is haxe.ds.IntMap) || (v is haxe.ds.StringMap) || (v is haxe.ds.ObjectMap) || (v is haxe.ds.EnumValueMap)) {
+		if ((v is haxe.ds.IntMap)
+			|| (v is haxe.ds.StringMap)
+			|| (v is haxe.ds.ObjectMap)
+			|| (v is haxe.ds.EnumValueMap)) {
 			return (v : IMap<Dynamic, Dynamic>).keyValueIterator();
 		} else if (v is Array) {
 			return (v : Array<Dynamic>).keyValueIterator();
@@ -3443,17 +3462,28 @@ class Interp {
 		return cont;
 	}
 
-	/** @param o A value. @return Whether it is a map. */
+	/**
+	 * @param o A value.
+	 * @return Whether it is a map.
+	 */
 	inline function isMap(o:Dynamic):Bool {
 		return (o is IMap);
 	}
 
-	/** @param map A map. @param key The key. @return The mapped value. */
+	/**
+	 * @param map A map.
+	 * @param key The key.
+	 * @return The mapped value.
+	 */
 	inline function getMapValue(map:Dynamic, key:Dynamic):Dynamic {
 		return cast(map, haxe.Constraints.IMap<Dynamic, Dynamic>).get(key);
 	}
 
-	/** @param map A map. @param key The key. @param value The value to store. */
+	/**
+	 * @param map A map.
+	 * @param key The key.
+	 * @param value The value to store.
+	 */
 	inline function setMapValue(map:Dynamic, key:Dynamic, value:Dynamic):Void {
 		cast(map, haxe.Constraints.IMap<Dynamic, Dynamic>).set(key, value);
 	}
@@ -3619,7 +3649,8 @@ class Interp {
 			var forwarded:Dynamic = Reflect.getProperty(boxed, f);
 
 			if (Reflect.isFunction(forwarded))
-				return Reflect.makeVarArgs(function(args:Array<Dynamic>):Dynamic return Reflect.callMethod(boxed, forwarded, args));
+				return Reflect.makeVarArgs(function(args:Array<Dynamic>):Dynamic return Reflect.callMethod(boxed,
+					forwarded, args));
 
 			if (forwarded == null && resolveCallShim(boxed, f) != null)
 				return Reflect.makeVarArgs(function(args:Array<Dynamic>):Dynamic return fcall(boxed, f, args));
@@ -3635,7 +3666,6 @@ class Interp {
 			if (fields != null)
 				return (bypassAccessor ? Reflect.field(fields, f) : Reflect.getProperty(fields, f));
 		}
-
 
 		if (hxscript.debug.Metrics.on)
 			hxscript.debug.Metrics.reads++;

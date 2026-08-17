@@ -155,27 +155,54 @@ class ScriptedInterface implements IScriptedType implements ICustomReflection {
 		return 'ScriptedInterface<$path>';
 	}
 
-	/** An interface carries no fields. @param field Unused. @return Always false. */
+	/**
+	 * An interface carries no fields.
+	 *
+	 * @param field Unused.
+	 * @return Always false.
+	 */
 	public function reflectHasField(field:String):Bool {
 		return false;
 	}
 
-	/** An interface carries no fields. @param field Unused. @return Always null. */
+	/**
+	 * An interface carries no fields.
+	 *
+	 * @param field Unused.
+	 * @return Always null.
+	 */
 	public function reflectGetField(field:String):Dynamic {
 		return null;
 	}
 
-	/** An interface carries no fields. @param field Unused. @param value Unused. @return Always null. */
+	/**
+	 * An interface carries no fields.
+	 *
+	 * @param field Unused.
+	 * @param value Unused.
+	 * @return Always null.
+	 */
 	public function reflectSetField(field:String, value:Dynamic):Dynamic {
 		return null;
 	}
 
-	/** An interface carries no properties. @param property Unused. @return Always null. */
+	/**
+	 * An interface carries no properties.
+	 *
+	 * @param property Unused.
+	 * @return Always null.
+	 */
 	public function reflectGetProperty(property:String):Dynamic {
 		return null;
 	}
 
-	/** An interface carries no properties. @param property Unused. @param value Unused. @return Always null. */
+	/**
+	 * An interface carries no properties.
+	 *
+	 * @param property Unused.
+	 * @param value Unused.
+	 * @return Always null.
+	 */
 	public function reflectSetProperty(property:String, value:Dynamic):Dynamic {
 		return null;
 	}

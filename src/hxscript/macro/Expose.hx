@@ -163,7 +163,8 @@ class Expose {
 									Context.warning(':scriptStatic on ${field.name} exposes a property with no backing field, so scripts read null. Expose a function instead, or add @:isVar.',
 										field.pos);
 								case FVar(AccNever | AccNo, _):
-									Context.warning(':scriptStatic on ${field.name} exposes a static that cannot be read, so scripts read null.', field.pos);
+									Context.warning(':scriptStatic on ${field.name} exposes a static that cannot be read, so scripts read null.',
+										field.pos);
 								default:
 							}
 
@@ -228,7 +229,8 @@ class Expose {
 		for (exposed in packages) {
 			if (path == exposed)
 				return true;
-			if (exposed.length > 0 && path.length > exposed.length && path.substr(0, exposed.length + 1) == exposed + '.')
+			if (exposed.length > 0 && path.length > exposed.length
+				&& path.substr(0, exposed.length + 1) == exposed + '.')
 				return true;
 		}
 

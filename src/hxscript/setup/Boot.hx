@@ -141,7 +141,9 @@ class Boot {
 			lines.push('  ' + (abstracts == null ? 0 : abstracts.length) + ' abstract(s) with a runtime form');
 		}
 
-		lines.push('  ' + (hxscript.compile.Compiler.available ? 'runtime compiler available' : 'interpreted only (built without -D hxscript_cppia)'));
+		lines.push('  '
+			+
+			(hxscript.compile.Compiler.available ? 'runtime compiler available' : 'interpreted only (built without -D hxscript_cppia)'));
 
 		return lines.join('\n');
 	}

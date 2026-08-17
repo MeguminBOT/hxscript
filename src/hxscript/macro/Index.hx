@@ -205,7 +205,8 @@ class Index {
 		});
 
 		return macro {
-			var meta:Array<TypeInfo> = cast haxe.Unserializer.run(haxe.rtti.Meta.getType($p{_name.split('.')}).typed[0]);
+			var meta:Array<TypeInfo> = cast haxe.Unserializer.run(haxe.rtti.Meta.getType($p{_name.split('.')})
+				.typed[0]);
 			var map:TypeMap = {
 				byPackage: [],
 				byModule: [],

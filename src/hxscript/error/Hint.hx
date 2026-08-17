@@ -34,15 +34,16 @@ class Hint {
 				unknownField(o, f);
 
 			case EInvalidAccess(f):
-				'`$f` exists but is not visible from a script. A `private` member is only reachable from\n'
-				+ 'inside the type that declares it; expose a public accessor, or set Config.strictAccess\n'
-				+ 'to false if this host wants scripts to reach private members.';
+				'`$f` exists but is not visible from a script. A `private` member is only reachable from\n' +
+				'inside the type that declares it; expose a public accessor, or set Config.strictAccess\n' +
+				'to false if this host wants scripts to reach private members.';
 
 			case ECustom(message):
 				custom(message);
 
 			case EImportHx:
-				'An `import.hx` prelude may only hold `import` and `using`. Move anything else into a\n' + 'module of its own.';
+				'An `import.hx` prelude may only hold `import` and `using`. Move anything else into a\n' +
+				'module of its own.';
 
 			case _:
 				null;
@@ -62,7 +63,9 @@ class Hint {
 		var paths:Array<String> = matching(name);
 
 		if (paths.length > 0) {
-			var lines:Array<String> = ['`$name` is in this build but is not in scope here. Either import it in the script:'];
+			var lines:Array<String> = [
+				'`$name` is in this build but is not in scope here. Either import it in the script:'
+			];
 
 			for (path in paths.slice(0, suggestions))
 				lines.push('    import $path;');
@@ -96,7 +99,9 @@ class Hint {
 		var paths:Array<String> = matching(name);
 
 		if (paths.length > 0 && paths.indexOf(path) < 0)
-			return '`$path` is not in this build, but ' + quoted(paths.slice(0, suggestions)) + ' is. Check the package.';
+			return '`$path` is not in this build, but '
+				+ quoted(paths.slice(0, suggestions))
+				+ ' is. Check the package.';
 
 		return '`$path` is not in this build.\n'
 			+ 'Either its package was never force-compiled, or an ignore list kept its module out.\n'
@@ -237,7 +242,8 @@ class Hint {
 			if (candidate == name)
 				continue;
 
-			var distance:Int = candidate.toLowerCase() == lower ? 1 : editDistance(lower, candidate.toLowerCase(), limit);
+			var distance:Int = candidate.toLowerCase() == lower ? 1 : editDistance(lower, candidate.toLowerCase(),
+				limit);
 
 			if (distance <= limit)
 				scored.push({name: candidate, distance: distance});

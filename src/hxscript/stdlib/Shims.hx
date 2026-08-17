@@ -175,15 +175,7 @@ class Shims {
 		set('StringTools.htmlUnescape', function(o:Dynamic, args:Array<Dynamic>):Dynamic {
 			var v:String = args[0];
 			return v.split('&gt;')
-				.join('>')
-				.split('&lt;')
-				.join('<')
-				.split('&quot;')
-				.join('"')
-				.split('&#039;')
-				.join("'")
-				.split('&amp;')
-				.join('&');
+				.join('>').split('&lt;').join('<').split('&quot;').join('"').split('&#039;').join("'").split('&amp;').join('&');
 		});
 	}
 

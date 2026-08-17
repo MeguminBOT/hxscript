@@ -75,7 +75,12 @@ class Sink {
 	 * @param fatal Whether it stopped something.
 	 */
 	public static function note(phase:Phase, message:String, ?hint:String, fatal:Bool = true):Void {
-		report({phase: phase, message: message, hint: hint, fatal: fatal});
+		report({
+			phase: phase,
+			message: message,
+			hint: hint,
+			fatal: fatal
+		});
 	}
 
 	/**

@@ -621,7 +621,8 @@ class Runtime {
 			 * class value itself, so calling it as it stands passes that class where the instance
 			 * belongs; the world's own `Type.createInstance` unbinds it for the same reason.
 			 */
-			var builds:Dynamic = stood.hostClass == null ? null : (cast stood.hostClass : hl.BaseType.Class).__constructor__;
+			var builds:Dynamic = stood.hostClass == null ? null : (cast stood.hostClass : hl.BaseType.Class)
+				.__constructor__;
 
 			if (builds != null) {
 				/**
@@ -1173,7 +1174,8 @@ class Runtime {
 		 * constructs through. A call that leaves an optional parameter out in the middle is written by
 		 * type and cannot be read back from the array, and the two backends have to agree about it.
 		 */
-		return hxscript.proxy.TypeProxy.createInstance(type, hxscript.types.ArgumentTools.forConstructor(type, (args : Array<Dynamic>)));
+		return hxscript.proxy.TypeProxy.createInstance(type,
+			hxscript.types.ArgumentTools.forConstructor(type, (args : Array<Dynamic>)));
 	}
 
 	/**
@@ -1234,12 +1236,14 @@ class Runtime {
 
 	/** @return The name of the constructor a value was made with, or null when it is not an enum value. */
 	public static function ctor(v:Dynamic):Dynamic {
-		return (v is ICustomEnumValueType) ? (v : ICustomEnumValueType).constructor : hxscript.proxy.TypeProxy.enumConstructor(v);
+		return (v is ICustomEnumValueType) ? (v : ICustomEnumValueType)
+			.constructor : hxscript.proxy.TypeProxy.enumConstructor(v);
 	}
 
 	/** @return What a constructor was given, positionally. */
 	public static function params(v:Dynamic):Dynamic {
-		return (v is ICustomEnumValueType) ? (v : ICustomEnumValueType).arguments : hxscript.proxy.TypeProxy.enumParameters(v);
+		return (v is ICustomEnumValueType) ? (v : ICustomEnumValueType)
+			.arguments : hxscript.proxy.TypeProxy.enumParameters(v);
 	}
 
 	/** @return Whether a value carries a named field, which is what an object pattern asks first. */

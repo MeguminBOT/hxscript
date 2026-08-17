@@ -116,16 +116,17 @@ class Loader {
 				null;
 
 			case NoLoader:
-				'this build carries no loader, because HashLink\'s jit is x86 and x86-64 only; '
-					+ 'scripts are interpreted on every other architecture';
+				'this build carries no loader, because HashLink\'s jit is x86 and x86-64 only; ' +
+				'scripts are interpreted on every other architecture';
 
 			case Disagrees:
-				'the native module was built against hashlink ' + version(builtFor()) + ' and does not match the one running; '
-					+ 'rebuild it against this HashLink';
+				'the native module was built against hashlink '
+				+ version(builtFor())
+				+ ' and does not match the one running; '
+				+ 'rebuild it against this HashLink';
 
 			case NotLinked:
-				'there is no hxscript.hdll beside what is running; '
-					+ 'build one with src/hxscript/hl/native/build.sh';
+				'there is no hxscript.hdll beside what is running; ' + 'build one with src/hxscript/hl/native/build.sh';
 		}
 	}
 

@@ -118,9 +118,38 @@ enum abstract Opcode(Int) to Int {
 	 * `-1` marks the variable-length forms, which write a count and then that many operands. The
 	 * numbers come from the same header's own arithmetic over its operand kinds, so a reader and
 	 * this writer cannot disagree about how far to advance.
+	 *
+	 * Ten to a row, each row labelled with its first index and the opcode that sits there, because
+	 * position IS the opcode here: a hundred bare numbers wrapped wherever they met the line limit
+	 * cannot be read against the enum above, which is what this looked like before. `@formatter:off`
+	 * is what stops the formatter putting it back. Keep the rows at ten if you add an opcode.
 	 */
-	public static final ARGS:Array<Int> = [2, 2, 2, 2, 2, 2, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 1, 1, 2, 3, 4, 5, 6, -1, -1, -1, -1, 2, 3, 3, 2, 2, 3, 3, 2, 2, 3, 3, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1, 2, 2, 2, 2, 2, 2, 2, 0, 1, 1, 1, -1, 1, 2, 1, 3, 3, 3, 3, 3, 3, 3, 3, 1, 2, 2, 2, 2, 2, 2, 2, -1, 2, 2, 4, 3, 0, 2, 3, 0, 3, 3, 1, 0];
-
+	// @formatter:off
+	public static final ARGS:Array<Int> = [
+		//   0  OMov
+		 2,  2,  2,  2,  2,  2,  1,  3,  3,  3,
+		//  10  OSDiv
+		 3,  3,  3,  3,  3,  3,  3,  3,  3,  3,
+		//  20  ONeg
+		 2,  2,  1,  1,  2,  3,  4,  5,  6, -1,
+		//  30  OCallMethod
+		-1, -1, -1,  2,  3,  3,  2,  2,  3,  3,
+		//  40  OGetThis
+		 2,  2,  3,  3,  2,  2,  2,  2,  3,  3,
+		//  50  OJSGt
+		 3,  3,  3,  3,  3,  3,  3,  3,  1,  2,
+		//  60  OToSFloat
+		 2,  2,  2,  2,  2,  2,  0,  1,  1,  1,
+		//  70  OSwitch
+		-1,  1,  2,  1,  3,  3,  3,  3,  3,  3,
+		//  80  OSetMem
+		 3,  3,  1,  2,  2,  2,  2,  2,  2,  2,
+		//  90  OMakeEnum
+		-1,  2,  2,  4,  3,  0,  2,  3,  0,  3,
+		// 100  OAsm
+		 3,  1,  0
+	];
+	// @formatter:on
 	/** @return How many operands this instruction carries, or -1 when it is variable-length. */
 	public inline function args():Int {
 		return ARGS[this];

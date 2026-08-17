@@ -574,7 +574,8 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 		 */
 		if (Reflect.field(instanceClass, '__nativeSuper') == true) {
 			var forSuper:Array<Dynamic> = superArguments(arguments);
-			var inst:IScriptedInstance = Type.createInstance(instanceClass, ArgumentTools.forConstructor(instanceClass, forSuper));
+			var inst:IScriptedInstance = Type.createInstance(instanceClass,
+				ArgumentTools.forConstructor(instanceClass, forSuper));
 			inst.__scriptConstruct(this, arguments);
 			return inst;
 		}
@@ -601,7 +602,8 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 		for (field in decl.fields)
 			if (field.name == 'new')
 				switch (field.kind) {
-					case KFunction(fun): found = fun;
+					case KFunction(fun):
+						found = fun;
 					case _:
 				}
 
@@ -620,8 +622,8 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 		var body:Array<Expr> = opening.before.copy();
 		body.push(({e: EArrayDecl(opening.args), pos: found.expr.pos} : Expr));
 
-		var evaluate:Dynamic = interp.buildFunction('__superArguments', found.args, ({e: EBlock(body), pos: found.expr.pos} : Expr), null,
-			interp.locals);
+		var evaluate:Dynamic = interp.buildFunction('__superArguments', found.args,
+			({e: EBlock(body), pos: found.expr.pos} : Expr), null, interp.locals);
 
 		var given:Dynamic = Reflect.callMethod(null, evaluate, arguments);
 		return (given is Array) ? (given : Array<Dynamic>) : [];
@@ -690,12 +692,22 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 		return fields;
 	}
 
-	/** Reflection over statics: whether a static field exists. @param field The field name. @return True if present. */
+	/**
+	 * Reflection over statics: whether a static field exists.
+	 *
+	 * @param field The field name.
+	 * @return True if present.
+	 */
 	public function reflectHasField(field:String):Bool {
 		return (__vars.exists(field));
 	}
 
-	/** Reflection over statics: read a static field. @param field The field name. @return Its value, or null. */
+	/**
+	 * Reflection over statics: read a static field.
+	 *
+	 * @param field The field name.
+	 * @return Its value, or null.
+	 */
 	public function reflectGetField(field:String):Dynamic {
 		return (__vars.exists(field) ? __vars.get(field).r : null);
 	}
@@ -711,7 +723,12 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 		return (__vars.exists(field) ? __vars.get(field).r = value : null);
 	}
 
-	/** Reflection over statics: read a static property via its getter. @param property The property name. @return Its value, or null. */
+	/**
+	 * Reflection over statics: read a static property via its getter.
+	 *
+	 * @param property The property name.
+	 * @return Its value, or null.
+	 */
 	public function reflectGetProperty(property:String):Dynamic {
 		return (__vars.exists(property) ? interp.getLocal(property, __vars) : null);
 	}

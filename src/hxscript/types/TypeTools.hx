@@ -142,7 +142,8 @@ class TypeTools {
 	 * @param collection The collection to search; defaults to the global one.
 	 * @return The importable type infos, or null if the path is unknown.
 	 */
-	public static inline function listTypes(path:String, fromPack:Bool = false, canIgnoreWarnings:Bool = false, ?collection:TypeCollection):Array<TypeInfo> {
+	public static inline function listTypes(path:String, fromPack:Bool = false, canIgnoreWarnings:Bool = false,
+			?collection:TypeCollection):Array<TypeInfo> {
 		var typeInfos:Array<TypeInfo> = [];
 
 		collection ??= TypeCollection.main;

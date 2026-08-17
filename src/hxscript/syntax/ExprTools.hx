@@ -151,10 +151,14 @@ class ExprTools {
 			case EArrayDecl(el): EArrayDecl([for (e in el) f(e)]);
 			case ENew(cl, el): ENew(cl, [for (e in el) f(e)]);
 			case EThrow(e): EThrow(f(e));
-			case ETry(e, v, t, c, extra): ETry(f(e), v, t, f(c), extra == null ? null : [for (cc in extra) {v: cc.v, t: cc.t, expr: f(cc.expr)}]);
+			case ETry(e, v, t, c,
+				extra): ETry(f(e), v, t, f(c),
+					extra == null ? null : [for (cc in extra) {v: cc.v, t: cc.t, expr: f(cc.expr)}]);
 			case EObject(fl): EObject([for (fi in fl) {name: fi.name, e: f(fi.e)}]);
 			case ETernary(c, e1, e2): ETernary(f(c), f(e1), f(e2));
-			case ESwitch(e, cases, def): ESwitch(f(e), [for (c in cases) {values: [for (v in c.values) f(v)], expr: f(c.expr)}], def == null ? null : f(def));
+			case ESwitch(e, cases,
+				def): ESwitch(f(e), [for (c in cases) {values: [for (v in c.values) f(v)], expr: f(c.expr)}],
+					def == null ? null : f(def));
 			case EMeta(name, args, e): EMeta(name, args == null ? null : [for (a in args) f(a)], f(e));
 			case ECheckType(e, t): ECheckType(f(e), t);
 			case ECast(e, t): ECast(f(e), t);

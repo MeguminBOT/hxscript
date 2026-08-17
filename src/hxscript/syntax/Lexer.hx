@@ -205,17 +205,26 @@ class Lexer {
 		}
 	}
 
-	/** @param e An expression. @return Its definition. */
+	/**
+	 * @param e An expression.
+	 * @return Its definition.
+	 */
 	inline function expr(e:Expr) {
 		return e.e;
 	}
 
-	/** @param e An expression. @return Its start offset. */
+	/**
+	 * @param e An expression.
+	 * @return Its start offset.
+	 */
 	inline function pmin(e:Expr) {
 		return e.pos.pmin;
 	}
 
-	/** @param e An expression. @return Its end offset. */
+	/**
+	 * @param e An expression.
+	 * @return Its end offset.
+	 */
 	inline function pmax(e:Expr) {
 		return e.pos.pmax;
 	}
@@ -505,7 +514,8 @@ class Lexer {
 								if (pow == null)
 									invalidChar(char);
 								var mantissa:Float = (exp > 0) ? n * 10 / exp : n;
-								return TConst(CFloat(pow < 0 ? mantissa / Math.pow(10, -pow) : mantissa * Math.pow(10, pow)));
+								return TConst(CFloat(pow < 0 ? mantissa / Math.pow(10,
+									-pow) : mantissa * Math.pow(10, pow)));
 							case ".".code:
 								if (exp > 0) {
 									if (exp == 10 && readChar() == ".".code) {
@@ -956,24 +966,29 @@ class Lexer {
 		opChars = "+*/-=!><&|^%~";
 		identChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_";
 
+		/**
+		 * One row per precedence level, loosest last, because the row's INDEX is the priority: the
+		 * loop below writes `i` into `opPriority` and asks `i == 10` to mark the assignments
+		 * right-associative. So a row moving is a silent change to how every expression parses, which
+		 * is why the indices are written down and why `@formatter:off` keeps the rows one to a line.
+		 */
+		// @formatter:off
 		var priorities = [
-			["%"],
-			["*", "/"],
-			["+", "-"],
-			["<<", ">>", ">>>"],
-			["|", "&", "^"],
-			["??"],
-			["==", "!=", ">", "<", ">=", "<="],
-			["..."],
-			["&&"],
-			["||"],
-			[
-				"=", "+=", "-=", "*=", "/=", "%=", "<<=", ">>=", ">>>=", "|=", "&=", "^=", "=>", "??="
-			],
-			["->"],
-			["in", "is"]
+			/*  0 */ ["%"],
+			/*  1 */ ["*", "/"],
+			/*  2 */ ["+", "-"],
+			/*  3 */ ["<<", ">>", ">>>"],
+			/*  4 */ ["|", "&", "^"],
+			/*  5 */ ["??"],
+			/*  6 */ ["==", "!=", ">", "<", ">=", "<="],
+			/*  7 */ ["..."],
+			/*  8 */ ["&&"],
+			/*  9 */ ["||"],
+			/* 10 */ ["=", "+=", "-=", "*=", "/=", "%=", "<<=", ">>=", ">>>=", "|=", "&=", "^=", "=>", "??="],
+			/* 11 */ ["->"],
+			/* 12 */ ["in", "is"]
 		];
-
+		// @formatter:on
 		opPriority = new Map();
 		opRightAssoc = new Map();
 		for (i in 0...priorities.length) {

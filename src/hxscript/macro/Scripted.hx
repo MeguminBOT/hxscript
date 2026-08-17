@@ -268,7 +268,8 @@ class Scripted {
 						case TCall({expr: TField(_, FStatic(c, cf))}, params):
 							{
 								pos: pos,
-								expr: ECall(macro $p{staticOwnerPath(c.get(), cf.get().name)}, [for (p in params) mapTyped(p)])
+								expr: ECall(macro $p{staticOwnerPath(c.get(), cf.get().name)},
+									[for (p in params) mapTyped(p)])
 							};
 						default:
 							Context.getTypedExpr(e);
@@ -305,21 +306,20 @@ class Scripted {
 						case TPath(p):
 							var bound:Null<ComplexType> = (p.pack.length == 0 && p.sub == null && p.params.length == 0) ? boundFor(p.name) : null;
 
-							if (bound != null)
-								bound;
-							else
-								TPath({
-									pack: p.pack,
-									name: p.name,
-									sub: p.sub,
-									params: [
-										for (q in p.params)
-											switch (q) {
-												case TPType(inner): TPType(bindType(inner));
-												default: q;
-											}
-									]
-								});
+							if (bound != null) bound; else TPath({
+								pack: p.pack,
+								name: p.name,
+								sub: p.sub,
+								params: [
+									for (q in p.params)
+										switch (q) {
+											case TPType(inner):
+												TPType(bindType(inner));
+											default:
+												q;
+										}
+								]
+							});
 
 						case TOptional(inner): TOptional(bindType(inner));
 						case TNamed(n, inner): TNamed(n, bindType(inner));
@@ -329,13 +329,18 @@ class Scripted {
 					}
 				}
 
-				/** @param params A type path's parameters. @return Them, with the base's bound. */
+				/**
+				 * @param params A type path's parameters.
+				 * @return Them, with the base's bound.
+				 */
 				function bindParams(params:Array<TypeParam>):Array<TypeParam> {
 					return [
 						for (q in params)
 							switch (q) {
-								case TPType(inner): TPType(bindType(inner));
-								default: q;
+								case TPType(inner):
+									TPType(bindType(inner));
+								default:
+									q;
 							}
 					];
 				}
@@ -361,10 +366,12 @@ class Scripted {
 								var parts:Array<String> = cls.module.split('.');
 								var moduleName:String = parts.pop();
 
-								var name:String = cls.name.endsWith('_Impl_') ? cls.name.substr(0, cls.name.length - 6) : cls.name;
+								var name:String = cls.name.endsWith('_Impl_') ? cls.name.substr(0,
+									cls.name.length - 6) : cls.name;
 
 								if (!qualified.exists(cls.name))
-									qualified.set(cls.name, {pack: parts, name: moduleName, sub: (moduleName == name ? null : name)});
+									qualified.set(cls.name,
+										{pack: parts, name: moduleName, sub: (moduleName == name ? null : name)});
 
 							case TField(_, FStatic(c, _)) | TTypeExpr(TClassDecl(c)):
 								var cls:ClassType = c.get();
@@ -405,7 +412,12 @@ class Scripted {
 								var q:TypePath = (t.pack.length == 0 && t.sub == null && qualified.exists(t.name)) ? qualified.get(t.name) : t;
 								{
 									pos: x.pos,
-									expr: ENew({pack: q.pack, name: q.name, sub: q.sub, params: bindParams(t.params)}, [for (p in params) fix(p)])
+									expr: ENew({
+										pack: q.pack,
+										name: q.name,
+										sub: q.sub,
+										params: bindParams(t.params)
+									}, [for (p in params) fix(p)])
 								};
 
 							case ECheckType(inner, t):
@@ -414,7 +426,8 @@ class Scripted {
 							case ECast(inner, t) if (t != null):
 								{pos: x.pos, expr: ECast(fix(inner), bindType(t))};
 
-							case EField(owner, member, kind) if (implName(owner) != null && abstractOf.exists(implName(owner))):
+							case EField(owner, member, kind)
+								if (implName(owner) != null && abstractOf.exists(implName(owner))):
 								{pos: x.pos, expr: EField(macro $p{abstractOf.get(implName(owner))}, member, kind)};
 
 							/**
@@ -428,7 +441,8 @@ class Scripted {
 									pos: x.pos,
 									expr: EUntyped({
 										pos: x.pos,
-										expr: ECall({pos: x.pos, expr: EConst(CIdent(name))}, [for (p in params) fix(p)])
+										expr: ECall({pos: x.pos, expr: EConst(CIdent(name))},
+											[for (p in params) fix(p)])
 									})
 								};
 
@@ -469,7 +483,8 @@ class Scripted {
 
 					while (at != null) {
 						if (at.constructor != null) {
-							var found:Null<Array<{name:String, opt:Bool, t:Type}>> = switch (at.constructor.get().type) {
+							var found:Null<Array<{name:String, opt:Bool, t:Type}>> = switch (at.constructor.get()
+								.type) {
 								case TFun(fargs, _): fargs;
 								case TLazy(lazy):
 									switch (lazy()) {
@@ -692,12 +707,19 @@ class Scripted {
 							switch (mapConstructor(type.superClass.t.get(), type.superClass.params).expr) {
 								case EFunction(_, fun):
 									inits.push(fun.expr);
-									return {pos: pos, expr: EFunction(FAnonymous, {args: fun.args, expr: macro $b{inits}, ret: fun.ret})};
+									return {
+										pos: pos,
+										expr: EFunction(FAnonymous,
+											{args: fun.args, expr: macro $b{inits}, ret: fun.ret})
+									};
 								default:
 							}
 						}
 
-						return {pos: pos, expr: EFunction(FAnonymous, {args: [], expr: macro $b{inits}, ret: macro :Void})};
+						return {
+							pos: pos,
+							expr: EFunction(FAnonymous, {args: [], expr: macro $b{inits}, ret: macro :Void})
+						};
 					}
 					var constr = type.constructor.get();
 
@@ -928,7 +950,8 @@ class Scripted {
 							args: [for (arg in direct) {name: arg.name, opt: arg.opt, type: toCT(arg.t)}],
 							expr: {
 								pos: pos,
-								expr: ECall({pos: pos, expr: EConst(CIdent('super'))}, [for (arg in direct) macro $i{arg.name}])
+								expr: ECall({pos: pos, expr: EConst(CIdent('super'))},
+									[for (arg in direct) macro $i{arg.name}])
 							},
 							ret: macro :Void
 						})
@@ -984,7 +1007,8 @@ class Scripted {
 						if (field.name == 'toString') {
 							hasToString = true;
 						} else {
-							var args:Array<{t:Type, opt:Bool, name:String}> = null, ret = null, expr = Context.getTypedExpr(field.expr());
+							var args:Array<{t:Type, opt:Bool, name:String}> = null, ret = null,
+								expr = Context.getTypedExpr(field.expr());
 							switch (field.type) {
 								default:
 								case TFun(aargs, rret):
@@ -1034,13 +1058,15 @@ class Scripted {
 									if (__safe) {
 										__interp.inTry = true;
 										try {
-											__result = Reflect.callMethod(__interp, __interp.getLocal(__name), $a{argsArray});
+											__result = Reflect.callMethod(__interp, __interp.getLocal(__name),
+												$a{argsArray});
 										} catch (__e:Dynamic) {
 											__base.onInstanceError(__e, __name, this);
 											__result = null;
 										}
 									} else {
-										__result = Reflect.callMethod(__interp, __interp.getLocal(__name), $a{argsArray});
+										__result = Reflect.callMethod(__interp, __interp.getLocal(__name),
+											$a{argsArray});
 									}
 									__func = __previous;
 									${isVoid?macro return:macro return cast __result}
@@ -1135,7 +1161,8 @@ class Scripted {
 								if (!accessible) {
 									omittedFields.push(f);
 									if (Context.defined('hxscript_verbose'))
-										Context.info('Skipping $f of ${cls.name}: signature uses an inaccessible type', pos);
+										Context.info('Skipping $f of ${cls.name}: signature uses an inaccessible type',
+											pos);
 									continue;
 								}
 
@@ -1285,7 +1312,8 @@ class Scripted {
 
 				/** Kept in `__vars` too, since a compiled body asks from outside any frame of the interpreter's. */
 				var __superRef:hxscript.runtime.Variable = {
-					ref: hxscript.runtime.Reference.RSuper(superLocals, __constructSuper, Type.getSuperClass(Type.getClass(this)))
+					ref: hxscript.runtime.Reference.RSuper(superLocals, __constructSuper,
+						Type.getSuperClass(Type.getClass(this)))
 				};
 				__interp.locals.set('super', __superRef);
 				__vars.set('super', __superRef);
@@ -1371,8 +1399,8 @@ class Scripted {
 								 * so the arguments it passes are evaluated once rather than twice. They
 								 * were evaluated before the instance existed, to make it.
 								 */
-								var body:hxscript.syntax.Expr = Reflect.field(Type.getClass(this), '__nativeSuper') == true
-									? hxscript.types.ScriptedTools.withoutSuper(fun.expr) : fun.expr;
+								var body:hxscript.syntax.Expr = Reflect.field(Type.getClass(this),
+									'__nativeSuper') == true ? hxscript.types.ScriptedTools.withoutSuper(fun.expr) : fun.expr;
 
 								constructor = __interp.buildFunction(f, fun.args, body, fun.ret, superLocals, true);
 								continue;
@@ -1380,8 +1408,8 @@ class Scripted {
 
 							/** A backend that compiled this method hands back a closure bound to this instance. */
 							var __compiled:Dynamic = t.boundMember(f, this);
-							__interp.locals.get(f).r = __compiled != null ? __compiled : __interp.buildFunction(f, fun.args, fun.expr, fun.ret,
-								superLocals);
+							__interp.locals.get(f).r = __compiled != null ? __compiled : __interp.buildFunction(f,
+								fun.args, fun.expr, fun.ret, superLocals);
 
 						case KVar(v):
 							if (__interp.locals.exists(f)) {
@@ -1548,7 +1576,8 @@ class Scripted {
 					expr: macro {
 						if (hxscript.macro.Scripted.ignoreFields.contains(field))
 							return false;
-						return (instanceFields.contains(field) || Reflect.hasField(this, field) || __vars.exists(field));
+						return (instanceFields.contains(field) || Reflect.hasField(this,
+							field) || __vars.exists(field));
 					},
 					ret: macro :Bool
 				})
@@ -1747,7 +1776,8 @@ class Scripted {
 		});
 
 		return macro {
-			var meta:Array<String> = cast haxe.Unserializer.run(haxe.rtti.Meta.getType($p{_name.split('.')}).typedScripted[0]);
+			var meta:Array<String> = cast haxe.Unserializer.run(haxe.rtti.Meta.getType($p{_name.split('.')})
+				.typedScripted[0]);
 			var map:Map<String, Dynamic> = [];
 
 			for (cls in meta) {

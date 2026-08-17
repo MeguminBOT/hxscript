@@ -239,7 +239,12 @@ class Bytecode {
 	 */
 	public function native(lib:String, name:String, type:Int):Int {
 		var findex:Int = nextFindex++;
-		natives.push({lib: stringId(lib), name: stringId(name), type: type, findex: findex});
+		natives.push({
+			lib: stringId(lib),
+			name: stringId(name),
+			type: type,
+			findex: findex
+		});
 		return findex;
 	}
 

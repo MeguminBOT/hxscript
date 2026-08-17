@@ -716,7 +716,6 @@ class Emitter {
 
 			signatures.set(c.name + (isStatic(f) ? '.' : '#') + f.name, sig);
 		}
-
 	}
 
 	/**
@@ -859,7 +858,8 @@ class Emitter {
 		var global:Int = module.global(holders.get(c.name));
 		values.set(c.name, global);
 
-		module.defineType(shapes.get(c.name), TObj(module.stringId(pathOf(c.name)), fields, protos, baseType, global + 1));
+		module.defineType(shapes.get(c.name),
+			TObj(module.stringId(pathOf(c.name)), fields, protos, baseType, global + 1));
 
 		emitted.push({
 			name: c.name,
@@ -1325,7 +1325,8 @@ class Emitter {
 
 					emitRendering(c, decl.pos);
 
-				case DPackage(_) | DImport(_, _) | DUsing(_) | DEnum(_) | DAbstract(_) | DInterface(_) | DTypedef(_) | DField(_):
+				case DPackage(_) | DImport(_, _) | DUsing(_) | DEnum(_) | DAbstract(_) | DInterface(_) | DTypedef(_) |
+					DField(_):
 
 				case _:
 					throw new Unsupported('a declaration this cannot express', decl.pos);
@@ -1411,7 +1412,12 @@ class Emitter {
 
 		pop();
 
-		module.add({type: sig.type, findex: sig.findex, regs: regs, ops: ops});
+		module.add({
+			type: sig.type,
+			findex: sig.findex,
+			regs: regs,
+			ops: ops
+		});
 	}
 
 	/**
@@ -1460,7 +1466,12 @@ class Emitter {
 
 		pop();
 
-		module.add({type: sig.type, findex: sig.findex, regs: regs, ops: ops});
+		module.add({
+			type: sig.type,
+			findex: sig.findex,
+			regs: regs,
+			ops: ops
+		});
 	}
 
 	/**
@@ -1599,7 +1610,8 @@ class Emitter {
 	 * @param host The class it belongs to, or null when it is a static.
 	 * @param inits Fields to put their starting values in first, for a constructor.
 	 */
-	function emitFunction(sig:Signature, fn:FunctionDecl, pos:Position, ?host:String, ?inits:Array<{name:String, value:Expr}>):Void {
+	function emitFunction(sig:Signature, fn:FunctionDecl, pos:Position, ?host:String,
+			?inits:Array<{name:String, value:Expr}>):Void {
 		ops = [];
 		regs = [];
 		scopes = [];
@@ -1751,7 +1763,9 @@ class Emitter {
 						setField(thisExpr(e.pos), name, value, e.pos);
 
 					case EIdent(name) if (ambientMembers.exists(name)):
-						throw new Unsupported('an assignment to ' + name + ', which the host offers to read rather than to write', e.pos);
+						throw new Unsupported('an assignment to '
+							+ name
+							+ ', which the host offers to read rather than to write', e.pos);
 
 					case EIdent(name) if (reachesHost()):
 						setField(thisExpr(e.pos), name, value, e.pos);
@@ -1775,8 +1789,12 @@ class Emitter {
 						throw new Unsupported('an assignment to something that is neither a local nor a field', e.pos);
 				}
 
-			case EBinop(op, target, value) if (op.length > 1 && op.charAt(op.length - 1) == '=' && ASSIGNABLE.indexOf(op) >= 0):
-				statement({e: EBinop('=', target, {e: EBinop(op.substr(0, op.length - 1), target, value), pos: e.pos}), pos: e.pos});
+			case EBinop(op, target, value)
+				if (op.length > 1 && op.charAt(op.length - 1) == '=' && ASSIGNABLE.indexOf(op) >= 0):
+				statement({
+					e: EBinop('=', target, {e: EBinop(op.substr(0, op.length - 1), target, value), pos: e.pos}),
+					pos: e.pos
+				});
 
 			case EIf(cond, yes, no):
 				var toElse:Array<Int> = [];
@@ -2580,7 +2598,8 @@ class Emitter {
 	function emitCall(callee:Expr, params:Array<Expr>, slot:Int, pos:Position):Void {
 		switch (callee.e) {
 			case EField({e: EIdent('super')}, name, _):
-				callSupport('superCall', [dynOf(thisExpr(pos)), named(owningPath()), named(name), gathered(params)], slot);
+				callSupport('superCall', [dynOf(thisExpr(pos)), named(owningPath()), named(name), gathered(params)],
+					slot);
 				return;
 
 			case EIdent('super'):
@@ -2749,12 +2768,8 @@ class Emitter {
 	 * @return Whether to read it off the subject.
 	 */
 	function subjectCtor(name:String):Bool {
-		return isTypeName(name)
-			&& lookup(name) == null
-			&& !constructors.exists(name)
-			&& !classes.exists(name)
-			&& !declared.exists(name)
-			&& !ambientMembers.exists(name);
+		return isTypeName(name) && lookup(name) == null && !constructors.exists(name) && !classes.exists(name)
+			&& !declared.exists(name) && !ambientMembers.exists(name);
 	}
 
 	/**
@@ -2826,7 +2841,12 @@ class Emitter {
 	 * @return The global's index.
 	 */
 	function hostSlot(owner:String, field:String):Int {
-		return bind('h' + owner + '.' + field, {index: 0, kind: BHost, owner: owner, field: field});
+		return bind('h' + owner + '.' + field, {
+			index: 0,
+			kind: BHost,
+			owner: owner,
+			field: field
+		});
 	}
 
 	/**
@@ -3153,7 +3173,6 @@ class Emitter {
 		 * nothing there. The wrapper now carries a real member per forwarded field, so the offset
 		 * resolves and both ways of running answer alike.
 		 */
-
 		/**
 		 * A class of the batch is allocated here rather than asked of the world, because this module
 		 * holds its layout. Every one of them has a constructor, synthesised when the script wrote
@@ -3244,7 +3263,8 @@ class Emitter {
 
 	function storeFloatIndex():Int {
 		if (storeFloatNative < 0)
-			storeFloatNative = module.native('hxs', 'stored', module.typeId(TFun([tDyn, tDyn, tF64, tDyn, tI32], tVoid)));
+			storeFloatNative = module.native('hxs', 'stored',
+				module.typeId(TFun([tDyn, tDyn, tF64, tDyn, tI32], tVoid)));
 
 		return storeFloatNative;
 	}
@@ -3354,7 +3374,8 @@ class Emitter {
 	/** Writes a field write, by name and through the world, for the reasons `getField` gives. */
 	function setField(obj:Expr, name:String, value:Expr, pos:Position):Void {
 		var cls:Null<String> = ownerNamed(obj) ?? heldAs(obj);
-		var writer:Null<{get:String, set:String}> = (initialising || writing == 'set_' + name) ? null : propertyOf(cls, name);
+		var writer:Null<{get:String, set:String}> = (initialising || writing == 'set_'
+			+ name) ? null : propertyOf(cls, name);
 
 		if (writer != null) {
 			if (writer.set != 'set')
@@ -3832,19 +3853,61 @@ class Emitter {
 	 * call made with the wrong convention, which is not an error anyone reports.
 	 */
 	static var SHAPES:StringMap<String> = [
-		'add' => 'ddd', 'sub' => 'ddd', 'mul' => 'ddd', 'div' => 'ddd', 'mod' => 'ddd',
-		'eq' => 'ddb', 'lt' => 'ddb', 'lte' => 'ddb', 'gt' => 'ddb', 'gte' => 'ddb',
-		'neg' => 'dd', 'truthy' => 'db', 'toInt' => 'di', 'toFloat' => 'df', 'toBool' => 'db',
-		'fetch' => 'dddd', 'store' => 'ddddv', 'get' => 'ddd', 'set' => 'dddv', 'raise' => 'dd',
-		'invoke' => 'dddd', 'send' => 'ddddd', 'make' => 'ddd', 'anyMap' => 'd',
-		'index' => 'ddd', 'indexInt' => 'did', 'setIndex' => 'dddd', 'array' => 'd', 'push' => 'ddv',
-		'object' => 'd', 'setField' => 'dddv', 'put' => 'dddd', 'range' => 'ddd',
-		'iterator' => 'dd', 'pairs' => 'dd', 'step' => 'db', 'take' => 'dd',
-		'args0' => 'd', 'args1' => 'dd', 'args2' => 'ddd', 'args3' => 'dddd', 'dispatch' => 'ddddd',
-		'call' => 'ddd', 'text' => 'dy',
-		'has' => 'ddb', 'sized' => 'ddb', 'ctor' => 'dd', 'params' => 'dd',
-		'isOfType' => 'ddb', 'catches' => 'ddb', 'enumOf' => 'dddd', 'regex' => 'ddd',
-		'superCall' => 'dddd', 'superGet' => 'dddd', 'superNew' => 'dddv'
+		'add' => 'ddd',
+		'sub' => 'ddd',
+		'mul' => 'ddd',
+		'div' => 'ddd',
+		'mod' => 'ddd',
+		'eq' => 'ddb',
+		'lt' => 'ddb',
+		'lte' => 'ddb',
+		'gt' => 'ddb',
+		'gte' => 'ddb',
+		'neg' => 'dd',
+		'truthy' => 'db',
+		'toInt' => 'di',
+		'toFloat' => 'df',
+		'toBool' => 'db',
+		'fetch' => 'dddd',
+		'store' => 'ddddv',
+		'get' => 'ddd',
+		'set' => 'dddv',
+		'raise' => 'dd',
+		'invoke' => 'dddd',
+		'send' => 'ddddd',
+		'make' => 'ddd',
+		'anyMap' => 'd',
+		'index' => 'ddd',
+		'indexInt' => 'did',
+		'setIndex' => 'dddd',
+		'array' => 'd',
+		'push' => 'ddv',
+		'object' => 'd',
+		'setField' => 'dddv',
+		'put' => 'dddd',
+		'range' => 'ddd',
+		'iterator' => 'dd',
+		'pairs' => 'dd',
+		'step' => 'db',
+		'take' => 'dd',
+		'args0' => 'd',
+		'args1' => 'dd',
+		'args2' => 'ddd',
+		'args3' => 'dddd',
+		'dispatch' => 'ddddd',
+		'call' => 'ddd',
+		'text' => 'dy',
+		'has' => 'ddb',
+		'sized' => 'ddb',
+		'ctor' => 'dd',
+		'params' => 'dd',
+		'isOfType' => 'ddb',
+		'catches' => 'ddb',
+		'enumOf' => 'dddd',
+		'regex' => 'ddd',
+		'superCall' => 'dddd',
+		'superGet' => 'dddd',
+		'superNew' => 'dddv'
 	];
 
 	/**
@@ -4817,7 +4880,8 @@ class Emitter {
 	 * @param slot Where to leave the value, or null when the switch is a statement.
 	 * @param pos Where it appears.
 	 */
-	function emitSwitch(subject:Expr, cases:Array<{values:Array<Expr>, expr:Expr, ?guard:Expr}>, fallback:Null<Expr>, slot:Null<Int>, pos:Position):Void {
+	function emitSwitch(subject:Expr, cases:Array<{values:Array<Expr>, expr:Expr, ?guard:Expr}>, fallback:Null<Expr>,
+			slot:Null<Int>, pos:Position):Void {
 		var value:Int = dynOf(subject);
 		var done:Array<Int> = [];
 
@@ -4932,7 +4996,8 @@ class Emitter {
 	 * in progress is put aside and put back. Nesting is what makes that necessary: a lambda inside a
 	 * lambda arrives here while this is already part-way through.
 	 */
-	function inner(findex:Int, seen:Array<String>, signature:Array<Int>, args:Array<Argument>, body:Expr, pos:Position):Void {
+	function inner(findex:Int, seen:Array<String>, signature:Array<Int>, args:Array<Argument>, body:Expr,
+			pos:Position):Void {
 		var heldOps:Array<Instruction> = ops;
 		var heldRegs:Array<Int> = regs;
 		var heldScopes:Array<StringMap<Int>> = scopes;
@@ -5107,8 +5172,8 @@ class Emitter {
 	 * @param slot Where to leave the value, or null when the try is a statement.
 	 * @param pos Where it appears.
 	 */
-	function emitTry(body:Expr, name:String, t:Null<CType>, handler:Expr, extra:Null<Array<{v:String, t:Null<CType>, expr:Expr}>>, slot:Null<Int>,
-			pos:Position):Void {
+	function emitTry(body:Expr, name:String, t:Null<CType>, handler:Expr,
+			extra:Null<Array<{v:String, t:Null<CType>, expr:Expr}>>, slot:Null<Int>, pos:Position):Void {
 		var thrown:Int = reg(tDyn);
 		var trap:Int = ops.length;
 		ops.push({op: OTrap, args: [thrown, 0]});
@@ -5173,10 +5238,7 @@ class Emitter {
 		return switch (t) {
 			case CTPath(path, _):
 				var name:String = path[path.length - 1];
-				if (name == 'Dynamic' || name == 'Any' || name == 'Exception')
-					null;
-				else
-					typeNamed(path.join('.'));
+				if (name == 'Dynamic' || name == 'Any' || name == 'Exception') null; else typeNamed(path.join('.'));
 
 			case CTParent(inner):
 				catchType(inner, pos);
@@ -5376,14 +5438,25 @@ class Emitter {
 
 	/** The jump each comparison becomes when it is taken. */
 	static var COMPARE:StringMap<Opcode> = [
-		'<' => OJSLt, '<=' => OJSLte, '>' => OJSGt, '>=' => OJSGte, '==' => OJEq, '!=' => OJNotEq
+		'<' => OJSLt,
+		'<=' => OJSLte,
+		'>' => OJSGt,
+		'>=' => OJSGte,
+		'==' => OJEq,
+		'!=' => OJNotEq
 	];
 
 	/** The comparison that is true exactly when another is false. */
+	// @formatter:off
 	static var INVERSE:StringMap<String> = [
-		'<' => '>=', '<=' => '>', '>' => '<=', '>=' => '<', '==' => '!=', '!=' => '=='
+		'<'  => '>=',
+		'<=' => '>',
+		'>'  => '<=',
+		'>=' => '<',
+		'==' => '!=',
+		'!=' => '=='
 	];
-
+	// @formatter:on
 	/** The compound assignments that rewrite into an operation and a plain assignment. */
 	static var ASSIGNABLE:Array<String> = ['+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>=', '>>>='];
 }

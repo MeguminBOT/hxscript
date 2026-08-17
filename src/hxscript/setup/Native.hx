@@ -98,7 +98,11 @@ class Native {
 
 			case Missing(reason, remedy):
 				hxscript.macro.Banner.note('native', 'missing, so every script will be interpreted');
-				Context.warning('hxscript: compiled scripts need a native module and ' + reason + '\n' + remedy + '\n'
+				Context.warning('hxscript: compiled scripts need a native module and '
+					+ reason
+					+ '\n'
+					+ remedy
+					+ '\n'
 					+ 'Until then every script is interpreted, which is a slower program rather than a broken one.',
 					Context.currentPos());
 		}
@@ -133,15 +137,25 @@ class Native {
 				'point HLPATH at a HashLink 1.16 binary distribution');
 
 		if (version != CARRIED)
-			return Missing('the HashLink at ' + hl + ' is ' + spell(version) + ' and the carried loader is for ' + spell(CARRIED),
-				'install HashLink ' + spell(CARRIED) + ', or build the module yourself against a matching source tree:\n'
-				+ '  sh ' + Path.join([carried, 'build.sh']) + ' --src <hashlink tree>');
+			return Missing('the HashLink at '
+				+ hl
+				+ ' is '
+				+ spell(version)
+				+ ' and the carried loader is for '
+				+ spell(CARRIED),
+				'install HashLink '
+				+ spell(CARRIED)
+				+ ', or build the module yourself against a matching source tree:\n'
+				+ '  sh '
+				+ Path.join([carried, 'build.sh'])
+				+ ' --src <hashlink tree>');
 
 		var cc:Null<String> = compiler();
 		if (cc == null)
 			return Missing('no C compiler was found', 'install one, or set CC to the one to use');
 
-		return Path.extension(out) == 'c' ? program(out, carried, hl, headers, cc, version) : library(out, carried, hl, headers, cc, version);
+		return Path.extension(out) == 'c' ? program(out, carried, hl, headers, cc,
+			version) : library(out, carried, hl, headers, cc, version);
 	}
 
 	/**
@@ -496,7 +510,10 @@ class Native {
 		return Std.parseInt('0x' + digits.matched(1));
 	}
 
-	/** @param packed A version as hl.h spells it. @return It as hashlink tags them. */
+	/**
+	 * @param packed A version as hl.h spells it.
+	 * @return It as hashlink tags them.
+	 */
 	static function spell(packed:Int):String {
 		return ((packed >> 16) & 0xFF) + '.' + ((packed >> 8) & 0xFF) + '.' + (packed & 0xFF);
 	}
@@ -521,7 +538,10 @@ class Native {
 		return null;
 	}
 
-	/** @param name A program. @return Whether it is here to be run, by path or by name. */
+	/**
+	 * @param name A program.
+	 * @return Whether it is here to be run, by path or by name.
+	 */
 	static function runnable(name:String):Bool {
 		if (name.indexOf('/') >= 0 || name.indexOf('\\') >= 0)
 			return FileSystem.exists(name);
@@ -529,7 +549,10 @@ class Native {
 		return onPath(name) != null || (windows() && onPath(name + '.exe') != null);
 	}
 
-	/** @param name An executable. @return Where it is, or null when it is not on the path. */
+	/**
+	 * @param name An executable.
+	 * @return Where it is, or null when it is not on the path.
+	 */
 	static function onPath(name:String):Null<String> {
 		var path:Null<String> = Sys.getEnv('PATH');
 		if (path == null)
@@ -578,7 +601,9 @@ class Native {
 	/** Removes a file if it is there, so a rename onto it can succeed. */
 	static function tidy(path:String):Void {
 		if (FileSystem.exists(path))
-			try FileSystem.deleteFile(path) catch (e:Dynamic) {}
+			try
+				FileSystem.deleteFile(path)
+			catch (e:Dynamic) {}
 	}
 
 	/** @return Whether this is a Windows machine, which changes how a program is linked. */

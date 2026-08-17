@@ -365,15 +365,7 @@ class Printer {
 			case CString(s):
 				add('"');
 				add(s.split("\\")
-					.join("\\\\")
-					.split('"')
-					.join('\\"')
-					.split("\n")
-					.join("\\n")
-					.split("\r")
-					.join("\\r")
-					.split("\t")
-					.join("\\t"));
+					.join("\\\\").split('"').join('\\"').split("\n").join("\\n").split("\r").join("\\r").split("\t").join("\\t"));
 				add('"');
 			case CReg(p, m):
 				add('~/');

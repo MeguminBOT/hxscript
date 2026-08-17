@@ -31,7 +31,10 @@ class ScriptedEnumValue implements ICustomEnumValueType {
 		this.arguments = arguments;
 
 		this.index = index;
-		this.constructor = (base != null && base.values != null && index >= 0 && index < base.values.length) ? base.values[index] : null;
+		this.constructor = (base != null
+			&& base.values != null
+			&& index >= 0
+			&& index < base.values.length) ? base.values[index] : null;
 	}
 
 	/** @return `Ctor` or `Ctor(arg,arg)` source-like text. */

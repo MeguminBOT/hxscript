@@ -229,7 +229,6 @@ class Presets {
 			'h2d.filter.Glow',
 			'h2d.col.Point',
 			'hxd.Key',
-
 			/**
 			 * The other way a game is played. `hxd.Pad.wait` hands over a pad as one arrives, and its
 			 * sticks, triggers and buttons are read per frame the way the keyboard is, so a project
@@ -245,7 +244,6 @@ class Presets {
 			'hxd.snd.Channel',
 			'hxd.snd.effect.Pitch',
 			'hxscript.heaps.SoundTools',
-
 			/** Named by `h2d.Tile`, and by `h2d.Object.drawTo`. */
 			'h3d.mat.Texture'
 		],
@@ -327,15 +325,12 @@ class Presets {
 			'h3d.scene.CameraController',
 			'h3d.scene.fwd.DirLight',
 			'h3d.scene.fwd.PointLight',
-
 			/** Ambient light and the light budget, which is `scene.lightSystem`. */
 			'h3d.scene.fwd.LightSystem',
-
 			/** Shadows, particles, and the sphere a culling test is written in. */
 			'h3d.pass.DefaultShadowMap',
 			'h3d.parts.GpuParticles',
 			'h3d.col.Sphere',
-
 			/**
 			 * The shape a game asks questions of rather than draws. `Ray` with
 			 * `Bounds.rayIntersection` is every hitscan shot and every ground probe, and both are
@@ -359,7 +354,6 @@ class Presets {
 			'h3d.prim.Sphere',
 			'h3d.prim.Cylinder',
 			'h3d.prim.Grid',
-
 			/** A sphere built from a subdivided solid rather than from rings, so it lights evenly. */
 			'h3d.prim.GeoSphere',
 			'h3d.mat.Material',
@@ -381,12 +375,7 @@ class Presets {
 		abstractPackages: [],
 		abstracts: [],
 		abstractExclude: [],
-		globals: [
-			'h3d.scene.Object',
-			'h3d.scene.Mesh',
-			'h3d.prim.Cube',
-			'h3d.mat.Material'
-		]
+		globals: ['h3d.scene.Object', 'h3d.scene.Mesh', 'h3d.prim.Cube', 'h3d.mat.Material']
 	};
 
 	/**
@@ -452,7 +441,8 @@ class Presets {
 
 		return [
 			for (lib in out)
-				if (enabled(lib.requires ?? lib.define) && skip.indexOf(lib.define) < 0
+				if (enabled(lib.requires ?? lib.define)
+					&& skip.indexOf(lib.define) < 0
 					&& (only.length == 0 || only.indexOf(lib.define) >= 0)) lib
 		];
 	}

@@ -39,8 +39,12 @@ class Shims {
 		});
 		set('Array.remove', function(o:Dynamic, a:Array<Dynamic>):Dynamic return ArrayImpl.remove(o, a[0]));
 		set('Array.contains', function(o:Dynamic, a:Array<Dynamic>):Dynamic return ArrayImpl.contains(o, a[0]));
-		set('Array.indexOf', function(o:Dynamic, a:Array<Dynamic>):Dynamic return ArrayImpl.indexOf(o, a[0], a.length > 1 ? a[1] : null));
-		set('Array.lastIndexOf', function(o:Dynamic, a:Array<Dynamic>):Dynamic return ArrayImpl.lastIndexOf(o, a[0], a.length > 1 ? a[1] : null));
+		set('Array.indexOf',
+			function(o:Dynamic,
+					a:Array<Dynamic>):Dynamic return ArrayImpl.indexOf(o, a[0], a.length > 1 ? a[1] : null));
+		set('Array.lastIndexOf',
+			function(o:Dynamic,
+					a:Array<Dynamic>):Dynamic return ArrayImpl.lastIndexOf(o, a[0], a.length > 1 ? a[1] : null));
 		set('Array.join', function(o:Dynamic, a:Array<Dynamic>):Dynamic return ArrayImpl.join(o, a[0]));
 		set('Array.reverse', function(o:Dynamic, a:Array<Dynamic>):Dynamic {
 			ArrayImpl.reverse(o);
@@ -50,7 +54,8 @@ class Shims {
 			ArrayImpl.sort(o, a[0]);
 			return null;
 		});
-		set('Array.slice', function(o:Dynamic, a:Array<Dynamic>):Dynamic return ArrayImpl.slice(o, a[0], a.length > 1 ? a[1] : null));
+		set('Array.slice',
+			function(o:Dynamic, a:Array<Dynamic>):Dynamic return ArrayImpl.slice(o, a[0], a.length > 1 ? a[1] : null));
 		set('Array.splice', function(o:Dynamic, a:Array<Dynamic>):Dynamic return ArrayImpl.splice(o, a[0], a[1]));
 		set('Array.concat', function(o:Dynamic, a:Array<Dynamic>):Dynamic return ArrayImpl.concat(o, a[0]));
 		set('Array.copy', function(o:Dynamic, a:Array<Dynamic>):Dynamic return ArrayImpl.copy(o));
@@ -61,7 +66,8 @@ class Shims {
 			return null;
 		});
 		set('Array.iterator', function(o:Dynamic, a:Array<Dynamic>):Dynamic return ArrayImpl.iterator(o));
-		set('Array.keyValueIterator', function(o:Dynamic, a:Array<Dynamic>):Dynamic return ArrayImpl.keyValueIterator(o));
+		set('Array.keyValueIterator',
+			function(o:Dynamic, a:Array<Dynamic>):Dynamic return ArrayImpl.keyValueIterator(o));
 		set('Array.toString', function(o:Dynamic, a:Array<Dynamic>):Dynamic return ArrayImpl.toString(o));
 	}
 
@@ -71,12 +77,20 @@ class Shims {
 		set('String.split', function(o:Dynamic, a:Array<Dynamic>):Dynamic return StringImpl.split(o, a[0]));
 		set('String.charAt', function(o:Dynamic, a:Array<Dynamic>):Dynamic return StringImpl.charAt(o, a[0]));
 		set('String.charCodeAt', function(o:Dynamic, a:Array<Dynamic>):Dynamic return StringImpl.charCodeAt(o, a[0]));
-		set('String.indexOf', function(o:Dynamic, a:Array<Dynamic>):Dynamic return StringImpl.indexOf(o, a[0], a.length > 1 ? a[1] : null));
-		set('String.lastIndexOf', function(o:Dynamic, a:Array<Dynamic>):Dynamic return StringImpl.lastIndexOf(o, a[0], a.length > 1 ? a[1] : null));
+		set('String.indexOf',
+			function(o:Dynamic,
+					a:Array<Dynamic>):Dynamic return StringImpl.indexOf(o, a[0], a.length > 1 ? a[1] : null));
+		set('String.lastIndexOf',
+			function(o:Dynamic,
+					a:Array<Dynamic>):Dynamic return StringImpl.lastIndexOf(o, a[0], a.length > 1 ? a[1] : null));
 		set('String.toUpperCase', function(o:Dynamic, a:Array<Dynamic>):Dynamic return StringImpl.toUpperCase(o));
 		set('String.toLowerCase', function(o:Dynamic, a:Array<Dynamic>):Dynamic return StringImpl.toLowerCase(o));
-		set('String.substring', function(o:Dynamic, a:Array<Dynamic>):Dynamic return StringImpl.substring(o, a[0], a.length > 1 ? a[1] : null));
-		set('String.substr', function(o:Dynamic, a:Array<Dynamic>):Dynamic return StringImpl.substr(o, a[0], a.length > 1 ? a[1] : null));
+		set('String.substring',
+			function(o:Dynamic,
+					a:Array<Dynamic>):Dynamic return StringImpl.substring(o, a[0], a.length > 1 ? a[1] : null));
+		set('String.substr',
+			function(o:Dynamic,
+					a:Array<Dynamic>):Dynamic return StringImpl.substr(o, a[0], a.length > 1 ? a[1] : null));
 		set('String.toString', function(o:Dynamic, a:Array<Dynamic>):Dynamic return StringImpl.toString(o));
 	}
 }

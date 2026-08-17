@@ -180,6 +180,7 @@ class Compiler {
 		return report;
 	}
 	#else
+
 	/**
 	 * Does nothing: this build has no compiler. Present so a host need not guard its own call.
 	 *

@@ -82,7 +82,8 @@ class Bridges {
 
 				if (Autowire.resolve(base) == null) {
 					if (!Autowire.declared(base))
-						Context.warning('hxscript: no module found for bridged base $base; scripts cannot extend it', pos);
+						Context.warning('hxscript: no module found for bridged base $base; scripts cannot extend it',
+							pos);
 
 					continue;
 				}
@@ -98,7 +99,8 @@ class Bridges {
 					name = 'Scripted' + flatten(base);
 
 				if (taken.exists(name)) {
-					Context.warning('hxscript: bridge name $name already taken by ${taken.get(name)}; skipping $base', pos);
+					Context.warning('hxscript: bridge name $name already taken by ${taken.get(name)}; skipping $base',
+						pos);
 					continue;
 				}
 				taken.set(name, base);

@@ -28,7 +28,6 @@ import hxscript.Environment;
 import hxscript.Module;
 import hxscript.error.Sink;
 import haxe.ds.StringMap;
-
 import hxscript.compile.Unit;
 import hxscript.compile.Result;
 import hxscript.compile.Skip;
@@ -230,7 +229,8 @@ class Backend {
 	 *        so it reaches them where they really live.
 	 * @return The compiled module, and which inputs were compiled or skipped.
 	 */
-	public static function compile(inputs:Array<Unit>, ?ambient:Array<String>, ?external:Array<String>, ?statics:Array<String>):Result {
+	public static function compile(inputs:Array<Unit>, ?ambient:Array<String>, ?external:Array<String>,
+			?statics:Array<String>):Result {
 		#if hxscript_cppia
 		var skipped:Array<Skip> = [];
 		var accepted:Array<Unit> = [];
@@ -467,9 +467,9 @@ class Backend {
 		Sink.report({
 			phase: PJit,
 			message: 'this batch loads without the hxcpp JIT and is refused with it on; the JIT is off for the rest of this process',
-			hint: 'A JIT fault is cumulative rather than caused by one construct, so there is no module to\n'
-			+ 'blame and nothing to fix in a script. Compiled code without the JIT is still much faster\n'
-			+ 'than interpreted. Set Compiler.jit to false at startup to skip this retry entirely.',
+			hint: 'A JIT fault is cumulative rather than caused by one construct, so there is no module to\n' +
+			'blame and nothing to fix in a script. Compiled code without the JIT is still much faster\n' +
+			'than interpreted. Set Compiler.jit to false at startup to skip this retry entirely.',
 			fatal: false
 		});
 
@@ -526,15 +526,14 @@ class Backend {
 	static function rejected(name:String, fault:String, shared:Bool):Void {
 		refused.set(name, fault);
 
-		Sink.report({
-			phase: PLoad,
+		Sink.report({phase: PLoad,
 			message: 'the bytecode loader refused $name: $fault',
-			hint: shared ? 'Reported against every module in the batch, because narrowing was off. Set\n'
-				+ 'Compiler.narrowOnFailure to true to find which one it is.' : 'The module is left interpreted and everything else still runs. The loader names the fault\n'
-				+ 'and nothing inside the module, so the construct has to be found by elimination: an\n'
-				+ 'assignment or increment through a chain of fields is the usual cause of a Set or\n'
-				+ 'increment complaint, and a link complaint means a class this module names is neither in\n'
-				+ 'the batch nor a host class.',
+			hint: shared ? 'Reported against every module in the batch, because narrowing was off. Set\n' +
+			'Compiler.narrowOnFailure to true to find which one it is.' : 'The module is left interpreted and everything else still runs. The loader names the fault\n'
+			+ 'and nothing inside the module, so the construct has to be found by elimination: an\n'
+			+ 'assignment or increment through a chain of fields is the usual cause of a Set or\n'
+			+ 'increment complaint, and a link complaint means a class this module names is neither in\n'
+			+ 'the batch nor a host class.',
 			fatal: false
 		});
 	}
@@ -559,9 +558,10 @@ class Backend {
 				message: 'left interpreted: ' + entry.reason,
 				origin: entry.origin,
 				line: entry.line,
-				excerpt: entry.origin == null || entry.line <= 0 ? null : hxscript.error.Sources.line(entry.origin, entry.line),
-				hint: 'A construct with no bytecode spelling is a normal outcome, not a failure: the module\n'
-				+ 'keeps running interpreted and everything else still compiles.',
+				excerpt: entry.origin == null
+				|| entry.line <= 0 ? null : hxscript.error.Sources.line(entry.origin, entry.line),
+				hint: 'A construct with no bytecode spelling is a normal outcome, not a failure: the module\n' +
+				'keeps running interpreted and everything else still compiles.',
 				fatal: false
 			});
 		}

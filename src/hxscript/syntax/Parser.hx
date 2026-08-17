@@ -496,7 +496,8 @@ class Parser extends Lexer {
 					|| (delta == 0 && !opRightAssoc.exists(op))) mk(EBinop(op2, makeBinop(op, e1, e2), e3), pmin(e1),
 						pmax(e3)); else mk(EBinop(op, e1, e), pmin(e1), pmax(e));
 			case ETernary(e2, e3, e4):
-				if (opRightAssoc.exists(op)) mk(EBinop(op, e1, e), pmin(e1), pmax(e)); else mk(ETernary(makeBinop(op, e1, e2), e3, e4), pmin(e1), pmax(e));
+				if (opRightAssoc.exists(op)) mk(EBinop(op, e1, e), pmin(e1),
+					pmax(e)); else mk(ETernary(makeBinop(op, e1, e2), e3, e4), pmin(e1), pmax(e));
 			default:
 				mk(EBinop(op, e1, e), pmin(e1), pmax(e));
 		}
@@ -824,7 +825,8 @@ class Parser extends Lexer {
 										parseFullExpr(exprs);
 								}
 							}
-							c.expr = if (exprs.length == 1) exprs[0]; else if (exprs.length == 0) mk(EBlock([]), tokenMin,
+							c.expr = if (exprs.length == 1) exprs[0]; else if (exprs.length == 0) mk(EBlock([]),
+								tokenMin,
 								tokenMin); else mk(EBlock(exprs), pmin(exprs[0]), pmax(exprs[exprs.length - 1]));
 						case TId("default"):
 							if (def != null)
@@ -843,7 +845,8 @@ class Parser extends Lexer {
 										parseFullExpr(exprs);
 								}
 							}
-							def = if (exprs.length == 1) exprs[0]; else if (exprs.length == 0) mk(EBlock([]), tokenMin,
+							def = if (exprs.length == 1) exprs[0]; else if (exprs.length == 0) mk(EBlock([]),
+								tokenMin,
 								tokenMin); else mk(EBlock(exprs), pmin(exprs[0]), pmax(exprs[exprs.length - 1]));
 						case TBrClose:
 							break;
@@ -959,7 +962,8 @@ class Parser extends Lexer {
 				switch (tk) {
 					case TId(id):
 						if (hasRest)
-							error(ECustom('Rest should only be used for the last function argument'), tokenMin, tokenMax);
+							error(ECustom('Rest should only be used for the last function argument'), tokenMin,
+								tokenMax);
 						hasRest = rest;
 						name = id;
 					default:
@@ -1018,12 +1022,22 @@ class Parser extends Lexer {
 
 		if (allowNoBody && maybe(TSemicolon)) {
 			closeParams(outer);
-			return {args: args, ret: ret, params: params, body: null};
+			return {
+				args: args,
+				ret: ret,
+				params: params,
+				body: null
+			};
 		}
 
 		var body = parseExpr();
 		closeParams(outer);
-		return {args: args, ret: ret, params: params, body: body};
+		return {
+			args: args,
+			ret: ret,
+			params: params,
+			body: body
+		};
 	}
 
 	/**
@@ -1150,7 +1164,8 @@ class Parser extends Lexer {
 								switch arg.value {
 									case null:
 									case v:
-										error(ECustom('Default values not allowed in function types'), v.pos.pmin, v.pos.pmax);
+										error(ECustom('Default values not allowed in function types'), v.pos.pmin,
+											v.pos.pmax);
 								}
 
 								CTNamed(arg.name, if (arg.opt) CTOpt(arg.t) else arg.t);
@@ -1353,7 +1368,8 @@ class Parser extends Lexer {
 	 * @param importModule Whether this is an `import.hx` prelude (restricted to imports/usings).
 	 * @return The parsed declarations.
 	 */
-	public function parseModule(content:String, ?origin:String = "hscript", position:Int = 0, ?pack:Array<String>, importModule:Bool = false) {
+	public function parseModule(content:String, ?origin:String = "hscript", position:Int = 0, ?pack:Array<String>,
+			importModule:Bool = false) {
 		this.pack = pack;
 		initParser(origin, position);
 		input = content;
@@ -1468,7 +1484,8 @@ class Parser extends Lexer {
 	 * @param isPrivate Whether it is `private`.
 	 * @return The resulting declaration.
 	 */
-	function parseAbstractDecl(name:String, meta:Metadata, params:Array<String>, isEnum:Bool, isPrivate:Bool):ModuleDecl {
+	function parseAbstractDecl(name:String, meta:Metadata, params:Array<String>, isEnum:Bool,
+			isPrivate:Bool):ModuleDecl {
 		var underlying:Null<CType> = null;
 		if (maybe(TPOpen)) {
 			underlying = parseType();
@@ -1550,7 +1567,10 @@ class Parser extends Lexer {
 	function parseModuleDecl(?decls:Array<ModuleDecl>, importModule:Bool = false):ModuleDecl {
 		var meta = parseMetadata();
 		var ident = getIdent();
-		var isPrivate = false, isExtern = false, isFinal = false, isAbstract = false;
+		var isPrivate = false,
+			isExtern = false,
+			isFinal = false,
+			isAbstract = false;
 		while (true) {
 			switch (ident) {
 				case "private":
@@ -1938,7 +1958,12 @@ class Parser extends Lexer {
 								name: fname,
 								meta: meta,
 								access: access,
-								kind: KFunction({args: finf.args, expr: finf.body, ret: finf.ret, params: finf.params}),
+								kind: KFunction({
+									args: finf.args,
+									expr: finf.body,
+									ret: finf.ret,
+									params: finf.params
+								}),
 							};
 						}
 					}

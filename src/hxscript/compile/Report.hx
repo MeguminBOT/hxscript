@@ -29,6 +29,13 @@ class Report {
 
 	/** @return A report of nothing having happened, which is where every run starts. */
 	public static function empty():Report {
-		return {compiled: [], skipped: [], failed: [], ms: 0, bytes: 0, substituting: false};
+		return {
+			compiled: [],
+			skipped: [],
+			failed: [],
+			ms: 0,
+			bytes: 0,
+			substituting: false
+		};
 	}
 }

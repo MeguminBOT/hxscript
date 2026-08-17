@@ -44,8 +44,11 @@ class Abstract {
 						ab = a.get();
 
 						switch (ab.pack[0]) {
-							case 'haxe', 'hl', 'cpp', 'neko', 'js', 'cs', 'lua', 'php', 'macro', 'java', 'flash', 'python':
+							// @formatter:off
+							case 'haxe', 'macro',
+								'cpp', 'cs', 'flash', 'hl', 'java', 'js', 'lua', 'neko', 'php', 'python':
 								return fields;
+							// @formatter:on
 							default:
 						}
 
@@ -222,7 +225,8 @@ class Abstract {
 		var t = toComplex(tt);
 		var st = macro $v{ComplexTypeTools.toString(t)};
 		var castExpr = (isEnum ? macro if (!_enumValues.contains(v) && !_enumMap.exists(v))
-			throw('Can\'t cast ' + AbstractTools.resolveName(v) + ' to ' + impl) : macro if (AbstractTools.resolveName(v) != $st) throw('Can\'t cast '
+			throw('Can\'t cast ' + AbstractTools.resolveName(v) + ' to ' +
+				impl) : macro if (AbstractTools.resolveName(v) != $st) throw('Can\'t cast '
 				+ AbstractTools.resolveName(v) + ' to ' + impl));
 
 		var enumI = 0;
@@ -319,7 +323,9 @@ class Abstract {
 		function afield(expr, typeIsAbstract:Bool, ownReturn:Bool = false) {
 			var newExpr;
 			if (ownReturn) {
-				newExpr = (typeIsAbstract ? macro {var r:Dynamic = $expr; return new $abstractT(r);} : macro {return $expr;});
+				newExpr = (typeIsAbstract ? macro {var r:Dynamic = $expr; return new $abstractT(r);} : macro {
+					return $expr;
+				});
 			} else {
 				newExpr = (typeIsAbstract ? macro new $abstractT($expr) : macro $expr);
 			}
@@ -456,7 +462,8 @@ class Abstract {
 								params: [],
 								expr: func(isSetter ? macro {
 									var cls = Type.resolveClass($implStr);
-									$p{[setterField]} = Reflect.callMethod(cls, Reflect.field(cls, $v{name}), $a{stuff});
+									$p{[setterField]} = Reflect.callMethod(cls, Reflect.field(cls, $v{name}),
+										$a{stuff});
 								} : macro {
 									var cls = Type.resolveClass($implStr);
 									Reflect.callMethod(cls, Reflect.field(cls, $v{name}), $a{stuff});
@@ -482,7 +489,10 @@ class Abstract {
 									var ee = e;
 									for (field in fields) {
 										if (f == field.name) {
-											ee = {pos: pos, expr: EMeta({pos: pos, name: ':privateAccess'}, macro $p{fullPath}.$f)};
+											ee = {
+												pos: pos,
+												expr: EMeta({pos: pos, name: ':privateAccess'}, macro $p{fullPath}.$f)
+											};
 											break;
 										}
 									}
@@ -504,7 +514,8 @@ class Abstract {
 								name: name,
 								pos: pos,
 								access: [AStatic, APublic],
-								kind: FProp(typeIsMe ? 'get' : 'default', 'never', typeIsMe ? TPath(abstractT) : macro :Dynamic, typeIsMe ? null : e?.map(mapIdent))
+								kind: FProp(typeIsMe ? 'get' : 'default', 'never',
+									typeIsMe ? TPath(abstractT) : macro :Dynamic, typeIsMe ? null : e?.map(mapIdent))
 							});
 
 							if (typeIsMe) {
@@ -606,7 +617,10 @@ class Abstract {
 										case EConst(CIdent('this')):
 											{expr: EConst(CIdent('__a')), pos: expr.pos};
 										case EConst(CIdent(f)) if (dropped.exists(f) && underlying.exists(f)):
-											{expr: EField({expr: EConst(CIdent('__a')), pos: expr.pos}, f), pos: expr.pos};
+											{
+												expr: EField({expr: EConst(CIdent('__a')), pos: expr.pos}, f),
+												pos: expr.pos
+											};
 										default:
 											ExprTools.map(expr, transformThis);
 									}
@@ -627,7 +641,8 @@ class Abstract {
 									expr: func(isSetter ? setterExpr : macro {
 										var cls = Type.resolveClass($implStr);
 										Reflect.callMethod(cls, Reflect.field(cls, $v{name}), $a{stuff});
-									}, returnsMe, !isSetter),
+									},
+										returnsMe, !isSetter),
 									ret: (name == 'toString' ? macro :String : (returnsMe ? TPath(abstractT) : macro :Dynamic))
 								})
 							});
@@ -786,20 +801,19 @@ class Abstract {
 								})
 							});
 
-							if (writable)
-								cls.fields.push({
-									name: 'set_' + f.name,
-									pos: pos,
-									access: [APrivate],
-									kind: FFun({
-										args: [{name: 'v', type: macro :Dynamic}],
-										expr: macro {
-											var held:$underlyingCT = cast __a;
-											return $p{['held', f.name]} = v;
-										},
-										ret: macro :Dynamic
-									})
-								});
+							if (writable) cls.fields.push({
+								name: 'set_' + f.name,
+								pos: pos,
+								access: [APrivate],
+								kind: FFun({
+									args: [{name: 'v', type: macro :Dynamic}],
+									expr: macro {
+										var held:$underlyingCT = cast __a;
+										return $p{['held', f.name]} = v;
+									},
+									ret: macro :Dynamic
+								})
+							});
 
 						case FMethod(_):
 							/**

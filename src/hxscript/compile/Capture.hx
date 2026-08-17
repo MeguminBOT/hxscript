@@ -124,8 +124,8 @@ class Capture {
 	 * @param locals Receives every declared local.
 	 * @param inFunction Whether this subtree sits inside a nested function.
 	 */
-	function collect(e:Expr, assigned:StringMap<Bool>, captured:StringMap<Bool>, locals:StringMap<Bool>, inFunction:Bool,
-			shadow:StringMap<Bool> = null):Void {
+	function collect(e:Expr, assigned:StringMap<Bool>, captured:StringMap<Bool>, locals:StringMap<Bool>,
+			inFunction:Bool, shadow:StringMap<Bool> = null):Void {
 		if (e == null)
 			return;
 
@@ -140,11 +140,15 @@ class Capture {
 
 			case EBinop(op, e1, e2):
 				if (op == '='
-					|| (op.length > 1 && op.charAt(op.length - 1) == '=' && op != '==' && op != '!=' && op != '>=' && op != '<=')) {
+					|| (op.length > 1
+						&& op.charAt(op.length - 1) == '='
+						&& op != '=='
+						&& op != '!='
+						&& op != '>='
+						&& op != '<=')) {
 					switch (e1.e) {
 						case EIdent(v):
-							if (!hidden(shadow, v))
-								assigned.set(v, true);
+							if (!hidden(shadow, v)) assigned.set(v, true);
 						case _:
 					}
 				}
@@ -155,8 +159,7 @@ class Capture {
 				if (op == '++' || op == '--') {
 					switch (inner.e) {
 						case EIdent(v):
-							if (!hidden(shadow, v))
-								assigned.set(v, true);
+							if (!hidden(shadow, v)) assigned.set(v, true);
 						case _:
 					}
 				}
@@ -331,7 +334,8 @@ class Capture {
 			case EConst(_) | EIdent(_) | EBreak | EContinue | EImport(_, _) | EUsing(_) | EDecl(_):
 			case EVar(_, _, init, _, _, _):
 				f(init);
-			case EParent(inner) | EThrow(inner) | ECast(inner, _) | ECheckType(inner, _) | EUnop(_, _, inner) | EField(inner, _, _):
+			case EParent(inner) | EThrow(inner) | ECast(inner, _) | ECheckType(inner, _) | EUnop(_, _, inner) |
+				EField(inner, _, _):
 				f(inner);
 			case EReturn(inner):
 				f(inner);
@@ -456,11 +460,16 @@ class Capture {
 			case EVar(n, t, init, get, set, isFinal): EVar(n, t, rewrite(init), get, set, isFinal);
 			case EFunction(fargs, body, n, ret, id): EFunction(fargs, rewrite(body), n, ret, id);
 			case ETry(body, v, t, ecatch, extra):
-				ETry(rewrite(body), v, t, rewrite(ecatch), extra == null ? null : [for (x in extra) {v: x.v, t: x.t, expr: rewrite(x.expr)}]);
+				ETry(rewrite(body), v, t, rewrite(ecatch),
+					extra == null ? null : [for (x in extra) {v: x.v, t: x.t, expr: rewrite(x.expr)}]);
 			case ESwitch(cond, cases, defaultExpr):
 				ESwitch(rewrite(cond), [
 					for (c in cases)
-						{values: [for (v in c.values) rewrite(v)], expr: rewrite(c.expr), guard: c.guard == null ? null : rewrite(c.guard)}
+						{
+							values: [for (v in c.values) rewrite(v)],
+							expr: rewrite(c.expr),
+							guard: c.guard == null ? null : rewrite(c.guard)
+						}
 				], rewrite(defaultExpr));
 		}
 

@@ -191,7 +191,8 @@ class Autowire {
 	 * @param abstracts The abstracts that were given a runtime form, for the report.
 	 * @param libraries The active libraries' titles, for the report.
 	 */
-	static function manifest(bridges:Array<Expr>, forced:{refs:Array<Expr>, args:Array<FunctionArg>, named:Array<String>}, globals:Array<String>,
+	static function manifest(bridges:Array<Expr>,
+			forced:{refs:Array<Expr>, args:Array<FunctionArg>, named:Array<String>}, globals:Array<String>,
 			abstracts:Array<String>, libraries:Array<String>):Void {
 		var pos:Position = Context.currentPos();
 		var pack:Array<String> = PACK.split('.');
@@ -209,42 +210,61 @@ class Autowire {
 						access: [APublic, AStatic],
 						pos: pos,
 						doc: 'Every generated bridge. Referenced so the classes survive dead-code elimination, and read by the setup report.',
-						kind: FVar(macro :Array<Class<Dynamic>>, {expr: EArrayDecl(bridges), pos: pos})
+						kind: FVar(macro :Array<Class<Dynamic>>, {
+							expr: EArrayDecl(bridges),
+							pos: pos
+						})
 					},
 					{
 						name: 'forced',
 						access: [APublic, AStatic],
 						pos: pos,
 						doc: 'Modules pulled into the build by being referenced here, so scripts can name them.',
-						kind: FVar(macro :Array<Class<Dynamic>>, {expr: EArrayDecl(forced.refs), pos: pos})
+						kind: FVar(macro :Array<Class<Dynamic>>, {
+							expr: EArrayDecl(forced.refs),
+							pos: pos
+						})
 					},
 					{
 						name: 'signatures',
 						access: [APublic, AStatic],
 						pos: pos,
 						doc: 'Never called. Its parameter types are the point: naming a type in a signature loads its module, including for abstracts, which cannot be values.',
-						kind: FFun({args: forced.args, ret: macro :Void, expr: macro {}})
+						kind: FFun({
+							args: forced.args,
+							ret: macro :Void,
+							expr: macro {}
+						})
 					},
 					{
 						name: 'globals',
 						access: [APublic, AStatic],
 						pos: pos,
 						doc: 'Types scripts may name without importing them.',
-						kind: FVar(macro :Array<String>, {expr: EArrayDecl([for (path in globals) macro $v{path}]), pos: pos})
+						kind: FVar(macro :Array<String>, {
+							expr: EArrayDecl([for (path in globals) macro $v{path}]),
+							pos: pos
+						})
 					},
 					{
 						name: 'abstracts',
 						access: [APublic, AStatic],
 						pos: pos,
 						doc: 'Abstracts given a runtime form, for the report.',
-						kind: FVar(macro :Array<String>, {expr: EArrayDecl([for (path in abstracts) macro $v{path}]), pos: pos})
+						kind: FVar(macro :Array<String>, {
+							expr: EArrayDecl([for (path in abstracts) macro $v{path}]),
+							pos: pos
+						})
 					},
 					{
 						name: 'libraries',
 						access: [APublic, AStatic],
 						pos: pos,
 						doc: 'The libraries wired into this build, by title.',
-						kind: FVar(macro :Array<String>, {expr: EArrayDecl([for (title in libraries) macro $v{title}]), pos: pos})
+						kind: FVar(macro :Array<String>, {
+							expr: EArrayDecl([for (title in libraries) macro $v{title}]),
+							pos: pos
+						})
 					}
 				]
 			}

@@ -192,7 +192,12 @@ class ScriptedEnum implements IScriptedType implements ICustomReflection impleme
 		return enums;
 	}
 
-	/** An enum has no reflectable fields. @param field Unused. @return Always false. */
+	/**
+	 * An enum has no reflectable fields.
+	 *
+	 * @param field Unused.
+	 * @return Always false.
+	 */
 	public function reflectHasField(field:String):Bool {
 		return false;
 	}
@@ -215,17 +220,34 @@ class ScriptedEnum implements IScriptedType implements ICustomReflection impleme
 		return null;
 	}
 
-	/** An enum's constructors are read-only. @param field Unused. @param value Unused. @return Always null. */
+	/**
+	 * An enum's constructors are read-only.
+	 *
+	 * @param field Unused.
+	 * @param value Unused.
+	 * @return Always null.
+	 */
 	public function reflectSetField(field:String, value:Dynamic):Dynamic {
 		return null;
 	}
 
-	/** Alias of `reflectGetField`. @param property The constructor name. @return The value or builder. */
+	/**
+	 * Alias of `reflectGetField`.
+	 *
+	 * @param property The constructor name.
+	 * @return The value or builder.
+	 */
 	public function reflectGetProperty(property:String):Dynamic {
 		return reflectGetField(property);
 	}
 
-	/** An enum's constructors are read-only. @param property Unused. @param value Unused. @return Always null. */
+	/**
+	 * An enum's constructors are read-only.
+	 *
+	 * @param property Unused.
+	 * @param value Unused.
+	 * @return Always null.
+	 */
 	public function reflectSetProperty(property:String, value:Dynamic):Dynamic {
 		return null;
 	}

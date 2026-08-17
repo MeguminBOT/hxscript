@@ -24,7 +24,8 @@ class Printer {
 		if (head != null)
 			out.push(head);
 
-		var excerpt:String = d.excerpt != null ? d.excerpt : (d.origin != null && d.line > 0 ? Sources.line(d.origin, d.line) : null);
+		var excerpt:String = d.excerpt != null ? d.excerpt : (d.origin != null
+			&& d.line > 0 ? Sources.line(d.origin, d.line) : null);
 
 		if (excerpt != null) {
 			out.push('  ' + expand(excerpt));
@@ -144,7 +145,11 @@ class Printer {
 			case EUnknownType(t): 'Type not found: $t';
 			case EUnknownField(o, f): hxscript.error.Hint.typeName(o) + ' has no field ' + f;
 			case EUnrecognizedPattern(e): 'Unrecognized pattern: ' + hxscript.syntax.Printer.toString(e);
-			case EInvalidChar(c): "Invalid character: '" + (StringTools.isEof(c) ? "EOF" : String.fromCharCode(c)) + "' (" + c + ")";
+			case EInvalidChar(c): "Invalid character: '"
+				+ (StringTools.isEof(c) ? "EOF" : String.fromCharCode(c))
+				+ "' ("
+				+ c
+				+ ")";
 			case EUnexpected(s): "Unexpected token: \"" + s + "\"";
 			case EUnterminatedString: "Unterminated string";
 			case EUnterminatedComment: "Unterminated comment";

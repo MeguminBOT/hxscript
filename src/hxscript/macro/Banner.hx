@@ -110,7 +110,8 @@ class Banner {
 				detected.push(title);
 
 		line('wired', detected.length == 0 ? 'no game library detected, the interpreter alone' : detected.join(', '));
-		line('reach', types + ' type(s), ' + abstracts + ' abstract(s), ' + globals + ' global(s), ' + bridges + ' bridge(s)');
+		line('reach',
+			types + ' type(s), ' + abstracts + ' abstract(s), ' + globals + ' global(s), ' + bridges + ' bridge(s)');
 	}
 
 	/**
@@ -177,7 +178,10 @@ class Banner {
 		return '\x1b[' + code + 'm' + text + '\x1b[0m';
 	}
 
-	/** @param target What this build targets. @return The colour to draw the mark in. */
+	/**
+	 * @param target What this build targets.
+	 * @return The colour to draw the mark in.
+	 */
 	static function colourFor(target:String):String {
 		return switch (target) {
 			case 'hxcpp': '36';
@@ -195,10 +199,13 @@ class Banner {
 
 	/** @return What this build targets, as somebody would say it rather than as a define spells it. */
 	static function targetName():String {
-		return if (Context.defined('cpp')) 'hxcpp'; else if (Context.defined('hl')) 'hashlink'; else if (Context.defined('js')) 'javascript'; else
-			if (Context.defined('neko')) 'neko'; else if (Context.defined('jvm')) 'jvm'; else if (Context.defined('java')) 'java'; else
-			if (Context.defined('cs')) 'c#'; else if (Context.defined('python')) 'python'; else if (Context.defined('lua')) 'lua'; else
-			if (Context.defined('php')) 'php'; else if (Context.defined('flash')) 'flash'; else if (Context.defined('eval')) 'eval'; else 'unknown';
+		return if (Context.defined('cpp')) 'hxcpp'; else if (Context.defined('hl')) 'hashlink'; else
+			if (Context.defined('js')) 'javascript'; else if (Context.defined('neko')) 'neko'; else
+				if (Context.defined('jvm')) 'jvm'; else if (Context.defined('java')) 'java'; else
+					if (Context.defined('cs')) 'c#'; else if (Context.defined('python')) 'python'; else
+						if (Context.defined('lua')) 'lua'; else if (Context.defined('php')) 'php'; else
+							if (Context.defined('flash')) 'flash'; else if (Context.defined('eval')) 'eval'; else
+								'unknown';
 	}
 
 	/**

@@ -164,8 +164,8 @@ class ScriptedTools {
 				 * with no import. An annotation reads this table directly rather than through
 				 * `Interp.resolve`, so it has to ask the same question that does.
 				 */
-				var type = (module?.interp.imports.get(p) ?? interp?.imports.get(p) ?? TypeTools.resolve(p, interp?.environment)
-					?? module?.interp.packageType(p) ?? interp?.packageType(p));
+				var type = (module?.interp.imports.get(p) ?? interp?.imports.get(p) ?? TypeTools.resolve(p,
+					interp?.environment) ?? module?.interp.packageType(p) ?? interp?.packageType(p));
 				if (type == null)
 					throw 'Type not found: $p';
 
@@ -196,8 +196,8 @@ class ScriptedTools {
 			default: throw 'Invalid interface $t';
 		}
 
-		var type = (module?.interp.imports.get(p) ?? interp?.imports.get(p) ?? TypeTools.resolve(p, interp?.environment)
-			?? module?.interp.packageType(p) ?? interp?.packageType(p));
+		var type = (module?.interp.imports.get(p) ?? interp?.imports.get(p) ?? TypeTools.resolve(p,
+			interp?.environment) ?? module?.interp.packageType(p) ?? interp?.packageType(p));
 		if (type != null)
 			return type;
 
