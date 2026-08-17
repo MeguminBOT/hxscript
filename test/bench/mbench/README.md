@@ -39,7 +39,7 @@ corpus shape.
 Selected by the binary's first argument.
 
 - `interp` builds an `Environment` and a `Module` and calls the static through the scripted class.
-- `cppia` parses, calls `Cppia.compile`, boots the resulting module and calls the static through
+- `cppia` parses, calls `hxscript.cppia.Backend.compile`, boots the resulting module and calls the static through
   `Reflect.field`.
 - `jit` is `cppia` with `cpp.cppia.Host.enableJit(true)` first.
 

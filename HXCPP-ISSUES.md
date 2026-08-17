@@ -9,6 +9,21 @@ whatever `haxelib path hxcpp` reports, which is not always the one being read.
 
 ## Applying the fixes
 
+Two ways, and the first is less work.
+
+**A prepatched hxcpp.** Every fix below that has one is already applied on
+[`MeguminBOT/hxcpp`, branch `patched-hxscript`](https://github.com/MeguminBOT/hxcpp/tree/patched-hxscript):
+
+```sh
+haxelib git hxcpp https://github.com/MeguminBOT/hxcpp patched-hxscript
+```
+
+Nothing else about it diverges from upstream, so this is the ordinary hxcpp with the fixes in it.
+The trade is the usual one for tracking a fork: `haxelib upgrade` will not move it, so it wants
+pulling by hand when upstream moves.
+
+**Or patch the hxcpp you already have.**
+
 ```sh
 python patches/apply-hxcpp.py            # apply, and say what was already there
 python patches/apply-hxcpp.py --check    # report only, change nothing
@@ -18,12 +33,14 @@ python patches/apply-hxcpp.py --revert   # put the originals back
 It finds hxcpp through `haxelib path hxcpp` unless given `--path`, and it is idempotent, so run it
 again after every `haxelib upgrade`. Nothing is written unless every fix that is not already there
 matched exactly: a half applied hxcpp is a state nobody has tested. `--revert` restores the files
-byte for byte.
+byte for byte, and `--check` exits 1 when there is work to do and 0 when there is not, so it can gate
+a build. It reports which issues below it closes when it runs, so the two files cannot drift about
+what "covered" means.
 
-**hxcpp compiles its runtime into each project**, so anything built before applying keeps the old
-behaviour until it is rebuilt. Delete the binary rather than trusting a rebuild to notice.
+**hxcpp compiles its runtime into each project** either way, so anything built before applying keeps
+the old behaviour until it is rebuilt. Delete the binary rather than trusting a rebuild to notice.
 
-Issues 1, 2 and 3 are covered. The rest have no patch yet.
+Issues 1, 2, 3 and 7 are covered. The rest have no patch yet.
 
 **Issue 1's fix is required, not optional.** This library declares a `Bool` field with its real type
 by default, which is what makes a boolean read back as `true` in every mode including jitted. Against
@@ -35,12 +52,14 @@ agreement only while interpreting.
 
 | # | issue | status |
 | --- | --- | --- |
-| 1 | A member field declared `Bool` never gets `fsBool` storage | open, patch known |
-| 2 | `DataVal<T>` does not report itself as a boolean to the JIT | patched locally, not upstream |
-| 3 | `convert` moves registers without a width, and the JIT refuses | patched locally, committed on the fork |
+| 1 | A member field declared `Bool` never gets `fsBool` storage | patched on the fork, not upstream |
+| 2 | `DataVal<T>` does not report itself as a boolean to the JIT | patched on the fork, not upstream |
+| 3 | `convert` moves registers without a width, and the JIT refuses | patched on the fork, not upstream |
 | 4 | `CallMember` trusts a vtable slot it did not verify, and segfaults | open, no patch |
 | 5 | `Type.getEnumConstructs` on a non-enum ends the process | open, avoided rather than fixed |
 | 6 | An hxcpp binary writing to `NUL` on Windows ends there | open, avoided rather than fixed |
+| 7 | A jitted `throw` never leaves the context, so the caller reads null | patched on the fork, not upstream |
+| 8 | A `Bool` put in a `Map` from a script comes back an `Int` | open, and it is Haxe's std rather than hxcpp |
 
 Everything listed here has been reproduced. Something suspected and not yet pinned down does not go
 in this file, because a wrong entry costs more than a missing one.
@@ -91,44 +110,43 @@ reflection, `Std.string` and dynamic access can tell.
 
 ### The patch
 
-Mirror the static variant, then size from the storage rather than from `exprType`:
+Mirror the static variant, then size from the storage rather than from `exprType`. This is the exact
+text `patches/apply-hxcpp.py` writes, replacing the `switch(exprType)` above:
 
 ```cpp
-   if (!isVirtual)
-   {
-      exprType = typeId==0 ? etObject : type->expressionType;
-      AlignOffset(exprType, ioOffset);
-      offset = ioOffset;
-
       storeType = typeId==0 ? fsObject : fieldStorageFromType(type);
 
       switch(storeType)
       {
          case fsBool: ioOffset += sizeof(int); break;
+         case fsByte: ioOffset += sizeof(int); break;
          case fsInt: ioOffset += sizeof(int); break;
          case fsFloat: ioOffset += sizeof(Float); break;
          case fsString: ioOffset += sizeof(String); break;
          case fsObject: ioOffset += sizeof(hx::Object *); break;
-         default: break;
+         case fsUnknown:
+            break;
       }
-   }
 ```
 
-`sizeof(int)` for the boolean rather than `sizeof(bool)` keeps the layout and the `AlignOffset` call
-exactly as they are, so a one-byte field simply leaves three bytes unused. Getting the size back is a
-separate change and is not worth coupling to a correctness fix.
+Every case is written out rather than left to a `default`, so a storage kind added upstream fails to
+compile here instead of silently getting no offset. `sizeof(int)` for the boolean rather than
+`sizeof(bool)` keeps the layout and the surrounding `AlignOffset` call exactly as they are, so a
+one-byte field simply leaves three bytes unused. Getting the size back is a separate change and is not
+worth coupling to a correctness fix.
 
 ### Confirmed by building it
 
 Patched, with the field declared `Bool` for real, every boolean reads back as `true` under the JIT
 and interpreted alike, including one with no annotation whose type is inferred from its initialiser.
-`test/cpp/BoolProbe.hx` is the reading, and the conformance table's `cppia-jit` column went to 0
-differ with it.
+`test/cpp/BoolProbe.hx` is the reading, and the conformance table's `hxcpp-cppia-jit` column went to
+0 differ with it.
 
 ### The way out for a stock hxcpp
 
 `-D hxscript_cppia_bool_compat` emits a `Bool` field with **no declared type** and writes `CASTBOOL`
-on the value. See `Config.nativeBoolSlots`, `Backend.isBool` and `Emitter.boolean`.
+on the value. See `hxscript.Config.nativeBoolSlots`, `hxscript.cppia.Backend.isBool` and
+`hxscript.cppia.Emitter.boolean`.
 
 That is correct interpreted and still reads back as `1` under the JIT, so it is a fallback rather
 than a substitute. Why it fails there has not been established, and it is deliberately not written up
@@ -151,7 +169,7 @@ is carried as one.
 
 So the same bytecode stores a boxed `Bool` interpreted and a boxed `Int` jitted.
 
-### The patch, applied locally
+### The patch
 
 ```cpp
 bool isBoolInt() HXCPP_OVERRIDE { return ExprTypeIsBool<T>::value; }
@@ -169,7 +187,7 @@ than invention.
 `move(sJitArg0, inSrc)` with neither side given a width. sljit then rejects the move with
 `Bad move target`, which takes down whatever was being compiled.
 
-### The patch, applied locally and committed on the fork
+### The patch
 
 ```cpp
 move(sJitArg0.as(jtInt), inSrc.as(jtInt));          // the etString case
@@ -324,17 +342,11 @@ symptom here.
 
 ### Still open, and separate from this
 
-Two constructs are wrong only with the JIT on, are fine interpreted, and are not explained by the
+Three constructs are wrong only with the JIT on, are fine interpreted, and are not explained by the
 above:
 
 | construct | interpreted | jitted |
 | --- | --- | --- |
-| `Array<Dynamic>.push(true)` | `TBool` | `TInt` |
-| a `Dynamic` instance field assigned `true` | `TBool` | `TInt` |
-
-Measured against the same code compiled natively, which answers `TBool` everywhere.
-
---- | --- | --- |
 | `Array<Dynamic>.push(true)` | `TBool` | `TInt` |
 | a `Dynamic` instance field assigned `true` | `TBool` | `TInt` |
 | a mixed `Array<Dynamic>` literal inside an anonymous object | `TBool` | `TInt` |

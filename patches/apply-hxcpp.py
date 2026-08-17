@@ -5,22 +5,41 @@
     python patches/apply-hxcpp.py --check    report only, change nothing
     python patches/apply-hxcpp.py --revert   put the originals back
     python patches/apply-hxcpp.py --path X   use the hxcpp at X rather than asking haxelib
+    python patches/apply-hxcpp.py --help     this text
+
+`--check` exits 1 when there is work to do and 0 when there is not, so it can gate a build. Any
+argument this list does not name is refused rather than ignored, since a mistyped `--revert` would
+apply and a mistyped `--check` would write.
+
+There is an easier route than this script. Every fix it carries is already applied on
+MeguminBOT/hxcpp, branch patched-hxscript, and nothing else about that branch diverges from
+upstream:
+
+    haxelib git hxcpp https://github.com/MeguminBOT/hxcpp patched-hxscript
+
+This script is for a project that would rather patch the hxcpp it already has, or that tracks
+upstream and wants the fixes reapplied after each pull.
 
 Each fix is written out as literal before and after text rather than as a diff, because a diff needs
 matching line endings and an hxcpp checkout on Windows may have either. Applying is idempotent: a
 fix already present is reported and skipped, so this can be run after every `haxelib upgrade`.
 
 Every fix is described in HXCPP-ISSUES.md, which is where the reasoning lives. The numbers here are
-that file's numbers.
+that file's numbers, and the issues covered are the ones `COVERS` names below.
 
 Nothing is written unless every fix that is not already applied matched exactly. A partial apply
 would leave hxcpp in a state nobody has tested.
 """
 
 import os
-import re
 import subprocess
 import sys
+
+# The prepatched branch, which is the other way to get all of this and is less work.
+FORK = 'https://github.com/MeguminBOT/hxcpp'
+FORK_BRANCH = 'patched-hxscript'
+FORK_HINT = ('           or take them prepatched:\n'
+             '             haxelib git hxcpp %s %s' % (FORK, FORK_BRANCH))
 
 # One entry per fix: the issue it closes, the file, and the text before and after.
 FIXES = [
@@ -148,6 +167,11 @@ FIXES = [
 ]
 
 
+# Which HXCPP-ISSUES.md issues this script closes, derived rather than written down, so the two
+# cannot disagree about what "covered" means.
+COVERS = sorted({fix['issue'] for fix in FIXES})
+
+
 def hxcpp_root(override):
     """Where hxcpp is, asked of haxelib unless it was given."""
     if override:
@@ -180,20 +204,43 @@ def write(path, text, newline):
         f.write(text.replace('\n', newline).encode('utf-8'))
 
 
-def main():
-    args = sys.argv[1:]
-    check = '--check' in args
-    revert = '--revert' in args
+def parse(args):
+    """The options, or an exit with what was wrong.
 
+    Unknown arguments are refused rather than ignored, because every one of them means the opposite
+    of what was asked: a mistyped `--revert` would apply, and a mistyped `--check` would write.
+    """
+    check = revert = False
     override = None
-    if '--path' in args:
-        at = args.index('--path')
-        if at + 1 >= len(args):
-            sys.exit('--path wants a directory after it')
-        override = args[at + 1]
+    rest = list(args)
+
+    while rest:
+        arg = rest.pop(0)
+
+        if arg == '--check':
+            check = True
+        elif arg == '--revert':
+            revert = True
+        elif arg == '--path':
+            if not rest:
+                sys.exit('--path wants a directory after it')
+            override = rest.pop(0)
+        elif arg in ('-h', '--help'):
+            print(__doc__.strip())
+            sys.exit(0)
+        else:
+            sys.exit('no option called %r. Try --help.' % arg)
+
+    return check, revert, override
+
+
+def main():
+    check, revert, override = parse(sys.argv[1:])
 
     root = hxcpp_root(override)
     print('hxcpp: %s' % root)
+    print('fixes: %d, closing HXCPP-ISSUES.md issue(s) %s'
+          % (len(FIXES), ', '.join(str(n) for n in COVERS)))
 
     # Text per file as it is being built up. Several fixes touch one file, so each has to be applied
     # to the running text rather than to what was on disk: computing each from the original and
@@ -207,7 +254,9 @@ def main():
         label = 'issue %d, %s' % (fix['issue'], fix['name'])
 
         if not os.path.isfile(path):
-            sys.exit('  MISSING  %s\n           no %s under that hxcpp' % (label, fix['file']))
+            sys.exit('  MISSING  %s\n           no %s under that hxcpp. Check --path names an hxcpp\n'
+                     '           checkout rather than a project.\n%s'
+                     % (label, fix['file'], FORK_HINT))
 
         if path not in working:
             working[path] = read(path)
@@ -223,8 +272,8 @@ def main():
 
         if have not in text:
             sys.exit('  NO MATCH %s\n           neither form is in %s. That hxcpp is a version this\n'
-                     '           script has not been taught, and nothing has been written.'
-                     % (label, fix['file']))
+                     '           script has not been taught, and nothing has been written.\n%s'
+                     % (label, fix['file'], FORK_HINT))
 
         if text.count(have) != wanted:
             sys.exit('  AMBIGUOUS %s\n           %d places match in %s, expected %d.'
@@ -235,6 +284,10 @@ def main():
 
     if not changed:
         print('nothing to do: all %d already %s' % (already, 'reverted' if revert else 'applied'))
+
+        if not revert:
+            print('(a checkout of %s %s reads this way too)' % (FORK, FORK_BRANCH))
+
         return 0
 
     if check:

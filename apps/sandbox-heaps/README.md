@@ -193,8 +193,9 @@ new build cannot write over it.
 | `gpuparticles` | ten thousand particles as one description rather than ten thousand objects, with their bounds drawn |
 | `fps` | a first person room with targets that break and crates that take the hit, whose whole simulation is a class with no scene graph in it |
 
-The last six are after the Heaps samples of the same names, adapted to this app's lifecycle. Heaps is
-MIT licensed, © 2013 Nicolas Cannasse.
+The seven from `base2d` to `gpuparticles` are after the Heaps samples of the same names, adapted to
+this app's lifecycle. `heaps` and `fps` are this app's own. Heaps is MIT licensed,
+© 2013 Nicolas Cannasse.
 
 ### The conformance projects, which do not ship
 

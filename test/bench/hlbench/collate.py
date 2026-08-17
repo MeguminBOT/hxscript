@@ -186,11 +186,25 @@ print("differ by design rather than by degree; `unwind` and `compound` rows are 
 print("dominated by how a mode implements `continue` and `throw`, or by doing far more than one")
 print("thing per iteration.\n")
 
-refused = sorted({c for c in order for col in COLS if rows[c].get(col, ("",))[0] == "unsupported"})
-if refused:
-    print("`refused` is a compiler declining a construct it does not emit: nothing ran, because the")
-    print("module is rejected whole. Those rows are the edge of the compiled subset: "
-          + ", ".join("`%s`" % c for c in refused) + ".\n")
+# `refused` means two different things depending on which side of the comparison it lands on, and
+# saying so is the point: read as one thing it looks like the library declining a construct in a
+# column that has no library in it.
+NATIVE = ("hashlink/c", "hashlink/vm")
+
+refused_native = sorted({c for c in order for col in COLS
+                         if col in NATIVE and rows[c].get(col, ("",))[0] == "unsupported"})
+refused_script = sorted({c for c in order for col in COLS
+                         if col not in NATIVE and rows[c].get(col, ("",))[0] == "unsupported"})
+
+if refused_native:
+    print("`refused` in a **native** column means the case cannot be written as Haxe at all, so there")
+    print("was nothing to compile and nothing ran: " + ", ".join("`%s`" % c for c in refused_native)
+          + ". Those are a property of the corpus, not of a compiler.\n")
+
+if refused_script:
+    print("`refused` in a **scripted** column is a compiler declining a construct it does not emit:")
+    print("nothing ran, because the module is rejected whole. Those rows are the edge of the compiled")
+    print("subset: " + ", ".join("`%s`" % c for c in refused_script) + ".\n")
 
 print("<details>")
 print("<summary><strong>%d cases, click to expand</strong></summary>\n" % len(order))

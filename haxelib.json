@@ -1,7 +1,7 @@
 {
     "name": "hxscript",
     "url": "https://github.com/MeguminBOT/hxscript",
-    "description": "An advanced Haxe interpreter. It parses Haxe-shaped source and evaluates it directly, with enough of the language intact that a script can declare classes, enums, typedefs and abstracts, and extend the ones your application already compiled, with declared types enforced at runtime. On hxcpp it can also translate a module to native bytecode while your application is running, with no Haxe toolchain installed, which is what lets a script that arrives after your release run at close to compiled speed.",
+    "description": "An advanced Haxe interpreter. It parses Haxe-shaped source and evaluates it directly, with enough of the language intact that a script can declare classes, enums, typedefs and abstracts, and extend the ones your application already compiled, with declared types enforced at runtime. On hxcpp and HashLink it can also translate a module to native bytecode while your application is running, with no Haxe toolchain installed, which is what lets a script that arrives after your release run at close to compiled speed.",
     "license": "MIT",
     "tags": [
         "hscript",
@@ -18,7 +18,7 @@
         "game"
     ],
     "version": "2.0.0",
-    "releasenote": "BREAKING: modules renamed and regrouped. The two most likely to be in your build file are hxscript.macro.AbstractMacro, now hxscript.macro.Abstract, and ExposeMacro, now Expose. The exceptions moved to hxscript.error, and hxscript.ImportModule to hxscript.runtime. Script, Environment, Module, Config, IScripted, Interp, ScriptedClass, Compiler and Cppia keep their names. CHANGELOG.md has the full table and what you wrote to be affected. Added: mark a class @:scriptable and name its package with -D hxscript_host and the bridge is generated for you; one diagnostic channel carrying the origin, line, source line and a likely cause; automatic setup for lime, openfl, flixel, flixel-addons, flixel-ui and heaps from -lib hxscript alone. Fixed: five portability faults, taking neko from 287 to 370 passing and python from 38 to 367, with php, js, lua and hl building again. On hxcpp, ??, %=, case a | b: and a using whose receiver type is known now compile rather than being refused. final class, abstract class and extern members parse.",
+    "releasenote": "BREAKING: modules renamed and regrouped. The two most likely to be in your build file are hxscript.macro.AbstractMacro, now hxscript.macro.Abstract, and ExposeMacro, now Expose. The exceptions moved to hxscript.error, and hxscript.ImportModule to hxscript.runtime. Script, Environment, Module, Config, IScripted, Interp, ScriptedClass and Compiler keep their names, and hxscript.compile.Cppia is now hxscript.cppia.Backend. CHANGELOG.md has the full table and what you wrote to be affected. Added: mark a class @:scriptable and name its package with -D hxscript_host and the bridge is generated for you; one diagnostic channel carrying the origin, line, source line and a likely cause; automatic setup for lime, openfl, flixel, flixel-addons, flixel-ui and heaps from -lib hxscript alone. Fixed: five portability faults, taking neko from 287 to 370 passing and python from 38 to 367, with php, js, lua and hl building again. On hxcpp, ??, %=, case a | b: and a using whose receiver type is known now compile rather than being refused. final class, abstract class and extern members parse.",
     "contributors": [
         "MeguminBOT"
     ],

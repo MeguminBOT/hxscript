@@ -3,11 +3,17 @@
 Design rationale lifted out of the source, so the docstrings there stay to a summary plus
 `@param`/`@return`. Each heading names the file and the symbol the note belongs to.
 
+**`src/hxscript/hl/` is not covered here.** The HashLink backend is the larger of the two and its
+rationale is written as a narrative instead, in
+[how-it-works.md, part three](how-it-works.md#part-three-compiling-to-hashlink), because almost
+every decision in it follows from two facts about the target rather than standing on its own.
+
 ## src/hxscript/openfl/SoundTools.hx
 
 ### class SoundTools
 
-The companion to ``Upload``, for the same two reasons and in the same shape. A script
+The companion to [`TriangleTools`](../src/hxscript/flixel/TriangleTools.hx), for the same two reasons
+and in the same shape. A script
 that synthesises audio has no way to hand it over: `lime.utils.UInt8Array` is an abstract whose
 only constructor is inline and generic, and `AudioBuffer.data` wants one. Inline members of an
 abstract have no runtime symbol for the interpreter to call and nothing for the runtime compiler
@@ -43,11 +49,16 @@ see that.
 
 ### class Compiler
 
-`Cppia.compile` turns declarations into bytecode and stops there, which leaves an embedder holding
+A backend turns declarations into bytecode and stops there, which leaves an embedder holding
 several steps that all have to be right: load the module, resolve every class it declared, record
 each against the world it came from, and turn substitution on. Miss the recording and nothing
 errors: the compile succeeded, the module loaded, the class is real, and every script still runs
 interpreted while the host reports otherwise. This does those steps.
+
+It is also what makes there be one of these rather than one per target. `hxscript.cppia.Backend` and
+`hxscript.hl.Backend` are reached through the same `Backend` name, chosen by which define the build
+carries, so the shape of compiling a world is written once and what differs per target is one call in
+the middle. A host writes `Compiler` and never learns which target it is on.
 
 One call per world:
 
@@ -67,12 +78,14 @@ their compiled form sat right there.
 
 **A module the loader rejects does not take the host with it.** The bytecode loader can refuse a
 module the emitter was perfectly happy with, reporting `Bad move target`, `Bad link` or `Bad Set expr`,
-and it does so for the module as a whole, naming nothing inside it. That is caught here, the batch
-is narrowed to find what can still be compiled, and whatever cannot is reported and left
-interpreted. See `narrow` for how, and why it is a split rather than a search.
+and it does so for the module as a whole, naming nothing inside it. That is caught by the backend, the
+batch is narrowed to find what can still be compiled, and whatever cannot is reported and left
+interpreted. See `batch` below for how, and why it is a split rather than a search.
 
 Nothing here happens on its own. The library never decides to compile something; a host calls
 this when it wants it, on the worlds it wants it for.
+
+## src/hxscript/cppia/Backend.hx
 
 ### static function batch(group:Array<Module>, env:Environment, report:Report, whole:Bool):Void
 
@@ -114,8 +127,6 @@ Read from the world's own map rather than from `built`. The two differ exactly w
 handed nothing because the work was done for a previous one, and answering from `built` there
 announces a substitution that cannot happen.
 
-## src/hxscript/compile/Cppia.hx
-
 ### public static function booleans(decls:Array<ModuleDecl>):Map<String, Map<String, Bool>>
 
 cppia has no boolean in its type system. Its expression types are void, null, object, string,
@@ -128,7 +139,7 @@ answers differently depending on whether it happened to compile.
 The declaration is the only place that knowledge still exists, so it is taken from there and
 carried to the boundary.
 
-### static function dropDanglingUsers(accepted:Array<Input>, skipped:Array<Skip>,
+### static function dropDanglingUsers(accepted:Array<Unit>, skipped:Array<Skip>,
 
 A reference to a refused class cannot link, and the loader rejects the WHOLE module over it, so
 one refusal would otherwise cost every class in the batch. Dropping the modules that lean on it
@@ -138,13 +149,13 @@ nothing more falls out, since dropping one module can strand another.
 Presence is keyed by the CLASSES on offer rather than by module name, since a reference names a
 class and a module may declare several under a name of its own.
 
-### public static function compile(inputs:Array<Input>, ?ambient:Array<String>, ?external:Array<String>, ?statics:Array<String>):Result
+### public static function compile(inputs:Array<Unit>, ?ambient:Array<String>, ?external:Array<String>, ?statics:Array<String>):Result
 
 All modules are declared before any is emitted, so they may refer to each other in any order.
 Emission runs against a throwaway writer first, since a module that failed part-way through
 would otherwise leave a corrupt record behind.
 
-## src/hxscript/compile/Emitter.hx
+## src/hxscript/cppia/Emitter.hx
 
 ### function implementationOf(a:AbstractDecl, pack:String):ClassDecl
 
@@ -323,7 +334,7 @@ Then hand it all over once, at startup:
 Expose.apply();
 ```
 
-That fills both sides from the same marks: `Config.globalVariables` so an interpreted script can
+That fills both sides from the same marks: `Config.globalStatics` so an interpreted script can
 write `player`, and `Compiler.ambient`/`Compiler.statics` so a compiled one resolves the same name
 to the same static. Marking a thing once and having it work either way is the point, since filling
 only one side gives a script that runs until the day it is compiled, or the reverse.
@@ -357,7 +368,8 @@ the two sides agree over time as well as at startup: the emitter turns a bare na
 static access, so compiled code always saw a host reassigning one, while a copied value never
 would. Each interpreter follows the binding as it is set up.
 
-Existing entries are kept: a name already in `globalVariables` is left as the host set it.
+A name the host bound by hand still wins. Nothing is overwritten here; `Interp.setDefaults` applies
+`globalVariables` first and skips any `globalStatics` entry whose name is already taken.
 
 ## src/hxscript/macro/Keep.hx
 
@@ -394,31 +406,37 @@ the bridge nor the base that asked for it:
 - a **sub-module type** loses its qualifier, so `new FlxButtonEvent()` re-emits
   unqualified and fails with `Type not found: FlxButtonEvent`;
 - a **compiler temporary** from inlined code is named with a backtick, which is not a
-  variable name (`"`" is not a valid variable name`).
-
-The typed form still knows the qualifiers, so it is walked first to collect them and
-the emitted syntax is rewritten against that.
-
+  variable name (`"`" is not a valid variable name`);
 - an **abstract's implementation class** is named directly, so reading an enum
   abstract's constant comes back as `FlxButtonState_Impl_.NORMAL`
   (`has no field FlxButtonState_Impl_`).
 
+The typed form still knows the qualifiers, so it is walked first to collect them and
+the emitted syntax is rewritten against that.
+
 The last one is only repairable for a genuine static. An abstract's *instance* members
 are compiled to statics on the same class and marked `@:impl`, and those have no
-spelling that works from outside; `reemittableConstructor` refuses those instead of
-guessing.
+spelling that works from outside; `reemittableConstructor` reports those rather than
+guessing, and the bridge takes the other route.
 
 ### function reemittableConstructor(e:TypedExpr):Null<String>
 
-A bridge rebuilds the base's constructor so a script's `new` can drive it. That means
-re-typing a body the typer has already lowered, and two things in a lowered body can
-never be re-typed anywhere else: a `private` type, which the bridge is not allowed to
-name, and an abstract's implementation class, whose members do not exist under any
-spelling reachable from outside.
+Rebuilding a base's constructor means re-typing a body the typer has already lowered, and some
+lowered bodies can never be re-typed anywhere else: one naming a `private` type, which the
+bridge is not allowed to name, one naming an abstract's implementation class, whose members do
+not exist under any spelling reachable from outside, and one assigning to `this`, which an
+inlined abstract constructor does.
 
 Without this the build fails anyway, with a handful of errors reported inside the
-library's own source, naming neither the bridge nor the base that pulled it in. That
-is the failure this turns into a sentence.
+library's own source, naming neither the bridge nor the base that pulled it in.
+
+**The answer is no longer a refusal.** This used to end the build with that reason turned into a
+sentence, and a base of that shape simply could not be extended, which cost the whole heaps 3D
+scene graph. What it decides now is only *which way* the base is constructed: with a reason in
+hand the bridge stops rebuilding and either calls a `hxscript.shim.<flattened path>` static
+`init` where one exists, or gets a real constructor calling a real `super` and lets Haxe build
+the base. So this is a routing question, and the reason string is diagnostic rather than fatal.
+`Presets.HEAPS_3D` is the note on what that bought.
 
 ## src/hxscript/runtime/Interp.hx
 
@@ -532,7 +550,7 @@ incomplete one.
 | `hxscript_no_shims` | step 4 off |
 | `hxscript_setup_only=a,b` | only these libraries |
 | `hxscript_setup_skip=a,b` | everything except these |
-| `hxscript_setup_skip=heaps3d` | heaps without its 3D half, which is nine of its eleven bridges |
+| `hxscript_setup_skip=heaps3d` | heaps without its 3D half, which is nine of the ten bridges its presets generate |
 | `hxscript_host=pack` | also bridge the host's own `@:scriptable` classes |
 | `hxscript_verbose` | print what each step did |
 
@@ -686,7 +704,7 @@ one holds only what is always available.
 
 `haxe.io.Bytes` and its two streams are here for the same reason and are easy to miss: a host
 that never touches them itself does not compile them in, so a script reading or writing binary
-data gets `Type not found` for a standard-library class that is plainly standard. `Decode`
+data gets `Type not found` for a standard-library class that is plainly standard. `BytesTools`
 already names `Bytes` in a signature; the streams are what a script needs to produce them.
 
 ### public static final LIME:Library =
@@ -750,19 +768,24 @@ A script that can draw needs no help to draw a readout. What it cannot easily do
 that looks like the application it is running inside, and a host with a UI already has that
 problem solved for itself and not for its scripts. So the widgets come along.
 
-`smidr.types` holds nothing but abstracts (`UITone`, `UIFill`, `UIEase`, `UIAlign`) and they
-are ordinary constructor arguments, so a script writes them constantly. Wrapping the package
-wholesale rather than naming them is right here for the same reason it is right for flixel: the
-alternative is finding out one at a time, from somebody else's `Unknown identifier`.
+`smidr.types` is **almost** nothing but abstracts, and the scan is pointed at it for that reason:
+ten of its twelve modules are an `enum abstract` (`UITone`, `UIFill`, `UIEase`, `UIAlign`,
+`UICursor`, `UICursorMode`, `UIDockZone`, `UIEdge`, `UIGlyph`, `UIAnimationPreset`), which is the
+exact shape a script cannot see the constants of without a wrapper, and they are ordinary
+constructor arguments, so a script writes them constantly. The other two, `UIMenuItem` and
+`UIRailTabDef`, are typedefs, which the scan passes over. Wrapping the package wholesale rather
+than naming them is right here for the same reason it is right for flixel: the alternative is
+finding out one at a time, from somebody else's `Unknown identifier`.
 
 `smidr.flixel` is left out of the include. It is the bridge to a framework this build may not
 have, and including it would make the UI toolkit depend on flixel being present.
 
-**Nothing here bridges.** `UIComponent` is the obvious base and cannot be one: it is an openfl
-`Sprite`, and its constructor writes `mouseChildren` and `mouseEnabled`, which a rebuilt
-constructor cannot write from outside the class. That is the same limit openfl's own display
-list has and it lands in the same place: scripts build and drive every widget freely, they
-just cannot declare a new one by subclassing.
+**Nothing here bridges, and that is now a choice rather than a limit.** `UIComponent` is the
+obvious base, and the reason it was not one has gone: it is an openfl `Sprite`, whose constructor
+writes `mouseChildren` and `mouseEnabled`, which a rebuilt constructor could not write from outside
+the class, and a base of that shape is constructed by Haxe now rather than refused. Openfl's own
+display list bridges for the same reason. So this record is a place to add `bases` when somebody
+wants scripted widgets; until then scripts build and drive every widget freely and declare none.
 
 ## src/hxscript/setup/Shims.hx
 
@@ -804,7 +827,7 @@ share the cell.
 
 Selection is by name rather than by binding, so sibling scopes reusing a name are all boxed.
 
-### src/hxscript/compile/Compiler.hx :: public static var jit:Bool = true;
+### src/hxscript/cppia/Backend.hx :: public static var jit:Bool = true;
 
 It is a process-wide switch rather than a per-module one, so it is set once and never unset by
 ordinary running. Leaving it on is the usual choice: it costs nothing measurable at load time
@@ -815,7 +838,7 @@ off has met a JIT fault rather than a bad module, and since that fault is cumula
 than caused by any one construct, the only useful response is to stop jitting for the rest of
 the process. That happens automatically and is reported.
 
-### src/hxscript/compile/Compiler.hx :: static function retryWithoutJit(result:Result, group:Array<Module>, env:Environment, report:Report):Bool
+### src/hxscript/cppia/Backend.hx :: static function retryWithoutJit(result:Result, group:Array<Module>, env:Environment, report:Report):Bool
 
 A module that the loader refuses with the JIT on and accepts with it off has met a JIT fault,
 and a JIT fault is cumulative: it belongs to how much has been jitted rather than to any one
@@ -823,7 +846,7 @@ construct, so narrowing would blame whichever module happened to tip it over. Gi
 JIT for the rest of the process is the only answer that stays true, and it is a good trade, since
 compiled without the JIT is still far ahead of interpreted.
 
-### src/hxscript/compile/Compiler.hx :: static function load(result:Result, offered:Array<Module>, env:Environment, report:Report):Null<String>
+### src/hxscript/cppia/Backend.hx :: static function load(result:Result, offered:Array<Module>, env:Environment, report:Report):Null<String>
 
 Guarded, and that is the point of it. The loader reports a fault by throwing, and what it
 throws is a bare string that names the fault and nothing inside the module, so an unguarded
@@ -831,14 +854,14 @@ load turns one unemittable construct in one script into the host process ending.
 worst case is that everything stays interpreted, which is the same degradation every other
 refusal already has.
 
-### src/hxscript/compile/Compiler.hx :: static function bind(module:Module, env:Environment):Bool
+### src/hxscript/cppia/Backend.hx :: static function bind(module:Module, env:Environment):Bool
 
 Skipping the work is not the same as skipping the binding. `built` outlives any one world, so a
 world made after a reload would otherwise find everything already compiled and be handed
 nothing: the classes exist, every report says so, and none of them is what runs, because the
 interpreter reads the world's own map and that map is empty.
 
-### src/hxscript/compile/Cppia.hx :: class Cppia
+### src/hxscript/cppia/Backend.hx :: class Backend
 
 Optional in two senses: nothing here is built unless `-D hxscript_cppia` is set, and any module
 the emitter cannot express is reported in `skipped` and left to the interpreter rather than
@@ -846,20 +869,20 @@ failing the batch.
 
 Loading the result needs a host built with `-D scriptable`, via `cpp.cppia.Module.fromData`.
 
-### src/hxscript/compile/Emitter.hx :: class Emitter
+### src/hxscript/cppia/Emitter.hx :: class Emitter
 
 cppia resolves names when the module links, so `emitIdent` must place each one as a local, a field
 of the enclosing class, or a type; anything else throws `Unsupported` rather than being
 guessed at. An unknown TYPE is not a refusal. It is emitted as `Dynamic`, costing dispatch speed
 for that expression alone.
 
-### src/hxscript/compile/Emitter.hx :: var classVars:StringMap<StringMap<String>>;
+### src/hxscript/cppia/Emitter.hx :: var classVars:StringMap<StringMap<String>>;
 
 Only fields that are plain variables are here. A field with a `get` or `set` accessor is left
 out on purpose: reaching it directly would read the storage behind the property and skip the
 accessor that gives it its meaning.
 
-### src/hxscript/compile/Emitter.hx :: var expectedArray:Null<String> = null;
+### src/hxscript/cppia/Emitter.hx :: var expectedArray:Null<String> = null;
 
 An array literal has nothing in it to say what it holds, so it was always built as the loose
 kind. That is fine until something reads it back through an annotation promising a specific
@@ -867,14 +890,14 @@ kind, because the read trusts the annotation and reinterprets the memory, which 
 than misbehaves. Carrying the target's type to the literal keeps the two descriptions of the
 same array in agreement.
 
-### src/hxscript/compile/Emitter.hx :: var moduleAbstracts:StringMap<String> = new StringMap();
+### src/hxscript/cppia/Emitter.hx :: var moduleAbstracts:StringMap<String> = new StringMap();
 
 An abstract has no runtime form, so a value of one is its underlying value and a method on it
 is a static taking that value as a leading `this`. Knowing which paths those are is what lets
 a call be routed there, and what each one boxes is what lets a slot holding one be typed as
 the thing it really holds.
 
-### src/hxscript/compile/Emitter.hx :: var temporaryArray:Null<String> = null;
+### src/hxscript/cppia/Emitter.hx :: var temporaryArray:Null<String> = null;
 
 A local's array type comes from what it was declared as, and a temporary is declared with no
 type at all, so it would be built untyped however specific its contents are. That matters when
@@ -882,7 +905,7 @@ the temporary is then read into a slot the loader believes holds a typed array: 
 wrong shape and yields nothing useful. This carries the type across the one step where there is
 no declaration to take it from.
 
-### src/hxscript/compile/Emitter.hx :: function ownView(decls:Array<ModuleDecl>):Void
+### src/hxscript/cppia/Emitter.hx :: function ownView(decls:Array<ModuleDecl>):Void
 
 Every module in the batch is declared into one table, so a name declared in one is visible from
 all of them, and a name the host also offers is decided by whichever was written last. Neither
@@ -893,13 +916,13 @@ A fresh emitter is built for each module and declares the batch before emitting 
 applying that module's own view last is enough to get the precedence right. Without it a
 script declaring `Damage` beside a host `Damage` silently linked the wrong one.
 
-### src/hxscript/compile/Emitter.hx :: function emitFun(args:Array<Argument>, body:Expr, ret:Null<CType>, pos:Position):Void
+### src/hxscript/cppia/Emitter.hx :: function emitFun(args:Array<Argument>, body:Expr, ret:Null<CType>, pos:Position):Void
 
 Captures are left to the loader, which walks the enclosing stack layout; this only has to nest
 and to keep variable ids unique. Default argument values become null-checks prepended to the
 body, since cppia accepts only constants in the signature.
 
-### src/hxscript/compile/Emitter.hx :: function accumulate(e:Expr, target:Expr):Expr
+### src/hxscript/cppia/Emitter.hx :: function accumulate(e:Expr, target:Expr):Expr
 
 Only the positions whose value the comprehension keeps are rewritten. In a block that is the
 last expression and nothing before it; in a loop it is the body, so nesting accumulates into
@@ -908,21 +931,21 @@ the same container; in an `if` it is each branch that exists.
 A `key => value` becomes a `set` rather than a `push`, which is what makes the map form work:
 the caller has already built `target` as a map when that is what the body yields.
 
-### src/hxscript/compile/Emitter.hx :: function accessCode(mode:Null<String>, pos:Position):String
+### src/hxscript/cppia/Emitter.hx :: function accessCode(mode:Null<String>, pos:Position):String
 
 Accessors are written as `V` rather than `C`. Both make the loader resolve `get_<name>` or
 `set_<name>` at link time, but only `V` also registers the field as a native property, and a
 by-name access, which is how this emitter reads fields, consults the accessor only for
 those. With `C` the read would silently return the storage slot instead.
 
-### src/hxscript/compile/Emitter.hx :: function storableType(path:String):Void
+### src/hxscript/cppia/Emitter.hx :: function storableType(path:String):Void
 
 A slot is only ever stored as bool, int, float, string or object, and everything that is not
 one of the first four is an object, so naming the exact class buys nothing, while naming one
 the loader cannot resolve leaves the slot with no store type at all and drops it to untyped
 access. Only the types that change the storage are written; the rest are `Dynamic`.
 
-### src/hxscript/compile/Emitter.hx :: function hostField(e:Expr):Bool
+### src/hxscript/cppia/Emitter.hx :: function hostField(e:Expr):Bool
 
 Only a field access qualifies, and only when its object cannot be shown to be a class from this
 batch: those have a known layout and are reached by offset. Everything else may be a property,
@@ -931,7 +954,7 @@ either.
 
 `this` is excluded because a scripted class's own fields are its own, whatever it extends.
 
-### src/hxscript/compile/Emitter.hx :: function nativeAbstract(path:String):Null<Class<Dynamic>>
+### src/hxscript/cppia/Emitter.hx :: function nativeAbstract(path:String):Null<Class<Dynamic>>
 
 A host abstract has no runtime class, so `BlendMode.ADD` cannot be emitted as a static access:
 the loader finds no `openfl.display.BlendMode` to link against and refuses the whole module with
@@ -942,7 +965,7 @@ whether a path is an abstract at all.
 Cached including the misses: nearly every path asked about is an ordinary class, and the answer
 is a type resolution.
 
-### src/hxscript/compile/Emitter.hx :: function abstractConstant(wrapper:Class<Dynamic>, name:String):Null<Dynamic>
+### src/hxscript/cppia/Emitter.hx :: function abstractConstant(wrapper:Class<Dynamic>, name:String):Null<Dynamic>
 
 This is not an optimisation, it is the only honest spelling. An enum abstract's constants are
 compile-time values, and compiled Haxe writes the underlying `1` or `"add"` at the call site, so
@@ -950,7 +973,7 @@ there is nothing at runtime for `BlendMode.ADD` to be. The wrapper holds each co
 getter returning a boxed value, which is right for the interpreter and wrong for anything handing
 it to a host API, so the box is opened here and the contents emitted.
 
-### src/hxscript/compile/Emitter.hx :: function declaredClass(path:String):Null<String>
+### src/hxscript/cppia/Emitter.hx :: function declaredClass(path:String):Null<String>
 
 Worth resolving because the alternative is `Dynamic`, and `Dynamic` decides how every later
 access to the value is performed: a field read becomes a lookup by name at runtime rather than
@@ -1049,7 +1072,7 @@ leaves compiled code through reflection arrives as `0` or `1` and the interprete
 the type back. The declaration is the only place that survives, so it is read from there.
 
 Answered lazily off the module's own declarations rather than recorded when something is
-compiled, so it cannot fall out of step with a host that drives `Cppia` itself and fills
+compiled, so it cannot fall out of step with a host that drives a backend itself and fills
 `compiled` by hand. Every answer is kept, the empty ones included, because a native class asked about
 on the way up an inheritance chain is the common case, and it is asked about once.
 
@@ -1209,8 +1232,10 @@ The delegate is the real map, so a script may hand one of these to host code typ
 
 ### src/hxscript/runtime/Interp.hx :: class Interp
 
-Inside this class `Type`, `Reflect`, and `Std` are aliased to the `hxScript*` proxies (see the
-imports), so reflection transparently understands scripted types as well as native ones.
+Inside this class `Type`, `Reflect` and `Std` are aliased to `hxscript.proxy.TypeProxy`,
+`ReflectProxy` and `StdProxy` (see the imports), so reflection transparently understands scripted
+types as well as native ones. The real ones are still reachable as `HaxeType` and `HaxeReflect`,
+which is worth remembering when reading this file.
 
 ### src/hxscript/runtime/Interp.hx :: var frameLocals:Map<String, Variable> = null;
 
@@ -1320,7 +1345,14 @@ set up a copy that nothing else reads.
 Declared as a `@:structInit` class rather than an anonymous structure so its fields compile to
 direct member access. Anonymous structures are looked up by field name at runtime on static
 targets, and this type is read on every variable access, so that cost lands in the interpreter's
-hottest path. `@:structInit` keeps the `{r: value}` construction syntax used throughout.
+hottest path. `@:structInit` keeps a construction syntax, which is now `{ref: value}`: `r` became a
+property over the numeric lane and a property has no storage for `@:structInit` to fill.
+
+The lane is the second reason this is a class. On a target where a `Dynamic` is a pointer, writing an
+`Int` into a slot allocates, and a loop counter is written once per iteration, so a number is kept
+unboxed in `num` with `lane` recording which kind it is. `r` boxes on the way out and only when
+something asks for a `Dynamic`, so nothing holding one of these has to know which lane it is in, and
+the paths that do know use `setInt`/`setFloat`/`asInt`/`asFloat` and never box at all.
 
 ### src/hxscript/setup/Abstracts.hx :: public static function generate(libs:Array<Library>):Array<String>
 

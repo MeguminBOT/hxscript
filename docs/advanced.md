@@ -118,8 +118,10 @@ typed at the wrong moment.
 
 `Expose` is the counterpart to the bridge macro above: instead of generating subclassable
 shells, it collects what your host offers scripts by name. Mark a type `@:scriptAmbient` or a static
-`@:scriptStatic`, call `Expose.apply()` at startup, and it fills `Config.globalVariables` for
+`@:scriptStatic`, call `Expose.apply()` at startup, and it fills `Config.globalStatics` for
 interpreted code and `Compiler.ambient`/`Compiler.statics` for compiled code from the same marks.
+`globalStatics` rather than `globalVariables` on purpose: it records where the value lives rather
+than the value, so a host reassigning the static is seen by both sides alike.
 
 Worked through in
 [`embedding.md`](embedding.md#giving-scripts-your-own-code), including why filling one side
@@ -183,8 +185,9 @@ really switches it on:
 That is how heaps ships as two: `heaps` is the 2D half, `heaps3d` is the scene graph, both arrive
 with `-lib heaps`, and `-D hxscript_setup_skip=heaps3d` drops the second. It is worth doing wherever
 one library holds two things a project picks between, because the halves are rarely the same size:
-heaps' 3D half is nine of its eleven bridges and **about a megabyte of binary**, and a 2D project
-pays all of it for a scene graph it never builds into.
+nine of the ten bridges the heaps presets generate are the 3D half, `h2d.Object` being the tenth, and
+they are **about a megabyte of binary**, which a 2D project otherwise pays for a scene graph it never
+builds into.
 
 Nothing forces the split to be even. `h3d.Vector`, `h3d.Matrix` and `h3d.mat.Texture` stay in the 2D
 record, because `h2d.Drawable` declares `colorAdd` and `colorMatrix` as the first two and `h2d.Tile`
@@ -223,17 +226,19 @@ will fail the build:
   `flixel.addons.editors.spine` needs spine;
 - **macro-only classes**, because `flixel.system.macros` uses `haxe.macro.Context` and is meaningless at
   runtime;
-- **deprecation stubs**, where `flixel.addons.tile.FlxRayCastTilemap` was removed in flixel-addons 5.9.0
-  and its stub does not compile.
+- **deprecation stubs**, where `flixel.addons.tile.FlxRayCastTilemap` was removed in flixel-addons
+  4.0.0 and what is left of the module is gated `#if (flixel < version("5.9.0"))`, so against flixel 6
+  it declares no type at all and an include of it has nothing to compile.
 
 Including a library wholesale costs binary size. That is the trade: a script can construct anything,
 and the build carries everything.
 
 ### Step 2: bridge the bases scripts subclass
 
-A list, as in §1. For flixel that is the display primitives (`FlxBasic`, `FlxObject`, `FlxSprite`,
-`FlxGroup`, `FlxSpriteGroup`, `FlxText`) plus whichever of your own states and game objects
-scripts build on. Twenty or so entries covers a real game.
+A list, as in §1. The flixel preset bridges `FlxBasic`, `FlxObject`, `FlxSprite`, `FlxState`,
+`FlxSubState`, `flixel.group.FlxSpriteGroup` and `flixel.text.FlxText`, plus `FlxBackdrop` and
+`FlxSkewedSprite` from flixel-addons and the three `FlxUI` states from flixel-ui. Add whichever of
+your own states and game objects scripts build on; twenty or so entries covers a real game.
 
 Keep it to what mods actually subclass. Every entry costs one generated override per inherited
 non-inline, non-final method, and a display-object base has a lot of them.
@@ -244,30 +249,40 @@ reports `Class <base> can't be extended for scripting`, but the type still appea
 mention the base at all. Watch `onProgramError` during load rather than diagnosing from the
 construction site.
 
-**Some bases cannot be bridged.** A bridge rebuilds the base's constructor so a script's `new` can
-drive it, which means re-typing a body the typer has already lowered, and two things in a lowered
-body can never be re-typed anywhere else: a **private type**, which the bridge is not allowed to
-name, and an **abstract's implementation class**, whose members exist under no spelling reachable
-from outside. The build says so, naming the base and the reason:
+**A constructor that cannot be rebuilt is no longer a base being refused.** A bridge used to rebuild
+the base's constructor so a script's `new` could drive it, which meant re-typing a body the typer had
+already lowered, and some lowered bodies can never be re-typed anywhere else: one naming a **private
+type**, which the bridge is not allowed to name, one naming an **abstract's implementation class**,
+whose members exist under no spelling reachable from outside, and one that **assigns to `this`**,
+which an inlined abstract constructor does. Each of those used to fail the build.
 
-```
-ScriptedFlxButton: flixel.ui.FlxTypedButton cannot be extended for scripting, because it
-constructs flixel.ui.FlxButton.FlxButtonEvent, which is private.
-Remove it from the bridged bases; scripts can still import and construct it.
-```
+Such a base is **constructed by Haxe** now. The bridge gets a real constructor calling a real `super`,
+and the instance is allocated through it rather than emptily, so the base runs exactly as compiled and
+nothing about it has to survive a round trip. What that costs is that the base's arguments have to be
+known before the instance exists, which is why `ScriptedClass` evaluates the script's `super(...)`
+arguments first and runs the rest of the constructor after. A base may also carry a shim,
+`hxscript.shim.<its path, flattened>` with a static `init(instance, ...args)`, which becomes the body
+of `__constructSuper` when one is there; nothing else about the bridge moves either way.
 
-Measured against the libraries the presets cover: `flixel.ui.FlxButton` is out (its constructor does
-`new FlxButtonEvent(...)`, and flixel declares that class `private`), and `h2d.Object` bridges while
-`h2d.Drawable` and everything under it does not. OpenFL's display objects **do** bridge, contrary to
-what this page used to say. `DisplayObject` does mention types a generated override cannot name,
+The practical consequence is that **the shape of a base's constructor is no longer a reason it cannot
+be a base.** What still is: `final`, `extern`, an interface, and a `private` class. For a scanned
+`@:scriptable` type those are filtered and reported under `-D hxscript_verbose`
+(`not bridged: <path> (final)`); a base named in a `Library` record skips the filter, because naming
+one is a decision already made.
+
+Measured against the libraries the presets cover: `h2d.Object` bridges, `h2d.Drawable` and everything
+under it does not, because `Drawable`'s surface mentions `h3d.Vector4` and a generated override of it
+fails to compile inside `Vector4`'s own constructor. OpenFL's display objects **do** bridge, contrary
+to what this page used to say. `DisplayObject` does mention types a generated override cannot name,
 but those methods are skipped and left to `super`, which is the designed degradation. They are
 expensive to bridge, because the cost is one override per inherited method and there are a great
 many.
 
-`FlxButton` is the one worth remembering, because nothing about it looks unbridgeable: it is an
-`FlxSprite` with callbacks, and `FlxSprite` bridges. One `private` keyword on the class its
-callbacks are wrapped in is the whole difference. This is not something to reason about from the
-outside. Add the base and let the build tell you.
+`flixel.ui.FlxButton` is still off the preset's bridge list, and it is worth knowing why the reason
+changed. Its constructor does `new FlxButtonEvent(...)` against a class flixel declares `private`,
+which is exactly the shape that used to fail the build. It no longer does, so the omission is now a
+curated choice rather than a known impossibility: adding it is a build-and-see. Scripts construct
+`FlxButton` either way, since it is in `globals`.
 
 Everything left out is still importable and constructible from a script. Only `extends` is off the
 table, and the usual answer is a host class that *owns* one rather than *is* one.
@@ -511,7 +526,7 @@ blacklists the interpreter's own machinery and every script using `Std` dies wit
 | `typedMode` | on (`-D hxscript_dynamic` flips it) | enforce declared types at runtime |
 | `strictAccess` | `false` | enforce `private` on script-declared members. Not the only gate: the check runs when this **or** `typedMode` is set, and `typedMode` defaults on, so `private` is enforced out of the box. Only explicit `private` counts; unmarked members stay public, unlike Haxe, because existing scripts rely on it. `@:privateAccess` waives it at the call site |
 | `preprocessorValues` | host defines + `hxscript` | what `#if` in a script sees |
-| `typeProxy` | `Std`, `Type`, `Reflect` (+ `Math` on hl) | swap a type name for a stand-in class |
+| `typeProxy` | `Std`, `Type`, `Reflect`, and `Math` on hl and python | swap a type name for a stand-in class |
 | `globalVariables` | `null`/`true`/`false`, `Int`/`Float`/`Bool` tokens | values in every interpreter |
 
 ---

@@ -38,6 +38,222 @@ That is how we got here.
 What follows is the full technical side of the implementation: the interpreter that defines what an
 answer should be, then the two backends that try to produce the same answer faster.
 
+Two diagrams first, because both pipelines are easier to hold in one picture than in ten pages of
+prose: how the library gets itself into your game, and what happens to a script once it is there.
+
+# Part zero: how the library reaches your game
+
+`-lib hxscript` is the whole of the setup, and what that one line buys is four things a script needs
+before it can touch the game around it. All four happen without appearing in your build file, which
+is convenient and also the reason this diagram exists: a step that runs on its own is a step nobody
+watches.
+
+<details>
+<summary><b>Diagram: from -lib hxscript to a script that can reach your game</b></summary>
+
+```mermaid
+flowchart TD
+    lib["-lib hxscript"] --> ep["extraParams.hxml"]
+
+    ep --> keep["Keep"]
+    ep --> aw["Autowire"]
+    ep --> ban["Banner"]
+
+    aw --> nat["Native"]
+    aw --> pick["which libraries?"]
+
+    pick --> s1["1. include"]
+    pick --> s3["3. abstracts"]
+
+    s1 --> after{{"onAfterInitMacros"}}
+    s3 --> after
+
+    after --> ref["1b. reference"]
+    after --> s2["2. bridges"]
+
+    ref --> man["Manifest"]
+    s2 --> man
+
+    idx["Index"] --> tc["TypeCollection"]
+
+    man --> boot["Boot.ensure"]
+
+    boot --> b1["read Manifest"]
+    boot --> b2["blacklist"]
+    boot --> b3["Expose"]
+    boot --> b4["imports"]
+    boot --> b5["4. shims"]
+
+    b1 --> ready
+    b2 --> ready
+    b3 --> ready
+    b4 --> ready
+    b5 --> ready
+    tc --> ready
+    keep --> ready
+
+    ready["scripts reach your game"]
+
+    subgraph CT ["compile time"]
+        lib
+        ep
+        keep
+        aw
+        ban
+        nat
+        pick
+        s1
+        s3
+        after
+        ref
+        s2
+        man
+        idx
+    end
+
+    subgraph RT ["at the first script, once"]
+        boot
+        b1
+        b2
+        b3
+        b4
+        b5
+        tc
+        ready
+    end
+
+    classDef front fill:#e8eaf0,stroke:#5b6478,color:#111827
+    classDef step fill:#fef3c7,stroke:#b45309,color:#111827
+    classDef run fill:#dbeafe,stroke:#1d4ed8,color:#111827
+    classDef done fill:#dcfce7,stroke:#15803d,color:#111827
+
+    class lib,ep,aw,ban,nat,pick,after,man,idx,keep front
+    class s1,s2,s3,ref step
+    class boot,b1,b2,b3,b4,b5,tc run
+    class ready done
+```
+
+</details>
+
+The amber boxes are the four steps [advanced.md](advanced.md#4-adding-a-game-library) describes, and
+they are numbered because each one fails differently:
+
+| step | what it does | symptom when it is missing |
+| --- | --- | --- |
+| **1** `include` | force-compiles the packages, so the types exist to be found | `Type not found` |
+| **1b** `reference` | pulls in `Library.types` by naming them, for a package that cannot be included | `Type not found` |
+| **2** `Bridges` | one bridge class per scriptable base | `Class <base> can't be extended for scripting` |
+| **3** `Abstracts` | a reflectable wrapper per native abstract | `Unknown identifier: ADD` |
+| **4** `Shims` | closures for members with no runtime form, into `Config.callShims` | `Cannot call null` |
+
+The grey boxes are plumbing rather than steps. `Keep` forces the standard-library types scripts reach
+by reflection into the build and marks them `@:keep`. `Native` builds `hxscript.hdll` and is
+HashLink's alone; it cannot fail a build. `Banner` prints what was wired and which backend you got.
+`Index` records a `TypeInfo` per type in the build and serialises it into `TypeCollection.main`, which
+is what lets a script name `haxe.Json` with nothing registered by hand. `which libraries?` is
+`Presets.active` plus `hostLibrary`: `-lib flixel` switches the flixel record on, and
+`-D hxscript_host` scans your own source for `@:scriptable` and `@:scriptAmbient`.
+
+Two things in that picture are load-bearing and neither is obvious.
+
+**The two halves read the same answer rather than deriving it twice.** `Autowire` bakes what it
+actually wired into `hxscript.wired.Manifest`, and `Boot` reads that, so a `Presets.custom` record
+the build acted on cannot be one the startup forgot about.
+
+**Nothing calls `Boot.ensure`.** `Environment`, `Module` and `Script` each call it before they do
+anything else and it returns on its first line the second time, so the runtime half is in place
+before the first interpreter exists whichever of the three a host reaches for first. That ordering
+is why [advanced.md](advanced.md#order-of-operations) is a page about sequence: a module builds its
+interpreter in its constructor, and anything a host adds to `Config` afterwards is too late for the
+modules already made.
+
+# From source text to an answer
+
+Everything below this line is one of these three branches, drawn out. The front end is shared: there
+is one lexer, one parser and one tree, and the backends compile the same tree the interpreter walks,
+which is what makes "does it answer the same thing" a question you can ask at all.
+
+<details>
+<summary><b>Diagram: one tree, three ways to run it</b></summary>
+
+```mermaid
+flowchart TD
+    src["source text"] --> lex["Lexer"] --> par["Parser"]
+
+    par --> ps["parseScript"]
+    par --> pm["parseModule"]
+
+    ps --> tree["Expr tree"]
+    pm --> decls["declarations"]
+
+    decls --> life["Module<br/>four stages"]
+    life --> types["scripted types"]
+    types --> env["Environment"]
+
+    tree --> walk
+    env --> walk["Interp.expr"]
+
+    env --> comp{{"Compiler.compile"}}
+    comp --> pre["Capture + Accessors"]
+
+    pre --> cppE["cppia emitter"]
+    pre --> hlE["HL emitter"]
+
+    cppE --> cppL["cppia loader"]
+    hlE --> hlL["HL loader"]
+
+    cppL --> bind["substituting"]
+    hlL --> bind
+
+    cppE -. "cannot emit" .-> skip
+    hlE -. "cannot emit" .-> skip
+    cppL -. "would not load" .-> skip
+    hlL -. "would not load" .-> skip
+
+    skip["reported, stays interpreted"]
+    skip --> walk
+
+    classDef front fill:#e8eaf0,stroke:#5b6478,color:#111827
+    classDef blue fill:#dbeafe,stroke:#1d4ed8,color:#111827
+    classDef amber fill:#fef3c7,stroke:#b45309,color:#111827
+    classDef green fill:#dcfce7,stroke:#15803d,color:#111827
+    classDef red fill:#fee2e2,stroke:#b91c1c,color:#111827
+
+    class src,lex,par,ps,pm,tree,decls,life,types,env,pre front
+    class walk,comp,bind blue
+    class cppE,cppL amber
+    class hlE,hlL green
+    class skip red
+```
+
+</details>
+
+**`Interp.expr` is in the middle on purpose.** It is not a fallback, it is the definition: the
+conformance corpus asks every column what a construct answers and compares each compiled one against
+its own target's interpreter, which is why [`support-table.md`](support-table.md) can say the two
+agree rather than that the tests passed.
+
+**The two shared passes cannot refuse.** `compile/Capture` boxes a local a closure both captures and
+assigns; `compile/Accessors` turns a local property into the `get_x()` and `set_x(v)` calls it stands
+for. Both are pure rewrites, both run over a body before a token is written, and `Accessors` has to
+run first, which was learned the hard way and is [part two](#where-the-tree-has-to-be-rewritten-first).
+
+**The dashed edges are the whole safety argument.** A refusal costs speed and never behaviour, and the
+two kinds are kept apart in the report because they have different fixes: `report.skipped` is an
+emitter declining to emit, `report.failed` is a loader declining to accept what was emitted. Each
+carries a name, a reason and a position.
+
+Where the two backends differ, in one table. Everything else about them is the same shape:
+
+| | cppia | HashLink |
+| --- | --- | --- |
+| bytecode | text, token stream with pools | binary, variable-length signed ints |
+| operands | a stack | typed registers, allocated per function |
+| loaded by | `cpp.cppia.Module.fromData` | the carried loader, through `hxscript.hdll` |
+| offered | in batches, so modules may refer to each other | one module at a time |
+| a rejected load | the batch is halved and retried | reported, and that module is interpreted |
+| the JIT | opt-in, process-wide, one call at startup | the VM jits whatever it loads |
+
 # Part one: the interpreter
 
 The compiler is not a separate language. It compiles the same syntax tree the interpreter walks, and
@@ -112,7 +328,11 @@ A local is a `hxscript.runtime.Variable`, not a bare value:
 
 ```haxe
 class Variable {
-    public var r:Dynamic;              // the value
+    public var ref:Dynamic;            // the value, when it is not a number
+    public var num:Float = 0;          // the value, when it is
+    public var lane:Int = REFERENCE;   // which of the two holds it
+    public var r(get, set):Dynamic;    // the value, whichever lane it is in
+
     public var a:AbstractValue = null; // the abstract wrapper, when it is one
     public var t:CType = null;         // the declared type
     public var isFinal:Bool = false;
@@ -125,6 +345,13 @@ class Variable {
 That is why reading a local is not a map lookup and nothing more. `readLocal` consults `get` and may
 call a `get_x` function; `writeLocal` consults `set`, refuses to assign to a `final`, and refuses to
 rebind a method that was not declared `dynamic`. Both honour `@:bypassAccessor`.
+
+**The two lanes are the one place the tree walk escapes `Dynamic`.** On a target where a `Dynamic` is
+a pointer, every write of an `Int` to a slot allocates a box, and a loop counter is written once per
+iteration. So a number lives in `num` with `lane` saying which kind it is, and `setInt`, `setFloat`,
+`asInt` and `asFloat` read and write it without boxing on the way. `r` is a property that boxes only
+when somebody actually asks for a `Dynamic`, so nothing holding a `Variable` has to know which lane
+it is in. Construction is `{ref: value}`, not `{r: value}`, because `r` has no storage of its own.
 
 Scopes are handled by save and restore rather than by a stack of maps. Entering a block records how
 many names have been declared so far; declaring a name pushes the previous binding onto
@@ -193,7 +420,8 @@ Everything above is a cost that repeats on every evaluation:
 
 * a switch dispatch per node, per execution
 * a map lookup per name
-* `Dynamic` everywhere, so boxing and dynamic dispatch on arithmetic
+* `Dynamic` almost everywhere, so dynamic dispatch on arithmetic, and boxing wherever a value leaves
+  a `Variable`'s numeric lane
 * a `Variable` indirection on every local read and write
 * position tracking and a script level call stack maintained as it goes
 * host calls going through reflection

@@ -55,7 +55,7 @@ if [ "$QUICK" = "1" ]; then
 	note "targets" "skipped (--quick)"
 else
 	if sh "$HERE/run.sh" > "$BIN/all-targets.log" 2>&1; then
-		note "targets" "$(grep -cE '^\S+ +(ok|built)' "$BIN/all-targets.log" || echo 0) of 10 ok"
+		note "targets" "$(grep -cE '^\S+ +(ok|built)' "$BIN/all-targets.log" || echo 0) of 9 ok"
 	else
 		note "targets" "FAILED, see bin_test/all-targets.log"
 		failures=$((failures + 1))

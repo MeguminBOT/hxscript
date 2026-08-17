@@ -27,7 +27,7 @@ This table is the whole summary. Each section below is one row of it, explained.
 | enums with parameters; `switch` extraction, guards, `\|`, array and object patterns | custom metadata, mostly inert | overload resolution |
 | abstracts, scripted and native: `@:op`, `@:arrayAccess`, `from`/`to` | `private`, enforced only where written explicitly | `@:structInit`, `@:multiType` |
 | typedef aliases | `untyped`, a no-op | compile-time type errors and inference |
-| statics, instance fields, `final` fields, accessors (`get`/`set`/`null`/`never`/`default`/`dynamic`) | `final` and `abstract` on a class, and `final` on a method: recorded, not enforced | overriding a native `inline`, `final` or `@:generic` method |
+| statics, instance fields, `final` fields, accessors (`get`/`set`/`null`/`never`/`default`/`dynamic`) | `final` and `abstract` on a class: recorded, not enforced. `final` on a method: parsed and dropped | overriding a native `inline`, `final` or `@:generic` method |
 | `using`, and `import` with `as`, `.*` and single fields | `inline` and `final` carry no optimization | compile-time inlining and DCE |
 | string interpolation, array and map comprehensions | | type-checking a `using` on a compiled class |
 | optional, default and rest arguments | | |
@@ -178,9 +178,11 @@ and never reaches that stage.
   Haxe, where the default is stricter. `@:privateAccess` waives the check at the call site, as in
   Haxe. See `checkAccess` in
   [`src/hxscript/runtime/Interp.hx`](../src/hxscript/runtime/Interp.hx).
-- **Custom metadata is inert.** Only a handful are honored: `@:privateAccess`, `@:bypassAccessor`,
-  `@:snapshot`, `@:safe`, `@:enumAbstract`, `@:enum`, `@:keep`, `@:coreType`. Anything else parses
-  and does nothing.
+- **Custom metadata is inert.** Six are honored on a script's own declarations: `@:privateAccess`,
+  `@:bypassAccessor`, `@:snapshot` (on a static or on the class, for all of them), `@:safe`,
+  `@:enumAbstract` and `@:enum`. Anything else parses and does nothing, `@:keep` and `@:coreType`
+  included: those two are read off *compiled* types by the build macros and mean nothing written in a
+  script.
 - **Interfaces carry no default implementations**, signatures only.
 - **A short call is placed by type, for a constructor.** Haxe lets a call leave out an optional
   parameter that is not the last one, and decides which one by asking what each argument is: that is
@@ -198,13 +200,16 @@ and never reaches that stage.
 - **`inline` / `final` have no optimization effect**, they parse, but everything is interpreted.
   There is no constant folding, inlining, or dead-code elimination; expect interpreter-level
   performance.
-- **`final class`, `abstract class` and `final` on a method parse and are recorded, but nothing
-  enforces them.** A script may extend a `final` class, instantiate an `abstract` one, and override a
-  `final` method. Haxe rejects all three at compile time, and there is no compile time here. The
-  flags are kept on the declaration (`ClassDecl.isFinal`, `isAbstract`, and `AFinal` / `AAbstract` in
-  `FieldAccess`), so a checker could enforce them without a parser change. `extern` on a member
-  parses for the same reason, and a member marked `abstract` or `extern` may be declared with no
-  body.
+- **`final class`, `abstract class` and `final` on a method parse, but nothing enforces them.** A
+  script may extend a `final` class, instantiate an `abstract` one, and override a `final` method.
+  Haxe rejects all three at compile time, and there is no compile time here.
+
+  The two on a class are *recorded*, as `ClassDecl.isFinal` and `isAbstract`, so a checker could
+  enforce them without touching the parser. `abstract` and `extern` on a member are recorded too, as
+  `AAbstract` and `AExtern` in `FieldAccess`, which is also what lets such a member be declared with
+  no body. **`final` on a method is not recorded**: it is accepted and dropped, there is no `AFinal`,
+  and a checker wanting to enforce it needs a parser change first. `final` on a *variable* field is
+  kept, in `VarDecl.isFinal`.
 
 ## 7. Scripts can only reach what survives DCE
 

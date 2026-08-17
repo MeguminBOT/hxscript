@@ -283,8 +283,8 @@ class Presets {
 	 * a preset offering only `h2d` says the library does not support half of what the framework is
 	 * for. So this is on whenever heaps is, and is a record of its own for the other reason, which is
 	 * that a project only ever wants one of the two graphs and this is the more expensive one. Nine
-	 * of the eleven bridges a heaps build generates are here, and a bridge costs one generated
-	 * override per inherited method.
+	 * of the ten bridges the heaps presets generate are here, `h2d.Object` being the tenth, and a
+	 * bridge costs one generated override per inherited method.
 	 *
 	 * ```
 	 * -D hxscript_setup_skip=heaps3d

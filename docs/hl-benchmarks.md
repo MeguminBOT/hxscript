@@ -137,8 +137,8 @@ differ by design rather than by degree; `unwind` and `compound` rows are in neit
 dominated by how a mode implements `continue` and `throw`, or by doing far more than one
 thing per iteration.
 
-`refused` is a compiler declining a construct it does not emit: nothing ran, because the
-module is rejected whole. Those rows are the edge of the compiled subset: `noCall`.
+`refused` in a **native** column means the case cannot be written as Haxe at all, so there
+was nothing to compile and nothing ran: `noCall`. Those are a property of the corpus, not of a compiler.
 
 <details>
 <summary><strong>39 cases, click to expand</strong></summary>

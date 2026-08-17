@@ -5,11 +5,12 @@
 #   sh test/run.sh cpp js       just those
 #
 # Exits non-zero only on an UNEXPECTED failure. A target listed in known-failing.txt is reported as
-# `known-fail` and does not fail the run, so this can be wired to CI while those five are still open.
+# `known-fail` and does not fail the run, so this can be wired to CI while those two are still open.
 #
 # Generation is real output rather than `--no-output`, and that is not incidental: the js and lua
-# failures are generator-stage errors that `--no-output` does not reach. A matrix that skipped
-# generation would report all nine green while four of them could not build.
+# failures this suite was built to catch were generator-stage errors, which `--no-output` never
+# reaches. A matrix that skipped generation reported every target green while four of them could not
+# build, which is the whole reason for the extra wall time.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
@@ -24,8 +25,11 @@ TARGETS=${*:-$ALL}
 
 mkdir -p "$BIN"
 
-# Whether a target has a runtime here. The rest are built and not run, which still catches every
-# compile and generator error, and is the entire failure mode this suite exists for.
+# Whether this suite has a way to EXECUTE what it built for a target. eval and cpp always do; neko,
+# python and hl do when their interpreter is on PATH. js, java, lua and php never do: no runner is
+# wired up for them, so installing node or a JVM would not change this. They are built and left, which
+# still catches every compile and generator error, and is the entire failure mode this suite exists
+# for.
 #
 # `hl` runs when the HashLink VM is on PATH. It is worth putting there: the target had nine failures
 # and fourteen gaps that only a real run could show, all of them one runtime cast.

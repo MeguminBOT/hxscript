@@ -7,43 +7,90 @@
 [![stars](https://badgen.net/github/stars/MeguminBOT/hxscript)](https://github.com/MeguminBOT/hxscript/stargazers)
 [![Haxe](https://badgen.net/badge/Haxe/4.3+/orange)](https://haxe.org/)
 
-**An advanced Haxe interpreter.**
+**An advanced Haxe interpreter.** It parses Haxe-shaped source and evaluates it directly, with enough
+of the language intact that a script can declare classes, enums, typedefs and abstracts, and extend
+the ones your application already compiled. Declared types are enforced as values pass through them.
 
-It parses Haxe-shaped source and evaluates it directly, with enough of the language intact that a
-script can declare classes, enums, typedefs and abstracts, and extend the ones your application
-already compiled. The interpreter is plain Haxe and builds on every target; see
-[Status](#status) for where that is exercised rather than only compiled.
+**On hxcpp and HashLink it also compiles**, at runtime, from source text, with no Haxe toolchain
+anywhere in sight: a module becomes cppia or HashLink bytecode and loads into the running process as a
+real class. That is what lets a script written after you shipped run at close to compiled speed.
 
-**On hxcpp and HashLink** it can also translate a script to native bytecode while your application
-is running, with no Haxe toolchain anywhere in sight. That part needs a target with bytecode of its
-own: hxcpp has cppia, and HashLink has its own, each reached through a backend of its own.
-
-It began as a fork of [hscript-insanity](https://github.com/inky03/hscript-insanity), itself a fork
-of [hscript](https://github.com/HaxeFoundation/hscript), and has since grown into its own thing:
-runtime type enforcement, working abstracts, a diagnostic channel, and a bytecode compiler with a
-backend for hxcpp and one for HashLink. See [lineage](#lineage) for what came from where.
+A script is an ordinary `.hx` file your program reads at runtime. `game.Entity` here is one of your
+own compiled classes, marked `@:scriptable` in a package `-D hxscript_host=game` names:
 
 ```haxe
-import hxscript.Script;
+// mods/Bandit.hx
+class Bandit extends game.Entity {
+    var ambushes:Int = 0;
 
-// Note the DOUBLE quotes: a single-quoted host string would interpolate `$name`
-// in your own code, before the script ever sees it.
-var script = new Script("
-    class Greeter {
-        var name:String;
-        public function new(name:String) this.name = name;
-        public function greet() return 'hello, $name!';
+    public function new() super('bandit');
+
+    override public function greet():String {
+        ambushes++;
+        return 'I ambush you, says $name';
     }
-
-    function run() {
-        var g = new Greeter('world');
-        trace(g.greet());
-    }
-", 'MyScript');
-
-script.start();
-script.call('run');   // MyScript:10: hello, world!
+}
 ```
+
+Three lines to load it, two to reach an instance, and what comes back is a real instance of your
+class:
+
+```haxe
+var world = new Environment();
+world.addModule(new Module(File.getContent('mods/Bandit.hx'), 'Bandit', []));
+world.start();
+
+var cls:ScriptedClass = cast world.resolve('Bandit');
+var bandit:game.Entity = cls.typeCreateInstance([]);
+
+bandit is game.Entity;   // true. Hand it to any native code taking an Entity
+bandit.greet();          // your own call site, running the script's override
+```
+
+<details open>
+<summary><b>One source text, four ways to run it</b></summary>
+
+```mermaid
+flowchart LR
+    app["your app"] --> txt["script text"] --> parse["parse"] --> world["world"]
+
+    world --> interp["interpret"]
+    world --> cppia["cppia"]
+    world --> hlbc["HL bytecode"]
+
+    cppia --> cjit["+ JIT"]
+
+    cppia -. "refused" .-> interp
+    hlbc -. "refused" .-> interp
+
+    classDef front fill:#e8eaf0,stroke:#5b6478,color:#111827
+    classDef blue fill:#dbeafe,stroke:#1d4ed8,color:#111827
+    classDef amber fill:#fef3c7,stroke:#b45309,color:#111827
+    classDef green fill:#dcfce7,stroke:#15803d,color:#111827
+
+    class app,txt,parse,world front
+    class interp blue
+    class cppia,cjit amber
+    class hlbc green
+```
+
+</details>
+
+Interpreting is the default and works on every target. The dashed edges are the safety property the
+whole thing rests on: whatever an emitter cannot express is reported with a reason and left to the
+interpreter, so turning compiling on cannot break a script that was working.
+
+## Contents
+
+- [What it is for](#what-it-is-for)
+- [Install](#install)
+- [What scripts can do](#what-scripts-can-do)
+- [Compiling at runtime](#compiling-at-runtime)
+- [Errors say where and why](#errors-say-where-and-why)
+- [Try it](#try-it)
+- [Documentation](#documentation)
+- [Status](#status), and [Targets](#targets)
+- [Lineage](#lineage)
 
 ## What it is for
 
@@ -58,92 +105,18 @@ script.call('run');   // MyScript:10: hello, world!
 haxelib install hxscript
 ```
 
-or track the repository, for the unreleased state:
+Then `-lib hxscript` in your hxml, or `<haxelib name="hxscript" />` in a `Project.xml`. To track the
+repository instead: `haxelib git hxscript https://github.com/MeguminBOT/hxscript`.
 
-```
-haxelib git hxscript https://github.com/MeguminBOT/hxscript
-```
+**That one line is the whole of the setup, including for the game library you already use.** With
+lime, openfl, flixel, flixel-addons, flixel-ui or heaps in the build, hxScript force-compiles their
+packages so scripts can name the types, generates a bridge per class scripts may `extend`, gives their
+abstracts a runtime form so `BlendMode.ADD` means something, and registers emulations for the `inline`
+members with no runtime form to call. `@:scriptable` plus `-D hxscript_host=<packages>` does the same
+for your own classes, and a library it does not know is
+[a record you write once](docs/advanced.md#4-adding-a-game-library).
 
-Then `-lib hxscript` in your hxml, or `<haxelib name="hxscript" />` in a `Project.xml`.
-
-**That is the whole of the setup, including for the game library you already use.** If the build has
-flixel, openfl, lime or heaps in it, hxScript notices and does the four things a script needs before
-it can touch them: force-compiles their packages so scripts can name the types, generates a bridge
-per class scripts may `extend`, gives their abstracts a runtime form so `BlendMode.ADD` means
-something, and registers emulations for the `inline` members with no runtime form to call.
-
-```
--lib hxscript
--lib flixel        # this line is also the flixel scripting setup
-```
-
-None of that is mentioned in your build file, and a library it does not know is
-[a record you write once](docs/advanced.md#4-adding-a-game-library). To let scripts reach your *own*
-classes, mark them and name their package:
-
-```xml
-<haxedef name="hxscript_host" value="game" />
-```
-
-```haxe
-@:scriptable      // scripts may extend it
-class Entity { ... }
-
-@:scriptAmbient   // scripts may name it without importing it
-class Api { ... }
-```
-
-The [embedding guide](docs/embedding.md) covers the rest, and lists every build flag, every mark and
-every runtime setting.
-
-## Errors say where and why
-
-A parse error quotes the line with a caret under the column. An unknown name says whether it is
-missing from the build or only from the script's scope, and prints the `import` to add. A call that
-resolved to nothing says whether the member is misspelled or `inline`.
-
-```
-Playground.hx:42: character 17
-  var x = foo(;
-              ^
-Unexpected token ';'
-```
-
-Errors carry a call stack across script boundaries and into the host, rather than a bare message:
-
-```
-Exception: ouch...
-Called from test/TestScript.hxs.crash (test/TestScript.hxs line 2 column 8)
-Called from script test/TestScript.hxs (test/TestScript.hxs line 4 column 1)
-Called from Main.main (Main.hx line 10 column 3)
-```
-
-## How it compares to hscript
-
-[hscript](https://github.com/HaxeFoundation/hscript) is a small, fast expression interpreter. It
-evaluates Haxe-shaped expressions and does that well; what it does not do is let a script declare
-*types*, or bring the module-level language along with them.
-
-| | hscript | hxScript |
-| --- | --- | --- |
-| expressions, functions, closures | yes | yes |
-| **declaring classes in a script** | no | yes, including `extends` on your compiled classes |
-| enums, typedefs, abstracts, module-level fields | no | yes, scripted or imported from compiled code |
-| `import` / `using` | no | yes, incl. `as` aliases, `.*` wildcards, single fields |
-| string interpolation (`'v$n'`) | no | yes |
-| pattern matching | basic `switch` | extractors, guards, captures, struct and array patterns |
-| property accessors (`var x(default, set)`) | no | yes |
-| type annotations | parsed, ignored | **enforced at runtime** |
-| `Int` / `Float` distinction | blurred by `Dynamic` | preserved (`/` is always `Float`) |
-| errors | message | call stack across scripts and into the host |
-| **compiling to native bytecode** | no | yes, at runtime, from source text, on hxcpp and HashLink |
-
-The hscript column reflects 2.7.0, the version the benchmark suite ran.
-[benchmarks.md](docs/benchmarks.md) puts six libraries in this family through identical scripts and
-is worth reading before picking one. hxScript carries the largest language surface and pays for it
-per operation, while being several times faster per *call*, because it signals `return` and `break`
-with flags where the others throw exceptions. Which of those matters depends on what your scripts do
-more of.
+The [embedding guide](docs/embedding.md) is the rest of it, and lists every flag, mark and setting.
 
 ## What scripts can do
 
@@ -163,9 +136,13 @@ values is there.
 | typed multi-catch, closures, `#if` | | |
 | runtime type enforcement, `Int`/`Float` correctness | | |
 
-**Typed by default.** Declared types are enforced as values pass through them, which is the main
-thing separating this from the interpreters it descends from. A script fails where Haxe would reject
-it, rather than several frames later somewhere unrelated.
+The last column is not a to-do list. A macro runs *in* the compiler and there is no compiler at
+runtime; type parameters are erased by Haxe itself before the interpreter ever sees them; and an
+`inline` method has no runtime representation to override.
+[parity.md](docs/parity.md) is the long form, including where each boundary lives in the source.
+
+**Typed by default**, which is the main thing separating this from the interpreters it descends from.
+A script fails where Haxe would reject it, rather than several frames later somewhere unrelated.
 
 ```haxe
 var x:Int = 5;        // ok
@@ -177,47 +154,82 @@ trace(5 is Int);      // true, primitives work as targets
 
 `Config.typedMode = false`, or `-D hxscript_dynamic`, turns it off.
 
-The last column is not a to-do list. A macro runs *in* the compiler and there is no compiler at
-runtime; type parameters are erased by Haxe itself before the interpreter ever sees them; and an
-`inline` method has no runtime representation to override.
-[parity.md](docs/parity.md) is the long form, including where each boundary lives in the source.
+<details>
+<summary><b>How it compares to hscript</b></summary>
+
+[hscript](https://github.com/HaxeFoundation/hscript) is a small, fast expression interpreter. It
+evaluates Haxe-shaped expressions and does that well; what it does not do is let a script declare
+*types*, or bring the module-level language along with them.
+
+| | hscript | hxScript |
+| --- | --- | --- |
+| expressions, functions, closures | yes | yes |
+| **declaring classes in a script** | no | yes, including `extends` on your compiled classes |
+| enums, typedefs, abstracts, module-level fields | no | yes, scripted or imported from compiled code |
+| `import` / `using` | no | yes, incl. `as` aliases, `.*` wildcards, single fields |
+| string interpolation (`'v$n'`) | no | yes |
+| pattern matching | basic `switch` | extractors, guards, captures, struct and array patterns |
+| property accessors (`var x(default, set)`) | no | yes |
+| type annotations | parsed, ignored | **enforced at runtime** |
+| `Int` / `Float` distinction | blurred by `Dynamic` | preserved (`/` is always `Float`) |
+| errors | message | call stack across scripts and into the host |
+| **compiling to native bytecode** | no | yes, at runtime, from source text, on hxcpp and HashLink |
+
+The hscript column reflects `7d5eacc` on master, just past 2.7.0, which is what the benchmark suite
+ran. hxScript carries the largest language surface here and pays for it per operation, while being
+several times faster per *call*, because it signals `return` and `break` with flags where the others
+throw exceptions. Which of those matters depends on what your scripts do more of, and
+[benchmarks.md](docs/benchmarks.md) puts six libraries in this family through identical scripts.
+
+</details>
 
 ## Compiling at runtime
 
-**Where the target has bytecode of its own.** Scripts are interpreted everywhere by default. On
-hxcpp a module can instead be translated to [cppia](https://haxe.org/manual/target-cppia.html),
-hxcpp's own bytecode, and loaded as a real `Class<Dynamic>`, worth about **21x per operation** and
-**37x per call**, rising to about **30x** and **104x** with hxcpp's JIT on top. On HashLink a second
-backend emits HashLink bytecode and loads it into the running process, where the VM's own JIT takes
-it.
+Optional, and only where the target has bytecode of its own. On hxcpp a module can be translated to
+[cppia](https://haxe.org/manual/target-cppia.html) and loaded as a real `Class<Dynamic>`, worth about
+**26x per operation** and **46x per call**, rising to about **40x** and **104x** with hxcpp's JIT. On
+HashLink a second backend emits HashLink bytecode into the running process, where the VM's own JIT
+takes it.
 
 ```haxe
 var report = hxscript.compile.Compiler.compile(env);
 trace('${report.compiled.length} compiled, ${report.skipped.length} interpreted');
 ```
 
-Needs `-D hxscript_cppia` here and `-D scriptable` on the host, or `-D hxscript_hl` for HashLink.
-It is decided per module: whatever the emitter cannot express is reported with a reason and left to
-the interpreter, so turning it on cannot break a script that was working.
+Needs `-D hxscript_cppia` and `-D scriptable` on hxcpp, or `-D hxscript_hl` on HashLink. It is decided
+per module, so compiling the hot ones and interpreting the rest is a normal thing to do.
 
-**Haxe can emit cppia too, but only as a build step.** That is the difference this is for. Haxe's
-path compiles a `.hx` file ahead of time, against a snapshot of your host's classes, on a machine
-with the compiler installed, so it cannot compile a script that did not exist when you shipped. This
+**Haxe can emit cppia too, but only as a build step**, and that is the difference this is for. Haxe's
+path compiles a `.hx` file ahead of time, against a snapshot of your host's classes, on a machine with
+the compiler installed, so it cannot compile a script that did not exist when you shipped. This
 translates source text in-process, at load, with nothing installed, which is what makes it work for
 mods, in-app editors and anything a user writes after the fact. Where both can compile the same
 script, expect Haxe's output to be faster: it type-checks and optimises, and this is a direct
 translation with no optimisation passes.
 
-**It is the newest part of the library.** What it rests on is a shared conformance corpus of 329
-constructs, run in six columns, one per way of executing a script: interpreted on eval, hxcpp and
-HashLink, and compiled as cppia with and without the JIT and as HashLink bytecode. Every compiled
-column currently agrees with its own target's interpreter on all 329 and refuses none of them, and
-[`support-table.md`](docs/support-table.md) is that reading, regenerated rather than written.
-Several wrong-answer bugs were found this way, which is both the reason to trust it as far as you do
-and the reason not to trust it further.
+**It is the newest part of the library**, and what it rests on is a shared conformance corpus of 332
+constructs run in six columns, one per way of executing a script. Every compiled column currently
+agrees with its own target's interpreter on all 332 and refuses none of them;
+[`support-table.md`](docs/support-table.md) is that reading, regenerated rather than written. Several
+wrong-answer bugs were found this way, which is both the reason to trust it as far as you do and the
+reason not to trust it further.
 
-[modes.md](docs/modes.md) is the full comparison and the guidance on when compiling repays what it
-costs; [mode-benchmarks.md](docs/mode-benchmarks.md) is where the figures come from.
+[modes.md](docs/modes.md) is the full comparison and when compiling repays what it costs;
+[mode-benchmarks.md](docs/mode-benchmarks.md) is where the figures come from.
+
+## Errors say where and why
+
+A parse error quotes the line with a caret under the column. An unknown name says whether it is
+missing from the build or only from the script's scope, and prints the `import` to add. A call that
+resolved to nothing says whether the member is misspelled or `inline`. Everything carries a call stack
+across script boundaries and into the host, rather than a bare message.
+
+```
+Playground.hx:42: character 17
+  var x = foo(;
+              ^
+Unexpected token ';'
+```
 
 ## Try it
 
@@ -232,9 +244,9 @@ Two worked examples and two applications, all runnable:
   lime, openfl and flixel where a project is a folder of `.hx` files it reads at runtime. Drop a
   folder in, press Run, edit, save, watch it reload.
 - [`apps/sandbox-heaps/`](apps/sandbox-heaps) is the same idea on heaps and HashLink, and is where
-  the 3D half is exercised: it ships seven of the heaps samples as examples plus a first-person
-  shooter whose physics is tested without opening a window, and it drives the conformance projects
-  that check a real project's interop interpreted against compiled.
+  the 3D half is exercised: seven of the heaps samples as examples, a first-person shooter whose
+  physics is tested without opening a window, and the conformance projects that check a real project's
+  interop interpreted against compiled.
 
 ## Documentation
 
@@ -243,17 +255,18 @@ Two worked examples and two applications, all runnable:
 - **[Macros, a custom interpreter, and binding your API](docs/advanced.md)** covers generating
   bridges, making native abstracts visible, and subclassing `Interp`.
 - **[Execution modes](docs/modes.md)** covers interpreting, compiling and jitting, and when each pays.
+- **[How it works](docs/how-it-works.md)** is the long technical account, and opens with both
+  pipelines as diagrams: how `-lib hxscript` reaches your game, and what happens to a script between
+  source text and an answer.
 - [Parity with Haxe](docs/parity.md) sets out what scripts can and cannot do, and why.
+- [Internals](docs/internals.md) explains why the parts that are not obvious are the way they are.
 - [Performance](docs/performance.md) covers what has been optimised, and how to measure without
   fooling yourself.
-- [Benchmarks](docs/benchmarks.md) puts six libraries in this family through identical scripts.
-- [Mode benchmarks](docs/mode-benchmarks.md) runs the same corpus interpreted, compiled and jitted.
-- [HashLink benchmarks](docs/hl-benchmarks.md) runs it against the same program compiled by Haxe,
+- [Benchmarks](docs/benchmarks.md) puts six libraries in this family through identical scripts;
+  [mode benchmarks](docs/mode-benchmarks.md) runs one corpus interpreted, compiled and jitted; and
+  [HashLink benchmarks](docs/hl-benchmarks.md) runs it against the same program compiled by Haxe,
   which is what a script costs against not scripting it at all.
 - [Static checking](docs/checker.md) sets out the design for a pre-run checker, and its limits.
-- **[How it works](docs/how-it-works.md)** is the long technical account: the interpreter, then
-  compiling to cppia, then compiling to HashLink, and why each one is shaped the way it is.
-- [Internals](docs/internals.md) explains why the parts that are not obvious are the way they are.
 - [Tests](test) holds the suites, which double as executable documentation of behaviour.
 - [Changelog](CHANGELOG.md) has what changed per release, including the renames 2.0.0 asks you
   to follow.
@@ -273,17 +286,38 @@ Working, and in use. What is known to be missing:
       does not appear in the calling script's trace. Errors themselves carry their frames wherever
       they are reported; this is the remaining half.
 
-**Targets.** The suite builds on all nine and runs on four of them.
+### Targets
 
-| | built | suite runs | result |
-| --- | --- | --- | --- |
-| eval, cpp | yes | yes | pass in full |
-| neko, python | yes | yes | a handful of scripted-abstract cases fail |
-| js, java, lua, php, hl | yes | no runtime here | compile and generate only |
+Nine targets, no CI, so every box below was ticked by hand.
 
-The bytecode compiler needs a target with bytecode of its own, hxcpp or HashLink, and passes in
-full on both. What neko and python fail, and why, is in
-[`test/known-failing.txt`](test/known-failing.txt).
+**Passes the suite, and runs a real application.**
+
+- [x] **hxcpp** (`cpp`) — 332/332 interpreted, as cppia, and as cppia with the JIT. Ships
+      [`apps/sandbox`](apps/sandbox): lime, openfl, flixel.
+- [x] **HashLink** (`hl`) — 332/332 interpreted and as HashLink bytecode. Ships
+      [`apps/sandbox-heaps`](apps/sandbox-heaps): heaps, as an HL/C binary.
+- [x] **eval** — runs [`examples/battle`](examples/battle). One case, `an abstract Map through its
+      alias`, kills the eval VM rather than answering it, so eval's `host` part reads 29/30. That is
+      the VM, not this library.
+
+**Runs the suite, with known failures.**
+
+- [ ] **neko** — 3, all a scripted abstract forwarding to a native underlying type.
+- [ ] **python** — 3 failures and 3 gaps, mostly `@:forward` over the generated wrapper.
+
+**Generates, but untested in a real application.**
+
+- [ ] **js**
+- [ ] **java**
+- [ ] **lua**
+- [ ] **php**
+
+The bytecode compiler needs a target with bytecode of its own, so it is hxcpp and HashLink only, and
+passes in full on both. Everywhere else a script is interpreted.
+
+`sh test/all.sh` runs the whole matrix. Detail: [`test/known-failing.txt`](test/known-failing.txt) for
+the failures, [`docs/support-table.md`](docs/support-table.md) for what every mode answers per
+construct.
 
 ## Lineage
 
@@ -293,16 +327,10 @@ experimental fork of [hscript](https://github.com/HaxeFoundation/hscript). hscri
 [RuleScript](https://github.com/Kriptel/RuleScript); both are worth a look, and both are in the
 benchmark comparison.
 
-What hxScript added on top of hscript-insanity, and what makes it a separate library rather than a
-fork with patches:
-
-- type annotations enforced at runtime, with `-D hxscript_dynamic` to opt out, and `Int` versus
-  `Float` kept correct either way;
-- abstracts that work, scripted or compiled, including operators, array access and `from`/`to`;
-- structural typedefs checked by field *type* rather than by name alone;
-- one diagnostic channel for every phase, carrying the position, the source line and a likely cause;
-- automatic setup for the game library already in your build;
-- a compiler that translates a script to cppia or HashLink bytecode at runtime;
-- interpreter performance work that was measured rather than assumed.
+What makes this a separate library rather than a fork with patches: types enforced at runtime with
+`Int` and `Float` kept correct, abstracts that work either side of the boundary, structural typedefs
+checked by field type, one diagnostic channel for every phase, automatic setup for the game library
+already in your build, a compiler that translates a script to bytecode at runtime, and interpreter
+performance work that was measured rather than assumed.
 
 Pull requests welcome at [hxScript](https://github.com/MeguminBOT/hxscript/pulls).

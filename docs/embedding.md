@@ -46,10 +46,11 @@ The build says so, once, in one block:
      native   built export/hlc/Sandbox.exe
 ```
 
-The line that matters most is the third one. **A compiled backend is opt-in on both targets that
-have one**, and a build meaning to have one and not having it is a program running scripts at a
-fraction of the speed it was measured at, with nothing anywhere saying so. That line says which of
-the two you got.
+The counts are one real build's and yours will differ; what to read them for is whether each is
+non-zero. The line that matters most is the `hxscript 2.0.0 ...` one, which names the backend.
+**A compiled backend is opt-in on both targets that have one**, and a build meaning to have one and
+not having it is a program running scripts at a fraction of the speed it was measured at, with
+nothing anywhere saying so. That line says which of the two you got.
 
 `-D hxscript_no_banner`, or `HXSCRIPT_NO_BANNER=1` in the environment, prints nothing. `NO_COLOR`
 keeps the block and drops the escapes. `-D hxscript_verbose` is separate and still prints the
@@ -115,6 +116,10 @@ generates the bridge, and the runtime half is installed by the first `Script`, `
 Add `-D hxscript_verbose` once and read what it prints. It lists every library detected, every bridge
 generated and every shim registered, which is the fastest way to confirm the setup did what you think.
 
+[how-it-works.md](how-it-works.md#part-zero-how-the-library-reaches-your-game) draws the whole of
+that setup as one diagram, compile-time half and runtime half, which is worth a look if any of it
+surprises you.
+
 ---
 
 ## Build flags
@@ -129,6 +134,7 @@ Everything the library reads. Only the first group is likely to concern you.
 | `-D hxscript_host=<packages>` | comma-separated packages to scan for `@:scriptable` and `@:scriptAmbient` |
 | `-D hxscript_verbose` | print every type, bridge and abstract the setup touched, under the block it already prints |
 | `-D hxscript_no_banner` | print nothing at all. `HXSCRIPT_NO_BANNER=1` does the same from the environment |
+| `-D hxscript_keep=<types>` | comma-separated standard-library types to keep beyond the default set. See [dead code elimination](#dead-code-elimination) |
 | `-dce no` | keep the standard-library members scripts reach by reflection. See [dead code elimination](#dead-code-elimination) |
 
 ### Behaviour
@@ -148,6 +154,7 @@ Two targets can run a script as their own bytecode, and each takes one flag.
 | `-D hxscript_cppia` | on hxcpp, compile the emitter into the build. Without it every module reports as skipped |
 | `-D scriptable` | hxcpp's own flag, which makes your types reachable from bytecode |
 | `-D hxscript_hl` | on HashLink, the same, and build the native module the loader needs |
+| `-D hxscript_cppia_bool_compat` | declare a `Bool` field with no type, for a stock hxcpp. See [`HXCPP-ISSUES.md`](../HXCPP-ISSUES.md), issue 1: right interpreted, still wrong jitted |
 
 On any other target the compiler does not exist and every script is interpreted.
 
@@ -210,7 +217,7 @@ project, and nothing to do for a 3D one, which is why it is off by default rathe
 | `@:scriptable` | a host class | scripts may `extend` it; the bridge is generated |
 | `@:scriptAmbient` | a host type | scripts may name it without importing it |
 | `@:scriptStatic('name')` | a host static | a bare name in a script resolves to it. Without an argument the field's own name is used |
-| `@:snapshot` | a scripted static | its value survives a reload |
+| `@:snapshot` | a scripted static, or its class | its value survives a reload. On the class, every static does |
 
 ## Runtime configuration
 
@@ -505,8 +512,8 @@ Check the first one at startup rather than wondering, because without it every m
 skipped, which looks exactly like a compiler that refuses everything:
 
 ```haxe
-if (!hxscript.compile.Cppia.available)
-    trace('built without -D hxscript_cppia; everything will be interpreted');
+if (!hxscript.compile.Compiler.available)
+    trace(hxscript.compile.Compiler.unavailable());
 ```
 
 **The whole integration:**
@@ -543,9 +550,14 @@ bytes, or decide something the facade decides for it.
 
 ### Driving it yourself
 
+**This part is hxcpp's alone.** `Compiler` is the cross-target facade and names whichever backend the
+build carries; the layer under it is a class per target, and only `hxscript.cppia.Backend` hands back
+bytes for a host to do as it likes with. `hxscript.hl.Backend` emits into the running process through
+the loader it carries and has no equivalent, so a HashLink host drives `Compiler` and nothing lower.
+
 ```haxe
 var decls = new Parser().parseModule(source, 'Goblin', 0, ['mods']);
-var result = hxscript.compile.Cppia.compile([{name: 'mods.Goblin', decls: decls}]);
+var result = hxscript.cppia.Backend.compile([{name: 'mods.Goblin', decls: decls}]);
 
 if (result.bytes != null) {
     var module = cpp.cppia.Module.fromData(result.bytes.getData());
@@ -560,7 +572,7 @@ meant to be read.
 The three optional arguments are what the facade fills in for you:
 
 ```haxe
-Cppia.compile(inputs,
+Backend.compile(inputs,
     ['game.Player', 'game.World'],       // ambient: types usable without an import
     ['mods.Shared'],                     // external: scripted classes NOT in this batch
     ['player=game.Player::current']);    // statics: bare name -> a real host static
@@ -579,7 +591,7 @@ for (input in inputs) {
     if (result.compiled.indexOf(input.name) < 0)
         continue;   // skipped; it stays interpreted
 
-    for (path in Cppia.declaredPaths(input.decls)) {
+    for (path in Backend.declaredPaths(input.decls)) {
         var cls = module.resolveClass(path);
         if (cls != null)
             env.compiled.set(path, cls);
@@ -652,8 +664,8 @@ load failure as "recompile from source", which is cheap and always correct.
 | `Type not found: X` thrown out of `new Script(...)`, uncaught | a global import that cannot resolve | guard the registration; check the type is in the build and not blacklisted |
 | `Unknown identifier: X` | the type was never compiled in | name its package in `hxscript_host`, or force it in |
 | `Class X can't be extended for scripting` | no bridge | `@:scriptable` on it, or a hand-written bridge kept in the build |
-| `X cannot be extended for scripting, because it inlines an abstract's constructor` | a bridge re-emits the constructor it extends, and an abstract's assigns to `this` | it cannot be a base. Scripts still import and construct it, so reach it by holding one rather than by being one |
-| `bridge name ScriptedX already taken` | two bases share a simple name | nothing to do since 2.0.1; the second takes its path flattened. Older versions dropped it |
+| `not bridged: X (final)` under `-D hxscript_verbose` | a scanned `@:scriptable` class is `final`, `extern`, an interface, or `private` | those four cannot be bases. Scripts still import and construct it, so reach it by holding one rather than by being one |
+| `bridge name ScriptedX already taken` | two bases share a simple name | nothing to do since 2.0.0; the second takes its path flattened. Older versions dropped it |
 | `Cannot call null` | dead code elimination removed the member | `-dce no`, or `@:keep` |
 | `Cannot call null` on an `inline extern` | it has no runtime form at all | register a closure in `Config.callShims` |
 | A native abstract's members do nothing | no runtime form | `@:build(hxscript.macro.Abstract.build())` on it |
@@ -682,12 +694,23 @@ library bug and is not.
 
 The library covers the worst of it. `extraParams.hxml` runs
 [`Keep`](../src/hxscript/macro/Keep.hx), which pulls `IntIterator`, `Reflect`, `Type`,
-`haxe.ds.StringMap`, `EReg`, `haxe.ds.List`, `Date` and `Sys` into the build and marks them and their
-fields kept, so those work under `-dce std` with nothing from you. It handles two failures separately
-because they are different: **keeping** saves a type already in the build from being stripped
-(`Cannot call null`), while **including** puts one in that nothing referenced at all
-(`Unknown identifier`), and `@:keep` cannot help with the second. `Keep.types` is a plain array you
-can add to.
+`haxe.ds.StringMap`, `EReg`, `List`, `haxe.ds.List`, `Lambda`, `Date` and `Sys` into the build and
+marks them and their fields kept, so those work under `-dce std` with nothing from you. It handles two
+failures separately because they are different: **keeping** saves a type already in the build from
+being stripped (`Cannot call null`), while **including** puts one in that nothing referenced at all
+(`Unknown identifier`), and `@:keep` cannot help with the second.
+
+`Keep.types` is a plain array you can add to, and
+**`-D hxscript_keep=StringTools,haxe.Json` adds to it without editing the library**. The neighbours
+worth knowing about, left out by default because each costs binary size for a program that does not
+use them: `haxe.ds.IntMap`, `haxe.ds.ObjectMap`, `haxe.ds.EnumValueMap`, `StringTools`, `haxe.Json`
+and `haxe.Timer`.
+
+`Lambda` is in the default list rather than among those neighbours, and the reason is worth knowing
+because it is not about size. Leaving it out was not neutral: on hxcpp something else in an ordinary
+build referenced it and a script could call it, while on eval and HashLink nothing did and the same
+script could not. A default that changes what a script can reach depending on which target the host
+was built for is worse than either answer.
 
 Members commonly reached from scripts that a bare program strips, and that `-dce no` or `@:keep`
 restores:
@@ -707,9 +730,10 @@ restores:
 hscript-family libraries, and it is a property of how the host was built rather than of the library.
 
 Whole classes are a separate case, where `-dce no` does not help because the type has to be reached
-somehow: `StringTools` under `-dce std`, and `Lambda`, `haxe.Json` and `haxe.Timer` in a bare program
-under either setting. Every `Math` and `Std` static, and the `Array` and `String` instance methods,
-survive either way, because the runtime itself references them.
+somehow: `StringTools` under `-dce std`, and `haxe.Json` and `haxe.Timer` in a bare program under
+either setting. `-D hxscript_keep` is the answer to all three. `Lambda` used to be on that list and is
+now kept by default, for the portability reason above. Every `Math` and `Std` static, and the `Array`
+and `String` instance methods, survive either way, because the runtime itself references them.
 
 **What survives depends on your build**, since a member lives when anything references it statically,
 so a large host keeps far more alive by accident than a bare one.

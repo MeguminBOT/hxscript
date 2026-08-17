@@ -15,19 +15,22 @@ carries on. Sorted by how likely you are to have written it.
 | `hxscript.runtime.ParserException` | `hxscript.error.ParserException` | caught a parse failure by type |
 | `hxscript.runtime.Error` | `hxscript.error.ErrorKind` | matched on an error kind |
 | `hxscript.ImportModule` | `hxscript.runtime.ImportModule` | used a shared prelude module |
-| `hxscript.compile.CppiaInput` | `hxscript.compile.Unit` | drove `Cppia.compile` yourself |
-| `hxscript.compile.CppiaResult` | `hxscript.compile.Result` | drove `Cppia.compile` yourself |
+| `hxscript.compile.Cppia` | `hxscript.cppia.Backend` | called the cppia emitter rather than `Compiler` |
+| `hxscript.compile.CppiaInput` | `hxscript.compile.Unit` | drove the cppia emitter yourself |
+| `hxscript.compile.CppiaResult` | `hxscript.compile.Result` | drove the cppia emitter yourself |
 | `hxscript.runtime.CallStack` | `hxscript.runtime.ScriptStack` | typed a variable as the interpreter's stack |
 
-Internals renamed at the same time, unlikely to appear in a host: `CppiaEmitter`, `CppiaWriter`,
-`CppiaCapture` and `CppiaUnsupported` drop their prefix inside `hxscript.compile`; `KeepMacro`,
-`ScriptedMacro` and `TypeCollectionMacro` become `Keep`, `Scripted` and `Index`; `HLMacro` becomes
-`Statics` and `proxy.HLMath` becomes `proxy.MathProxy`; `runtime.Mirror` becomes `runtime.Reference`;
+Internals renamed at the same time, unlikely to appear in a host: `CppiaEmitter` and `CppiaWriter`
+drop their prefix and move to `hxscript.cppia`, beside the backend; `CppiaCapture` and
+`CppiaUnsupported` drop theirs and stay in `hxscript.compile`, being shared with the second backend;
+`KeepMacro`, `ScriptedMacro` and `TypeCollectionMacro` become `Keep`, `Scripted` and `Index`;
+`HLMacro` becomes `Statics` and `proxy.HLMath` becomes `proxy.MathProxy`; `runtime.Mirror` becomes
+`runtime.Reference`;
 `types.DummyClass` becomes `types.ScriptedObject`; `tools.Tools` splits into `syntax.ExprTools` and
 `types.TypeTools`, and `tools.Defines` moves to `setup.Defines`.
 
-`Script`, `Environment`, `Module`, `Config`, `IScripted`, `Interp`, `ScriptedClass`,
-`compile.Compiler` and `compile.Cppia` keep their names.
+`Script`, `Environment`, `Module`, `Config`, `IScripted`, `Interp`, `ScriptedClass` and
+`compile.Compiler` keep their names.
 
 ### Breaking for scripts, if you tracked the repo rather than releases
 
@@ -60,7 +63,7 @@ that names it.
   HashLink jits what it loads, so there is no separate jitted mode the way there is on hxcpp.
 - **One conformance corpus, six columns, and a table written from what came back.** `sh test/all.sh`
   runs every suite and reports by part rather than by file. The middle suite is the interesting one:
-  329 constructs offered to six ways of running a script, interpreted on eval, hxcpp and HashLink,
+  332 constructs offered to six ways of running a script, interpreted on eval, hxcpp and HashLink,
   and compiled as cppia with and without the JIT and as HashLink bytecode, so that a part of the
   language working in one and not another is visible rather than inferred. `docs/support-table.md`
   is regenerated from those columns, never edited. A case that ends the process is recorded as
@@ -157,7 +160,7 @@ script meets the host:
   `import haxe.ds.Option;` bound `Option` and neither `Some` nor `None`, and a bare `None` read
   whatever else was in scope under that name. This was the one case where two interpreters answered
   differently on different targets.
-- **cppia refuses nothing in the conformance corpus**, down from 19 of 329 cases, with no case
+- **cppia refuses nothing in the conformance corpus**, down from 19 of 332 cases, with no case
   answering differently. Three causes: constructing an abstract the host compiled, which has no
   runtime class for a `NEW` to name and is now built through `hxscript.runtime.Construct`; a
   constructor call short of an optional in the middle, now placed by type rather than padded from

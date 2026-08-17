@@ -135,14 +135,6 @@ class Compiler {
 	}
 
 	/**
-	 * Compiles what it can of a world and binds the results into it.
-	 *
-	 * @param env The world. Its `compiled` map and `substituting` flag are set by the backend.
-	 * @param modules Which of its modules to offer, or null for all of them. Offering them together
-	 *        matters: they are declared before any is emitted, so they may refer to each other.
-	 * @return What compiled, what did not and why, and how long it took.
-	 */
-	/**
 	 * Forgets every class compiled so far, so the next compile starts from source.
 	 *
 	 * A backend remembers what it has built, by scripted path, for as long as the process lives, and
@@ -160,6 +152,14 @@ class Compiler {
 		Backend.reset();
 	}
 
+	/**
+	 * Compiles what it can of a world and binds the results into it.
+	 *
+	 * @param env The world. Its `compiled` map and `substituting` flag are set by the backend.
+	 * @param modules Which of its modules to offer, or null for all of them. Offering them together
+	 *        matters: they are declared before any is emitted, so they may refer to each other.
+	 * @return What compiled, what did not and why, and how long it took.
+	 */
 	public static function compile(env:Environment, ?modules:Array<Module>):Report {
 		var report:Report = Report.empty();
 

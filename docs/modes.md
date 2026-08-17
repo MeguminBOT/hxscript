@@ -7,11 +7,12 @@ about what choosing between them means where you do.
 
 Every figure quoted here is hxcpp's, measured in [`mode-benchmarks.md`](mode-benchmarks.md). The
 HashLink backend reaches the same construct-for-construct agreement, recorded in
-[`support-table.md`](support-table.md), and has its own measurements that this page does not yet
-carry.
+[`support-table.md`](support-table.md), and is measured separately in
+[`hl-benchmarks.md`](hl-benchmarks.md), which asks a different question: what a script costs against
+the same program compiled by Haxe rather than against interpreting it.
 
-The short version: compiling is worth about **21x** on ordinary work and about **37x** on calls, it
-costs roughly **7ms per module** to do, and it is decided per module rather than per application. If
+The short version: compiling is worth about **26x** on ordinary work and about **46x** on calls, it
+costs roughly **9ms per module** to do, and it is decided per module rather than per application. If
 your scripts contain loops, turn it on. If they are short handlers called a few times each, it will
 not pay for itself.
 
@@ -50,14 +51,14 @@ interpreting saves you is `-D scriptable` and `-D hxscript_cppia`, and nothing e
 ### cppia
 
 The same declarations compiled to hxcpp's own bytecode. `Compiler.compile(env)` emits a module,
-loads it, and makes its classes the ones the world runs; `Cppia.compile` is the layer under that for
-a host that wants the bytes rather than the effect. Either way what comes back is an ordinary
-`Class<Dynamic>`. [`embedding.md`](embedding.md#compiling-at-runtime)
+loads it, and makes its classes the ones the world runs; `hxscript.cppia.Backend.compile` is the layer
+under that for a host that wants the bytes rather than the effect. Either way what comes back is an
+ordinary `Class<Dynamic>`. [`embedding.md`](embedding.md#compiling-at-runtime)
 is the integration.
 
 Needs two defines. `-D scriptable` is hxcpp's, and makes the host's own types reachable from
 bytecode, which is what a compiled script calls into. `-D hxscript_cppia` is this library's, and is
-what compiles the emitter in at all: without it `Cppia.compile` reports every module skipped, which
+what compiles the emitter in at all: without it `Compiler.compile` reports every module skipped, which
 looks exactly like a compiler that refuses everything.
 
 ### cppia with the JIT
@@ -78,18 +79,21 @@ so a host writes the define and nothing else. Why it needs one at all, and what 
 cppia, is [`how-it-works.md`](how-it-works.md#part-three-compiling-to-hashlink). It reaches the same construct-for-construct agreement
 cppia does, recorded in [`support-table.md`](support-table.md), and refuses nothing in the corpus.
 
-The figures on this page are hxcpp's. This backend has its own and they are not quoted here yet.
+The figures on this page are hxcpp's. This backend's are in
+[`hl-benchmarks.md`](hl-benchmarks.md), against natively compiled Haxe rather than against the
+interpreter, so the two sets are not comparable and none of them is repeated here.
 
 ## What compiling buys
 
-Per **ordinary operation**, about **21x**. Per **call**, about **37x**. Calls gain more because a
+Per **ordinary operation**, about **26x**. Per **call**, about **46x**. Calls gain more because a
 call is where the interpreter does most of its bookkeeping, and bytecode does none of it.
 
-Adding the JIT on top is worth about **1.4x on operations** and **2.8x on calls**, which is useful but not
-another order of magnitude, and the spread matters more than the average. It is 16x on a case that is
-nothing but bytecode (`noCall`) and 1.1x on one bounded by string allocation in the runtime
-(`strConcat`), which would not care what drove it. The rule of thumb: the JIT speeds up a script's
-own logic and does nothing for time spent inside the standard library.
+Adding the JIT on top is worth about **1.5x on operations** and **2.3x on calls**, which is useful but not
+another order of magnitude, and the spread matters more than the average. It runs from 7x on a case
+that is nothing but bytecode (`locals`) down to 1.1x on one bounded by a read into the host
+(`hostStatic`), which would not care what drove it, with string work (`strConcat`, `strInterp`) close
+behind at 1.3x. The rule of thumb: the JIT speeds up a script's own logic and does nothing for time
+spent inside the standard library or the host.
 
 **Expect less than this in a real application.** Those figures come from a corpus built to isolate
 the interpreter, where every case is a loop of one operation, which is exactly the work bytecode removes. A
@@ -98,12 +102,12 @@ where its time goes. Treat them as a ceiling.
 
 ## What compiling costs
 
-**About 7ms per module, once.** Getting a module ready costs about 1.2ms interpreted against about
-8.4ms compiled, for a module of 80 small functions. That scales with module size, so treat it as a
+**About 9ms per module, once.** Getting a module ready costs about 1.3ms interpreted against about
+10.6ms compiled, for a module of 80 small functions. That scales with module size, so treat it as a
 shape rather than a constant.
 
 It is charged once against a saving charged per operation, so there is a break-even. For the module
-measured it lands near **5,100 operations** in the life of that module. Anything with a loop in it
+measured it lands near **5,500 operations** in the life of that module. Anything with a loop in it
 clears that inside one frame. A module of short event handlers, each called a handful of times, may
 never clear it, and compiling it is a straight loss.
 
@@ -125,7 +129,7 @@ are hot and interpret the rest.
 
 **Enable the JIT** whenever you are compiling at all.
 
-`Cppia.compile` reports what it emitted and what it skipped with a reason, so a host can decide per
+`Compiler.compile` reports what it emitted and what it skipped with a reason, so a host can decide per
 module and interpret the remainder. Both modes produce the same class, so nothing downstream needs to
 know which one it got.
 
@@ -227,7 +231,8 @@ stops you emitting it directly.
 The tokens are not the work. The work is deciding what to emit: laying out classes and fields,
 resolving names, working out which field accesses can link by offset and which have to go by name,
 handling capture, and keeping all of it consistent with what the loader expects to link against.
-That is what this emitter is, and it is around 2,900 lines of it.
+That is what this emitter is, and it is around 4,900 lines of it. HashLink's, which has registers and
+a binary format to keep straight as well, is around 5,400.
 
 ## What the compiler refuses
 
@@ -241,16 +246,25 @@ so a refusal costs speed rather than behaviour.
 | a reference to a scripted type that stays interpreted | there is nothing for the name to link to, and cppia resolves an unknown one to null and then uses it without looking |
 | a host superclass whose constructor shape is unknown | the type table has no entry for it, so a call to it cannot be padded |
 | a method or non-constant field *of a native abstract* | an abstract has no class to call a method on once compiled; its constants fold to their value |
-| a static extension whose receiver type is not known here | rewriting a call that was really a member call would change what the program does, so it is refused instead |
-| inline type declarations | anonymous types declared in place |
-| local property accessors | `var x(get, set)` declared inside a function body |
-| mixed array and map literals | a literal the emitter cannot type as one or the other |
+| an inline type declaration | a `class` or `enum` declared inside a function body, which has no module to be declared into |
+| a `super(...)` short of an optional in the middle whose arguments do not say which | the recorded parameter shape is what places it, and where two parameters both accept what was written there is nothing to decide on |
+| a property with no field behind it, named inside its own accessor | Haxe rejects it too; compiled it would call the accessor from inside itself forever. `@:isVar` gives it a field and it compiles |
+| a `for (k => v in ...)` whose key or value is not a plain name | the pair is bound to a temporary and read by name, and there is nothing to bind a pattern to |
+| a `case` pattern that neither `SWITCH` nor the if-else rewrite can take | value cases, enum constructors, arrays, objects and nested shapes all can, so what is left is narrow |
+
+The emitter carries a handful of further `Unsupported` throws for operators and accessor keywords
+outside the set the parser produces. They are guards against a future parser change rather than
+constructs a script can write, so they are not listed.
 
 Everything else in the language a script actually uses now compiles, including the things this page
 listed as refused until recently: abstracts, map comprehensions, rest arguments, property accessors,
-key-value loops, `??`, `%=`, `case a | b:`, and a `using` whose receiver type is known. Pattern
-matching compiles in full, over enum constructors, arrays, objects and nested shapes alike: a switch
-the `SWITCH` instruction cannot express is rewritten into an if-else chain rather than refused.
+key-value loops, `??`, `%=`, `case a | b:`, and a `using` whatever its receiver type, since one the
+emitter cannot place statically goes through `hxscript.runtime.Using` and is decided on the value the
+way the interpreter decides it. **Local property accessors** are no longer refused either: `Accessors`
+rewrites `var x(get, set)` in a function body into the `get_x()` and `set_x(v)` calls it stands for
+before a token is written, so the emitter never meets one. And a **mixed array and map literal** is
+not a refusal but a match: it emits the same `Invalid map key=>value expression` the interpreter
+raises, on the same line, which is what agreement means for a construct that is an error either way.
 
 Three more went the same way and they are the ones a project met most often. **Constructing an
 abstract the host compiled**, meaning `h3d.Vector`, `h3d.Matrix` and `h2d.col.Point`, which is most
@@ -263,10 +277,10 @@ parameter shape for a `super(...)`, rather than padded from the right into the w
 constructor or an enum-abstract constant, is now looked up in the world's type table, which is where
 the interpreter had been finding it all along.
 
-The evidence is the shared conformance corpus: 329 constructs offered to six columns, one per way
+The evidence is the shared conformance corpus: 332 constructs offered to six columns, one per way
 of running a script, with `sh test/all.sh` collecting them and
 [`support-table.md`](support-table.md) written from what came back rather than by hand. Every
-compiled column agrees with its own target's interpreter on all 329 and refuses none.
+compiled column agrees with its own target's interpreter on all 332 and refuses none.
 
 That is a stronger claim than "nothing was refused", and the two halves are deliberately kept apart:
 a refusal costs speed, and a construct that compiled to the wrong thing is reported as a difference
@@ -310,6 +324,15 @@ trace('' + (n == 1));   // segfault with cpp.cppia.Host.enableJit(true)
 The emitter routes that shape through `Std.string` so a script cannot reach it, but the fault is in
 `hx::CppiaJitCompiler::convert` and any cppia reaches it, including bytecode Haxe's own `-cppia`
 built. It has nothing to do with this library beyond avoiding it.
+
+It is issue 3 in [`HXCPP-ISSUES.md`](../HXCPP-ISSUES.md), which has the three lines that fix it, and
+it is already applied on
+[`MeguminBOT/hxcpp`, branch `patched-hxscript`](https://github.com/MeguminBOT/hxcpp/tree/patched-hxscript)
+along with the other three fixes that have one:
+
+```sh
+haxelib git hxcpp https://github.com/MeguminBOT/hxcpp patched-hxscript
+```
 
 ## What is not known
 

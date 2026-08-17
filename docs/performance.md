@@ -1,14 +1,17 @@
 # Interpreter performance
 
 A log of what has been optimized, what it cost before, and how it was measured. Numbers come from
-[`test/Bench.hx`](../test/Bench.hx), a micro-benchmark whose cases are chosen so a gain can be
-attributed to a specific change rather than to "things feel faster".
+[`test/bench/Bench.hx`](../test/bench/Bench.hx), a micro-benchmark whose cases are chosen so a gain
+can be attributed to a specific change rather than to "things feel faster".
 
 ## Running it
 
 ```
-haxe -cp test -cp src -main Bench -cpp bin_bench && ./bin_bench/Bench.exe
+haxe -cp test/bench -cp src -main Bench -cpp bin_bench && ./bin_bench/Bench.exe
 ```
+
+Its first argument scales every case's loop count, for a change small enough that the default counts
+finish inside the machine's own run-to-run drift.
 
 Measure on **hxcpp**, not `--interp`. The interpreted target hides exactly the costs that matter here
 (the typed-boundary coercions and exception costs behave differently), and hxcpp is what ships.
@@ -24,7 +27,8 @@ session**, run both, and compare those:
 
 ```
 git worktree add /tmp/before <previous-commit>
-haxe -cp test -cp /tmp/before -main Bench -cpp /tmp/before_bin && /tmp/before_bin/Bench.exe
+haxe -cp /tmp/before/test/bench -cp /tmp/before/src -main Bench -cpp /tmp/before_bin
+/tmp/before_bin/Bench.exe
 git worktree remove /tmp/before --force
 ```
 
@@ -320,7 +324,8 @@ essentially every interpreter step.
 | `call` | 1153 | 1028 | -11% |
 
 `@:structInit` keeps the `{r: value}` construction syntax, so the change was contained; only two sites
-needed a type annotation. Worth applying to any remaining hot anonymous structure.
+needed a type annotation. Worth applying to any remaining hot anonymous structure. (`r` later became a
+property over `Variable`'s unboxed numeric lane, so construction reads `{ref: value}` now.)
 
 ### Hot-path fixes (`af48eeb`)
 
@@ -453,8 +458,9 @@ Interpreter-wide **-12.5%**, and 16 to 37% on the per-operation cases the compar
 Calls moved 10% as a side effect, since they read and write variables too.
 
 Measured as best-of-3 inside the harness, then the minimum across four paired runs of both binaries,
-because a single pair put `neg` at -18% on one run and +6% on the next. All eleven tests in
-[`../test`](../test) produce byte-identical output before and after, on both `--interp` and hxcpp.
+because a single pair put `neg` at -18% on one run and +6% on the next. All eleven tests
+[`../test`](../test) held at the time produced byte-identical output before and after, on both
+`--interp` and hxcpp.
 
 ### Parsing: most of the "4x slower" was position tracking
 
@@ -562,5 +568,7 @@ Remaining known costs, none currently urgent:
   not dominant (a native method call goes through the same dispatch at about 1.25us), so this is not
   the next thing to chase.
 - Parsing, not setup, is what script load costs: an 11KB script parses in about 714us, against ~44us
-  of interpreter setup. The token pushback `List` and the reflective `Type.enumEq` in `Lexer.maybe`
-  are the obvious targets if load time ever becomes a complaint.
+  of interpreter setup. The two obvious targets there, the token pushback `List` and the reflective
+  `Type.enumEq` in `Lexer.maybe`, have both since been taken (see *most of the "4x slower" was
+  position tracking* above), so what is left of parse cost is the three-objects-per-AST-node item
+  listed further up.
