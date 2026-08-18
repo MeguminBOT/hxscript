@@ -6,6 +6,7 @@ bin_mbench/
 bin_xbench/
 bin_hlbench/
 bin_completion/
+bin_reach/
 hxscript.zip
 export_classes.info
 /bin_test/
