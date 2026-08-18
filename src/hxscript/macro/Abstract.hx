@@ -70,6 +70,25 @@ class Abstract {
 		cls.pack = ab.pack;
 		cls.name = 'AbstractValue_${fullPath.join('_')}';
 		cls.meta.push({name: ':keep', pos: pos});
+
+		/**
+		 * Exempt from whatever null-safety the host library asked for.
+		 *
+		 * A wrapper is defined into the package of the abstract it wraps, because that is what makes
+		 * `AbstractTools.resolve` able to find it. That also puts it inside any `--macro nullSafety(...)`
+		 * covering that package, and hxvlc's `extraParams.hxml` has exactly that line for `hxvlc`. The
+		 * check then runs against generated code that was never written to satisfy it, and the build
+		 * ends on `_enumMap`, `_enumConstructors` and `_enumValues` having no initial value: adding one
+		 * library to a project stopped it compiling, for a reason nothing in that project could act on.
+		 *
+		 * This is generated code with a known shape rather than code anyone maintains, so opting it out
+		 * loses no checking a person would have done. The library's own modules are unaffected.
+		 */
+		cls.meta.push({
+			name: ':nullSafety',
+			params: [macro Off],
+			pos: pos
+		});
 		cls.fields.push({
 			name: 'isEnum',
 			pos: pos,
