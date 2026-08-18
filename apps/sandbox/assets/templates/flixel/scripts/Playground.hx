@@ -1,3 +1,14 @@
+import flixel.FlxG;
+import flixel.FlxSprite;
+import flixel.FlxState;
+import flixel.text.FlxText;
+import flixel.tweens.FlxEase;
+import flixel.tweens.FlxTween;
+
+#if flixel_addons
+import flixel.addons.effects.FlxSkewedSprite;
+#end
+
 import Palette;
 
 /**
