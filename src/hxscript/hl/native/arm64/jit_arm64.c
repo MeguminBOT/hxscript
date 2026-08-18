@@ -753,6 +753,101 @@ static void emit_method_addr( jit_ctx *ctx, int obj, int index, int into ) {
 	emit(ctx, a64_ldr_imm(A64_X, into, S2, (unsigned int)index));
 }
 
+/** Defined below, next to the other things that take the address of a register's home. */
+static void emit_addr_of( jit_ctx *ctx, int r, int into );
+
+/**
+	Calling a method on a structural type, which is two answers again.
+
+	A virtual holds a pointer per field to wherever the underlying object keeps it, so when there is
+	one the call goes straight through it, with the receiver swapped for the object the virtual wraps.
+	When there is not, the runtime is asked by name, and that path wants the arguments as an array:
+	pointers passed as themselves, everything else as the address of its home in the frame.
+
+	A result that is not a pointer comes back through a vdynamic the caller provides, so room for one
+	is taken from the stack beside the argument array and read out afterwards.
+
+	@return Whether the call could be built.
+*/
+static int emit_virtual_call( jit_ctx *ctx, int dst, int obj, int index, int *args, int nargs ) {
+	hl_type *t = ctx->regs[obj].t;
+	hl_obj_field *vf = t->virt->fields + index;
+	vreg *out = ctx->regs + dst;
+	int need_dyn = out->size != 0 && !hl_is_ptr(out->t);
+	int argspace = (((nargs - 1) * 8) + 15) & ~15;
+	int dynspace = need_dyn ? ((int)(sizeof(vdynamic) + 15) & ~15) : 0;
+	int space = argspace + dynspace;
+	int slow, over, i;
+
+	load_reg(ctx, obj, S1);
+	emit(ctx, a64_ldr_imm(A64_X, S2, S1, (unsigned int)(sizeof(vvirtual) / 8 + index)));
+
+	slow = ctx->len;
+	emit(ctx, a64_cbz(1, S2, 0));
+
+	/** Straight through, with the wrapped object standing in for the virtual as the receiver. */
+	if( !pass_args_from(ctx, args + 1, nargs - 1, 1) )
+		return 0;
+
+	emit(ctx, a64_ldr_imm(A64_X, 0, S1, (unsigned int)(offsetof(vvirtual, value) / 8)));
+	emit(ctx, a64_blr(S2));
+
+	if( out->size != 0 )
+		store_reg(ctx, dst, 0);
+
+	over = ctx->len;
+	emit(ctx, a64_b(0));
+	ctx->buf[slow] = a64_cbz(1, S2, ctx->len - slow);
+
+	/** By name, through the runtime, with the arguments laid out where it can walk them. */
+	if( space == 0 )
+		space = 16;
+
+	adjust_sp(ctx, space, 0);
+	emit(ctx, a64_mov_sp(1, S0, A64_SP));
+
+	for(i=0;i<nargs-1;i++) {
+		if( hl_is_ptr(ctx->regs[args[i + 1]].t) )
+			load_reg(ctx, args[i + 1], S2);
+		else
+			emit_addr_of(ctx, args[i + 1], S2);
+
+		emit(ctx, a64_str_imm(A64_X, S2, S0, (unsigned int)i));
+	}
+
+	if( need_dyn )
+		emit(ctx, a64_add_imm(1, 4, S0, (unsigned int)argspace));
+	else
+		emit(ctx, a64_mov_reg(1, 4, A64_ZR));
+
+	emit(ctx, a64_mov_reg(1, 3, S0));
+	emit_imm32(ctx, 2, vf->hashed_name);
+	emit_imm64(ctx, 1, (unsigned long long)(size_t)vf->t);
+	load_reg(ctx, obj, S1);
+	emit(ctx, a64_ldr_imm(A64_X, 0, S1, (unsigned int)(offsetof(vvirtual, value) / 8)));
+
+	emit_call(ctx, (void *)(size_t)&hl_dyn_call_obj);
+
+	if( need_dyn ) {
+		emit(ctx, a64_mov_sp(1, S1, A64_SP));
+		emit(ctx, a64_add_imm(1, S1, S1, (unsigned int)argspace));
+
+		if( !mem_access(ctx, S1, (int)offsetof(vdynamic, v), dst, S0, 0) )
+			return 0;
+
+		adjust_sp(ctx, space, 1);
+		store_reg(ctx, dst, S0);
+	} else {
+		adjust_sp(ctx, space, 1);
+
+		if( out->size != 0 )
+			store_reg(ctx, dst, 0);
+	}
+
+	ctx->buf[over] = a64_b(ctx->len - over);
+	return 1;
+}
+
 /**
 	Calls a method found in an object's table.
 
@@ -766,10 +861,9 @@ static void emit_method_addr( jit_ctx *ctx, int obj, int index, int into ) {
 static int emit_method_call( jit_ctx *ctx, int dst, int obj, int index, int *args, int nargs ) {
 	hl_type *t = ctx->regs[obj].t;
 
-	/**
-		A virtual resolves its fields by name at run time and answers a different way when it has
-		none, so it is left to the interpreter rather than half done here.
-	*/
+	if( t->kind == HVIRTUAL )
+		return emit_virtual_call(ctx, dst, obj, index, args, nargs);
+
 	if( t->kind != HOBJ && t->kind != HSTRUCT )
 		return 0;
 
@@ -2156,6 +2250,18 @@ static void *hxs_entry_for( hl_type *t ) {
 			break;
 		}
 
+		/**
+			A pointer argument is the slot itself; anything else is behind it.
+
+			That is the runtime's own convention, the same one hl_wrapper_call and hl_dyn_call_obj
+			read, and dereferencing both alike reads through a perfectly good object and hands over
+			whatever its first field happens to be.
+		*/
+		if( hl_is_ptr(a) ) {
+			emit(&ctx, a64_ldr_imm(A64_X, ints++, S0, (unsigned int)i));
+			continue;
+		}
+
 		emit(&ctx, a64_ldr_imm(A64_X, S1, S0, (unsigned int)i));
 
 		if( isf )
@@ -2212,6 +2318,136 @@ static void *hxs_entry_for( hl_type *t ) {
 	hxs_entries = e;
 
 	return at;
+}
+
+/**
+	Being called as compiled code from the runtime, which is the other direction.
+
+	hl_make_fun_wrapper turns a closure of one signature into one of another by making a closure whose
+	code is whatever hl_setup.get_wrapper hands back, and which passes itself as its first argument.
+	That code is called with the new signature's arguments in registers and has to hand them to
+	hl_wrapper_call as an array, laid out the way the runtime reads it: a pointer argument sits in the
+	slot, and anything else has its address there instead.
+
+	So this is compiled per signature too, from the same encoder, and cached the same way.
+*/
+static hxs_entry *hxs_wrappers = NULL;
+
+static void *hxs_wrapper_for( hl_type *t ) {
+	hxs_entry *e;
+	jit_ctx ctx;
+	hl_type_fun *fun = t->fun;
+	int nargs = fun->nargs;
+	int A = 32;
+	int V = A + nargs * 8;
+	int R = V + nargs * 8;
+	int frame = (R + (int)sizeof(vdynamic) + 15) & ~15;
+	int i, ints = 1, floats = 0;
+	size_t bytes;
+	void *at;
+
+	for(e = hxs_wrappers; e; e = e->next) {
+		hl_type_fun *o = e->t->fun;
+		int same = o->nargs == nargs && o->ret->kind == fun->ret->kind;
+
+		for(i=0;same && i<nargs;i++)
+			same = o->args[i]->kind == fun->args[i]->kind;
+
+		if( same )
+			return e->code;
+	}
+
+	memset(&ctx, 0, sizeof(ctx));
+
+	emit(&ctx, a64_sub_imm(1, A64_SP, A64_SP, (unsigned int)frame));
+	emit(&ctx, a64_stp(1, A64_PAIR_OFF, A64_FP, A64_LR, A64_SP, 0));
+	emit(&ctx, a64_mov_sp(1, A64_FP, A64_SP));
+	emit(&ctx, a64_str_imm(A64_X, 0, A64_FP, 2));
+
+	for(i=0;i<nargs;i++) {
+		hl_type *a = fun->args[i];
+		int size = hl_type_size(a);
+		int isf = a->kind == HF32 || a->kind == HF64;
+
+		if( (isf ? floats : ints) > 7 ) {
+			ctx.failed = 1;
+			break;
+		}
+
+		if( hl_is_ptr(a) ) {
+			emit(&ctx, a64_str_imm(A64_X, ints++, A64_FP, (unsigned int)((A + i * 8) / 8)));
+			continue;
+		}
+
+		if( isf )
+			emit(&ctx, a64_str_fp_imm(width_of(size), floats++, A64_FP, (unsigned int)((V + i * 8) / size)));
+		else
+			emit(&ctx, a64_str_imm(width_of(size), ints++, A64_FP, (unsigned int)((V + i * 8) / size)));
+
+		emit(&ctx, a64_add_imm(1, S0, A64_FP, (unsigned int)(V + i * 8)));
+		emit(&ctx, a64_str_imm(A64_X, S0, A64_FP, (unsigned int)((A + i * 8) / 8)));
+	}
+
+	emit(&ctx, a64_ldr_imm(A64_X, 0, A64_FP, 2));
+	emit(&ctx, a64_add_imm(1, 1, A64_FP, (unsigned int)A));
+	emit(&ctx, a64_add_imm(1, 2, A64_FP, (unsigned int)R));
+	emit_imm64(&ctx, S0, (unsigned long long)(size_t)&hl_wrapper_call);
+	emit(&ctx, a64_blr(S0));
+
+	/**
+		A pointer comes back as the return value. Anything else was written into the dynamic that was
+		handed over, and is read out of it here.
+	*/
+	if( fun->ret->kind != HVOID && !hl_is_ptr(fun->ret) ) {
+		int size = hl_type_size(fun->ret);
+		int isf = fun->ret->kind == HF32 || fun->ret->kind == HF64;
+
+		emit(&ctx, a64_add_imm(1, S1, A64_FP, (unsigned int)R));
+
+		if( isf )
+			emit(&ctx, a64_ldr_fp_imm(width_of(size), 0, S1, (unsigned int)(offsetof(vdynamic, v) / size)));
+		else
+			emit(&ctx, a64_ldr_imm(width_of(size), 0, S1, (unsigned int)(offsetof(vdynamic, v) / size)));
+	}
+
+	emit(&ctx, a64_ldp(1, A64_PAIR_OFF, A64_FP, A64_LR, A64_SP, 0));
+	emit(&ctx, a64_add_imm(1, A64_SP, A64_SP, (unsigned int)frame));
+	emit(&ctx, a64_ret(A64_LR));
+
+	if( ctx.failed ) {
+		free(ctx.buf);
+		return NULL;
+	}
+
+	bytes = (size_t)ctx.len * sizeof(a64_insn);
+	at = hxs_exec_alloc(bytes);
+
+	if( at == NULL ) {
+		free(ctx.buf);
+		return NULL;
+	}
+
+	hxs_exec_unseal(at, bytes);
+	memcpy(at, ctx.buf, bytes);
+	hxs_exec_seal(at, bytes);
+	free(ctx.buf);
+
+	e = (hxs_entry *)malloc(sizeof(hxs_entry));
+
+	if( e == NULL )
+		return NULL;
+
+	e->t = t;
+	e->code = at;
+	e->next = hxs_wrappers;
+	hxs_wrappers = e;
+
+	return at;
+}
+
+/** What hl_setup.get_wrapper points at. */
+static void *hxs_get_wrapper( hl_type *t ) {
+	return hxs_wrapper_for(t);
 }
 
 /** What hl_setup.static_call points at: enter a compiled function with arguments the runtime arranged. */
@@ -2386,6 +2622,9 @@ void *hl_jit_code( jit_ctx *ctx, hl_module *m, int *codesize, hl_debug_infos **d
 		hl_setup.static_call = hxs_static_call;
 		hl_setup.static_call_ref = false;
 	}
+
+	if( hl_setup.get_wrapper == NULL )
+		hl_setup.get_wrapper = hxs_get_wrapper;
 
 	return at;
 }
