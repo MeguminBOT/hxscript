@@ -1,7 +1,7 @@
 {
     "name": "hxscript",
     "url": "https://github.com/MeguminBOT/hxscript",
-    "description": "An advanced Haxe interpreter. It parses Haxe-shaped source and evaluates it directly, with enough of the language intact that a script can declare classes, enums, typedefs and abstracts, and extend the ones your application already compiled, with declared types enforced at runtime. On hxcpp and HashLink it can also translate a module to native bytecode while your application is running, with no Haxe toolchain installed, which is what lets a script that arrives after your release run at close to compiled speed.",
+    "description": "An advanced Haxe interpreter. It parses Haxe-shaped source and evaluates it directly, with support of runtime translation into bytecode for extremely fast performance on hxcpp and hashlink.",
     "license": "MIT",
     "tags": [
         "hscript",
@@ -15,7 +15,9 @@
         "bytecode",
         "hxcpp",
         "runtime",
-        "game"
+        "game",
+        "hashlink",
+        "hashlinkvm"
     ],
     "version": "2.0.0",
     "releasenote": "See the changelog: https://github.com/MeguminBOT/hxscript/blob/main/CHANGELOG.md",
