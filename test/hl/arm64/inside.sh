@@ -118,11 +118,14 @@ if [ -f bin_test/vm/real.hl ]; then
 
 	if [ -x /tmp/hl ]; then
 		( cd bin_test/vm && /tmp/hl real.hl > /tmp/vm.out 2>&1 ) || true
+		( cd bin_test/vm && /tmp/hl harder.hl >> /tmp/vm.out 2>&1 ) || true
 		sed 's/^/  /' /tmp/vm.out
 
 		# Each line is checkable by eye, so the answers are named rather than counted.
 		for want in 'loop      285' 'array     6 6' 'map       42' 'object    hello world' \
-			'enum      42' 'catch     thrown' 'anon      7' 'string    ab 1.5'; do
+			'enum      42' 'catch     thrown' 'anon      7' 'string    ab 1.5' \
+			'sorted    1,2,3,4,5' 'dynamic   42' 'reflect   42' 'mapped    1,4,9,16,25' \
+			'iterate   3' 'fields    2'; do
 			grep -qF "$want" /tmp/vm.out || {
 				echo "  missing from what it printed: $want"
 				fail=$((fail + 1))

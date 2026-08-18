@@ -2305,6 +2305,7 @@ static void *hxs_entry_for( hl_type *t ) {
 	hxs_exec_unseal(at, bytes);
 	memcpy(at, ctx.buf, bytes);
 	hxs_exec_seal(at, bytes);
+
 	free(ctx.buf);
 
 	e = (hxs_entry *)malloc(sizeof(hxs_entry));
@@ -2453,6 +2454,7 @@ static void *hxs_get_wrapper( hl_type *t ) {
 /** What hl_setup.static_call points at: enter a compiled function with arguments the runtime arranged. */
 static void *hxs_static_call( void *fun, hl_type *t, void **args, vdynamic *out ) {
 	void *(*tramp)( void *, void **, vdynamic * ) = (void *(*)( void *, void **, vdynamic * ))hxs_entry_for(t);
+
 
 	if( tramp == NULL )
 		hl_error("no way into a function of this shape");
@@ -2604,6 +2606,15 @@ void *hl_jit_code( jit_ctx *ctx, hl_module *m, int *codesize, hl_debug_infos **d
 		ctx->buf[w + 2] = a64_movk(1, r, (unsigned int)((to >> 32) & 0xFFFF), A64_HW32);
 		ctx->buf[w + 3] = a64_movk(1, r, (unsigned int)((to >> 48) & 0xFFFF), A64_HW48);
 	}
+
+	/**
+		And the static closures, which are the same problem in a different place: each was allocated
+		while its function had no address, so each has been waiting for one exactly as the call sites
+		were. A closure left unpatched holds nothing and calling it jumps to zero.
+	*/
+	for(i=0;i<ctx->nclosures;i++)
+		ctx->closures[i].c->fun = (unsigned char *)at
+			+ (size_t)ctx->m->functions_ptrs[ctx->closures[i].findex];
 
 	hxs_exec_unseal(at, bytes);
 	memcpy(at, ctx->buf, bytes);
