@@ -26,12 +26,64 @@ class AbstractScan {
 		{src: '\tenum abstract Indented(Int) {}', want: 'Indented'}
 	];
 
+	/**
+	 * Declarations the scanner must NOT report, because `abstract` is three keywords in Haxe 4.
+	 *
+	 * It is a type, a class modifier and a method modifier, and the pattern matches the word after it
+	 * whichever one it was. flixel's `FlxBaseTilemap` has all three shapes and produced
+	 * `FlxBaseTilemap.class`, `.public` and `.function`, handed on to `Compiler.addMetadata` as though
+	 * they were types. Nothing failed, since metadata on a path nothing declares does nothing, so the
+	 * only symptom was three junk entries in the count `-D hxscript_verbose` prints. The positive
+	 * cases above cannot catch this: they only ask what the scanner finds, never what it invents.
+	 */
+	static var REJECT:Array<String> = [
+		'abstract class Base<T> extends Other {}',
+		'\tabstract public function width():Float;',
+		'\tabstract  public function spaced():Float;',
+		'\tabstract function orient(t:Null<T>):Null<T>;',
+		'\tabstract private var held:Int;',
+		'abstract interface Odd {}'
+	];
+
+	/**
+	 * Paths as a preset may write them, each with the path the abstract is declared under.
+	 *
+	 * `Compiler.addMetadata` matches on the declared path, which is the package and the type, and a
+	 * script imports a sub-type through its module as well. Handing it the import spelling matches
+	 * nothing and says nothing, so the abstract gets no wrapper and no runtime form: its constants
+	 * answer nothing and an import of it binds to null. That is what the scanner did to every abstract
+	 * sharing a module with another type, which was two thirds of what it found, and the same door is
+	 * open to anything written by hand in a preset's `abstracts`.
+	 */
+	static var PATHS:Array<{src:String, want:String}> = [
+		{src: 'flixel.util.FlxAxes', want: 'flixel.util.FlxAxes'},
+		{src: 'flixel.text.FlxText.FlxTextAlign', want: 'flixel.text.FlxTextAlign'},
+		{src: 'flixel.util.typeLimit.NextState.InitialState', want: 'flixel.util.typeLimit.InitialState'},
+		{src: 'Top', want: 'Top'},
+		{src: 'pack.Top', want: 'pack.Top'},
+		// A package is lowercase by Haxe's own rule, so nothing here is a module to drop.
+		{src: 'h2d.col.Point', want: 'h2d.col.Point'},
+		{src: 'openfl.display.BlendMode', want: 'openfl.display.BlendMode'}
+	];
+
 	public static function run():Void {
 		var missed:Array<String> = [];
+
+		for (p in PATHS) {
+			var got:String = hxscript.setup.Abstracts.declared(p.src);
+			if (got != p.want)
+				missed.push('("' + p.src + '" gave "' + got + '", wanted "' + p.want + '")');
+		}
 
 		for (c in CASES) {
 			if (hxscript.setup.Abstracts.declaredAbstracts(c.src).indexOf(c.want) < 0)
 				missed.push(c.want);
+		}
+
+		for (src in REJECT) {
+			var got:Array<String> = hxscript.setup.Abstracts.declaredAbstracts(src);
+			if (got.length > 0)
+				missed.push('(invented ' + got.join('/') + ' from "' + StringTools.trim(src) + '")');
 		}
 
 		/** A word that only looks like one, so the pattern cannot be loosened into matching prose. */
@@ -39,7 +91,8 @@ class AbstractScan {
 			missed.push('(matched a comment)');
 
 		if (missed.length > 0) {
-			haxe.macro.Context.error('the abstract scanner missed: ' + missed.join(', '), haxe.macro.Context.currentPos());
+			haxe.macro.Context.error('the abstract scanner missed: ' + missed.join(', '),
+				haxe.macro.Context.currentPos());
 		}
 	}
 }
