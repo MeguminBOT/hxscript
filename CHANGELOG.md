@@ -1,5 +1,135 @@
 # Changelog
 
+## Unreleased
+
+### Breaking: no preset offers a bare name any more
+
+A preset's `globals` list used to be registered as global imports at startup, so `-lib flixel` beside
+`-lib hxscript` put forty-three bare names into the scope of every script in the process. Every
+shipped preset now offers an empty list, and a script reaches a game library by writing an `import`,
+as in Haxe:
+
+```haxe
+import flixel.FlxSprite;   // in the script, and this is all that was ever needed
+```
+
+A host that wants some names bare says which:
+
+```haxe
+Boot.importGlobals(['flixel.FlxG', 'flixel.FlxSprite']);
+```
+
+**What breaks:** a script writing a bare `FlxG`, `FlxSprite` or any of the other forty-one now fails
+with `Unknown identifier`, and the hint on that error names both fixes. Adding the `import` is the
+one to prefer.
+
+**Why.** A preset's job is to say what a script *can* import, which is steps 1 to 3 of the wiring:
+include the types, bridge the bases, wrap the abstracts. What is already imported into every script
+is a different question and not a library's to answer. Forty-three names in every script's global
+scope shadow anything the host binds under the same name, and a script reading `FlxG` gives no clue
+where it came from.
+
+**The mechanism is unchanged**, only the shipped data. `globals` is still a field on
+`hxscript.setup.Library`, `Presets.custom` still takes a record that fills it, `Boot.importGlobals()`
+with no argument still takes whatever a record offers, and `-D hxscript_globals` still takes it at
+startup. All three now find nothing to take unless you put it there.
+
+`@:scriptAmbient` on your own class is unaffected and still automatic: marking one is the request, so
+there is nothing to ask twice. `Boot.ambient` is that list, kept apart from `Boot.globals` for the
+same reason.
+
+### Fixed
+
+- **`openfl.Lib` was offered without anything guaranteeing it was in the build.** The openfl preset
+  names it in `globals`, but every included root is a sub-package of `openfl` and `Lib` sits at the
+  package root, so nothing in the record puts it there. It may have arrived anyway, the way
+  `h3d.Vector` does, by some included type naming it in a signature; what is certain is that nothing
+  made it so. It is in `types` now, which does. Separately, a path that cannot be registered is
+  **reported through `Sink`** rather than dropped in silence, which is what would have made this
+  visible either way.
+- **The abstract scanner invented three abstracts from flixel.** `abstract` is a type, a class
+  modifier and a method modifier in Haxe 4, and the pattern took whatever word followed it, so
+  `flixel.tile.FlxBaseTilemap`'s `abstract class`, `abstract public function` and `abstract function`
+  produced `FlxBaseTilemap.class`, `.public` and `.function`. They were handed to
+  `Compiler.addMetadata` as though they were types, which harmed nothing because metadata on a path
+  nothing declares does nothing, but the count was three too high. `AbstractScan` now has cases for
+  what the scanner must NOT report, which it never had: it only ever asked what the scanner finds,
+  never what it invents.
+- **A generated abstract wrapper failed a host library's null-safety pass, and took the build with
+  it.** A wrapper is defined into the package of the abstract it wraps, because that is what lets
+  `AbstractTools.resolve` find it, and that also puts it inside any `--macro nullSafety(...)` covering
+  that package. hxvlc's `extraParams.hxml` has exactly that line for `hxvlc`, so wrapping
+  `hxvlc.util.typeLimit.OneOfTwo` produced a class checked against a standard it was never written
+  to: `_enumMap`, `_enumConstructors` and `_enumValues` have no initial value, and adding one library
+  to a project stopped that project compiling for a reason nothing in it could act on. Wrappers now
+  carry `@:nullSafety(Off)`. The library's own modules are unaffected, and this is generated code of a
+  known shape rather than code anyone maintains, so nothing a person would have checked is lost.
+- **Two thirds of the abstracts a preset scanned for were never actually wrapped.**
+  `Compiler.addMetadata` takes the path a type is *declared* under, which is its package and its own
+  name, and the scanner was passing the module as well: `flixel.text.FlxText.FlxTextAlign` rather
+  than `flixel.text.FlxTextAlign`. Metadata on a path nothing declares is not an error, so every
+  abstract that shared a module with another type was counted as wrapped and silently skipped, and
+  only the eleven flixel wrote in a module of their own came out with a wrapper. Without one an
+  abstract has no runtime form at all, so `FlxTextAlign.CENTER` answered nothing, assigning to
+  `FlxText.alignment` did nothing, and `import flixel.text.FlxText.FlxTextAlign;` bound the name to
+  null and failed on first use with `Module FlxTextAlign does not define type FlxTextAlign`, naming
+  the type as though it were the module. The flixel stack now generates 71 wrappers where it
+  generated 31, and every abstract these presets ask for is usable from a script.
+  `docs/verified-imports.md` lists what is still not.
+
+### Added
+
+- **Presets for five more libraries**, so `-lib` is still the whole of the setup for each.
+
+  **hxvlc**, video playback through libVLC, which is the case a mod that plays a cutscene needs.
+  `hxvlc.impl` is deliberately left out of the roots: it is the libVLC extern layer, written in
+  `cpp.RawPointer` and `cpp.Callable`, and a script drives video through `FlxVideoSprite` or `Video`
+  rather than below them. One bridge, `FlxVideoSprite`; `openfl.Video` is reachable but not
+  extendable, because it inherits most of the openfl display list and holding one is how openfl is
+  used anyway. `hxvlc.util.typeLimit.OneOfTwo` is wrapped, since `Location` is a typedef of it and it
+  is the argument type of every `load` call.
+
+  **extension-haptics**, vibration, as the one cross-platform class `extension.haptics.Haptic`. Every
+  platform branch in it is behind a conditional and the library has no `#error` anywhere, so it
+  compiles everywhere and does nothing where there is no hardware. `HapticAndroid` and `HapticIOS`
+  are left out on purpose: naming them would undo exactly that.
+
+  **extension-androidtools**, the Android system surface, and the one record here that is Android
+  only. See the `requires` change below for why that had to become expressible.
+
+  **haxe.ui**, as two records, because that is how it ships: `haxeui-core` is the components and the
+  layout, and a backend library decides what they draw on. `haxe.ui.backend` is left to the backend
+  record rather than named in core, since core ships that package as the shape a backend must fill
+  and the backend library shadows it on the classpath. `abstractPackages` covers the whole of
+  `haxe.ui`, because the toolkit is built out of abstracts: every constant is an enum abstract,
+  `Variant` is what a component's value is typed as, and `EventType` is how an event is named. No
+  bases in core, since a haxe.ui screen is composed rather than subclassed and `Component` would be
+  the most expensive bridge in any preset shipped; `haxeui-flixel` bridges `UIState` and `UISubState`,
+  which is where a flixel project does subclass.
+
+- **A `Library` record may require several defines**, comma-separated in `requires`, all of which must
+  hold. `extension-androidtools` answers `#error 'not supported on your current platform'` off
+  Android, so a desktop build that merely had the library would have stopped compiling the moment the
+  preset force-compiled its packages. Requiring `extension-androidtools` and `android` together keeps
+  a project that lists the library unconditionally, and guards its own calls, building on every other
+  target.
+
+- **`docs/verified-imports.md`**, generated by `python test/lib/reach.py`: every type a script can
+  `import` and use, per shipped stack, with the ones that cannot be used listed by name and reason.
+  Nothing in it is read off `Presets`. `test/lib/Probe.hx` writes an `import` for every type in the
+  build, runs it, and records whether the name came back with a runtime form behind it, which is the
+  only way to catch the three failures that accept an `import` and then answer nothing: a type dead
+  code elimination dropped, an abstract with no wrapper, and a typedef of a shape the interpreter
+  cannot represent. 1882 usable and 377 not for the flixel stack; 414 and 60 for heaps 2D and 3D.
+
+  **Measured on the targets a game ships as**, hxcpp first and HL/C second, rather than on the
+  interpreter. That costs a real build per stack and is the only way the answer means anything: dead
+  code elimination is what strips a member and is a property of the target, and a library is free to
+  define a type per target the way heaps does with `hxd.FloatBuffer`. HL/C needs a HashLink
+  installation for `hl.h` and `libhl`, which `src/hxscript/hl/native/build.sh` finds under
+  `/c/hashlink/*` or takes from `HLPATH`. A stack neither target can build is reported as *not
+  verified*, with both build errors, rather than guessed at.
+
 ## 2.0.0
 
 ### Breaking: renamed modules
@@ -34,9 +164,10 @@ drop their prefix and move to `hxscript.cppia`, beside the backend; `CppiaCaptur
 
 ### Breaking for scripts, if you tracked the repo rather than releases
 
-Three helpers are reachable from a script by a bare name, with no import, because the presets list
-them in `globals`. They were renamed with everything else, so a script written against the repo
-between 1.1.2 and now needs the new name. Nothing that shipped in 1.1.2 had them.
+Three helpers were reachable from a script by a bare name, because the presets listed them in
+`globals`. They were renamed with everything else, so a script written against the repo between 1.1.2
+and now needs the new name. Nothing that shipped in 1.1.2 had them. As of the change at the top of
+this file they also need an `import`, since no preset offers a bare name any more.
 
 | Script wrote | Now writes |
 | --- | --- |
