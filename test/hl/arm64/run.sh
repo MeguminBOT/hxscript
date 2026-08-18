@@ -60,4 +60,19 @@ if [ "$SHELL_ONLY" = "1" ]; then
 	exec docker run --rm -it --platform linux/arm64 -v "$MOUNT:/work" "$IMAGE" /bin/sh
 fi
 
+# The corpus that a real module has to get through, generated out here because Haxe is out here and
+# the container has none. HL/C is portable C, so what it writes is compiled for arm64 inside.
+#
+# EmitProbe rather than LoadProbe: the module it loads is one hxScript's own emitter produced, so it
+# stays inside the opcodes this jit compiles. LoadProbe loads a module Haxe compiled, which uses the
+# rest of the instruction set and is refused rather than run.
+if command -v haxe >/dev/null 2>&1; then
+	echo "-- generating the HL/C corpus, since Haxe is here and the container has none --"
+	rm -rf "$ROOT/bin_test/hlc-arm64"
+	( cd "$ROOT" && haxe -cp src -cp test/hl/loader -D hxscript_hl -D hxscript_no_native \
+		-D hl-ver=1.16.0 -D no-compilation -main EmitProbe -hl bin_test/hlc-arm64/main.c )
+else
+	echo "-- no Haxe here, so the corpus is skipped and only the jit's own checks run --" >&2
+fi
+
 docker run --rm --platform linux/arm64 -v "$MOUNT:/work" "$IMAGE" sh test/hl/arm64/inside.sh

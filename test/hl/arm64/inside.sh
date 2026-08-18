@@ -72,6 +72,34 @@ N=src/hxscript/hl/native
 gcc -O2 -Wall -Wextra -std=c11 -DHXS_NATIVE_TABLE 	-include $N/vendor/hxs_vendor.h -I /opt/hl/include -I $N/vendor/hl116 -I $N/arm64 	test/hl/arm64/jit.c $N/arm64/jit_arm64.c $N/arm64/exec.c 	-o /tmp/jit -L/opt/hl/lib -lhl -lm
 /tmp/jit || fail=$((fail + 1))
 
+if [ -f bin_test/hlc-arm64/hlc.json ]; then
+	echo
+	echo "-- the corpus, as a native binary with the jit compiled into it --"
+
+	sh src/hxscript/hl/native/build.sh --hl /opt/hl --hlc bin_test/hlc-arm64 --out /tmp/corpus \
+		> /tmp/corpus.log 2>&1 || {
+		echo "  it did not build:"
+		sed 's/^/    /' /tmp/corpus.log
+		fail=$((fail + 1))
+	}
+
+	if [ -x /tmp/corpus ]; then
+		# From /tmp, because the corpus writes files beside itself and the mount is the repository.
+		( cd /tmp && ./corpus > /tmp/corpus.out 2>&1 ) || true
+
+		tail -1 /tmp/corpus.out | sed 's/^/  /'
+
+		# Refused counts as failure here. A refused module is correct behaviour in a shipped program,
+		# where it means interpreting instead, but in this suite it means the jit did not compile
+		# something it is supposed to and the result proves nothing about the code it would have made.
+		if ! grep -q ', 0 failed ==, 0 refused' /tmp/corpus.out; then
+			echo "  the corpus did not come back clean:"
+			tail -20 /tmp/corpus.out | sed 's/^/    /'
+			fail=$((fail + 1))
+		fi
+	fi
+fi
+
 echo
 if [ "$fail" = "0" ]; then
 	echo "== everything checked passed =="
