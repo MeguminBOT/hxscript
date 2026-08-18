@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.0.2
+
+### Fixed
+
+- **The package shipped without `extraParams.hxml`, so none of the library's setup ran.** haxelib
+  applies that file to every build that says `-lib hxscript`, and it is the whole of how the three
+  setup macros come to run. Installed from haxelib, the library therefore did nothing: dead code
+  elimination stripped the standard-library members a script reaches by reflection, no game library
+  was detected, no bridge or abstract wrapper was generated, the runtime half was never installed,
+  and there was no banner to say any of it had been skipped. `package.sh` names what goes in the zip
+  and listed `src`, the manifest, the readme and the licence, and `git archive` ships exactly what it
+  is told. Nobody working from a checkout could see it, because `haxelib dev` points at the
+  repository, where the file has always been.
+
 ## 2.0.1
 
 ### Fixed
