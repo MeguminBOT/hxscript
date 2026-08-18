@@ -15,6 +15,20 @@ the ones your application already compiled. Declared types are enforced as value
 anywhere in sight: a module becomes cppia or HashLink bytecode and loads into the running process as a
 real class. That is what lets a script written after you shipped run at close to compiled speed.
 
+> **On hxcpp this needs a patched hxcpp for now.** Stock hxcpp miscompiles parts of the cppia it
+> loads, so a compiled script can disagree with the same script interpreted. The fixes are
+> upstreamable and none of them is specific to this library, but until they land the compiled path
+> wants
+> [`MeguminBOT/hxcpp`, branch `patched-hxscript`](https://github.com/MeguminBOT/hxcpp/tree/patched-hxscript):
+>
+> ```sh
+> haxelib git hxcpp https://github.com/MeguminBOT/hxcpp patched-hxscript
+> ```
+>
+> [HXCPP-ISSUES.md](HXCPP-ISSUES.md) lists every fault behind that, and
+> `python patches/apply-hxcpp.py` patches a checkout you already have instead. Interpreting is
+> unaffected, and so is HashLink.
+
 A script is an ordinary `.hx` file your program reads at runtime. `game.Entity` here is one of your
 own compiled classes, marked `@:scriptable` in a package `-D hxscript_host=game` names:
 
