@@ -42,6 +42,7 @@
 #include <hlmodule.h>
 
 #include <math.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -628,6 +629,92 @@ static int mem_access( jit_ctx *ctx, int base, int off, int r, int into, int sto
 }
 
 /**
+	Puts the arguments of a call where the ABI expects them, starting part way along.
+
+	A closure carrying a receiver passes it as the first argument, so everything else moves along one
+	place in the general bank. The floating point bank is unaffected, since a receiver is a pointer.
+
+	@param ints0 Which general argument register to start at.
+	@return Whether they all fit in registers.
+*/
+static int pass_args_from( jit_ctx *ctx, int *args, int nargs, int ints0 ) {
+	int i, ints = ints0, floats = 0;
+
+	for(i=0;i<nargs;i++) {
+		vreg *v = ctx->regs + args[i];
+
+		if( v->size == 0 )
+			continue;
+
+		if( v->is_float ) {
+			if( floats > 7 )
+				return 0;
+
+			load_reg(ctx, args[i], floats++);
+		} else {
+			if( ints > 7 )
+				return 0;
+
+			load_reg(ctx, args[i], ints++);
+		}
+	}
+
+	return 1;
+}
+
+/**
+	Reads a method out of an object's table of them.
+
+	An object begins with a pointer to its type, a type carries the table, and the table is indexed
+	by the position the bytecode names. Three loads, and the offsets are asked of the structures
+	rather than written down, since writing them down is how a jit and the runtime it shares memory
+	with drift apart.
+
+	@param obj The register holding the object.
+	@param index Which method.
+	@param into Where to leave its address.
+*/
+static void emit_method_addr( jit_ctx *ctx, int obj, int index, int into ) {
+	load_reg(ctx, obj, S1);
+	emit(ctx, a64_ldr_imm(A64_X, S2, S1, 0));
+	emit(ctx, a64_ldr_imm(A64_X, S2, S2, (unsigned int)(offsetof(hl_type, vobj_proto) / 8)));
+	emit(ctx, a64_ldr_imm(A64_X, into, S2, (unsigned int)index));
+}
+
+/**
+	Calls a method found in an object's table.
+
+	@param dst Where the result goes.
+	@param obj The register holding the receiver.
+	@param index Which method.
+	@param args Every argument, the receiver included, since it is the first.
+	@param nargs How many.
+	@return Whether the call could be built.
+*/
+static int emit_method_call( jit_ctx *ctx, int dst, int obj, int index, int *args, int nargs ) {
+	hl_type *t = ctx->regs[obj].t;
+
+	/**
+		A virtual resolves its fields by name at run time and answers a different way when it has
+		none, so it is left to the interpreter rather than half done here.
+	*/
+	if( t->kind != HOBJ && t->kind != HSTRUCT )
+		return 0;
+
+	emit_method_addr(ctx, obj, index, S0);
+
+	if( !pass_args(ctx, args, nargs) )
+		return 0;
+
+	emit(ctx, a64_blr(S0));
+
+	if( ctx->regs[dst].size != 0 )
+		store_reg(ctx, dst, 0);
+
+	return 1;
+}
+
+/**
 	@return Whether the runtime's dynamic helpers for this kind take the destination type.
 
 	hl_dyn_getd and hl_dyn_castd and their float and 64 bit relatives already know what they are
@@ -1191,6 +1278,71 @@ static int compile_op( jit_ctx *ctx, hl_function *f, hl_opcode *op, int index ) 
 
 		case OCallN:
 			return emit_hl_call(ctx, op->p1, op->p2, op->extra, op->p3);
+
+		case OCallMethod:
+			return emit_method_call(ctx, op->p1, op->extra[0], op->p2, op->extra, op->p3);
+
+		/**
+			The same dispatch with the receiver implied. It is register 0, and it is also the first
+			argument, so the list is one longer than the bytecode wrote.
+		*/
+		case OCallThis: {
+			int args[16];
+			int i;
+
+			if( op->p3 + 1 > (int)(sizeof(args) / sizeof(args[0])) )
+				return 0;
+
+			args[0] = 0;
+			for(i=0;i<op->p3;i++)
+				args[i + 1] = op->extra[i];
+
+			return emit_method_call(ctx, op->p1, 0, op->p2, args, op->p3 + 1);
+		}
+
+		/**
+			Calling a closure, which may or may not be carrying a receiver, and only says which at run
+			time. So both ways of arranging the arguments are emitted and one is jumped over.
+
+			A closure held as a dynamic is a different thing again: its arguments have to be boxed
+			into an array for hl_dyn_call. That is left to the interpreter for now.
+		*/
+		case OCallClosure: {
+			int over, plain;
+
+			if( ctx->regs[op->p2].t->kind != HFUN )
+				return 0;
+
+			load_reg(ctx, op->p2, S1);
+			emit(ctx, a64_ldr_imm(A64_X, S0, S1, (unsigned int)(offsetof(vclosure, fun) / 8)));
+			emit(ctx, a64_ldr_imm(A64_W, S2, S1, (unsigned int)(offsetof(vclosure, hasValue) / 4)));
+
+			plain = ctx->len;
+			emit(ctx, a64_cbz(0, S2, 0));
+
+			emit(ctx, a64_ldr_imm(A64_X, 0, S1, (unsigned int)(offsetof(vclosure, value) / 8)));
+
+			if( !pass_args_from(ctx, op->extra, op->p3, 1) )
+				return 0;
+
+			emit(ctx, a64_blr(S0));
+
+			over = ctx->len;
+			emit(ctx, a64_b(0));
+
+			ctx->buf[plain] = a64_cbz(0, S2, ctx->len - plain);
+
+			if( !pass_args_from(ctx, op->extra, op->p3, 0) )
+				return 0;
+
+			emit(ctx, a64_blr(S0));
+			ctx->buf[over] = a64_b(ctx->len - over);
+
+			if( ctx->regs[op->p1].size != 0 )
+				store_reg(ctx, op->p1, 0);
+
+			return 1;
+		}
 
 		case ORet:
 			if( ctx->regs[op->p1].size != 0 )

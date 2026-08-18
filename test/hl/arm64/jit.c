@@ -705,6 +705,137 @@ int main( void ) {
 
 	{
 		/**
+			A method reached through the object's own table, which is three loads: the object names
+			its type, the type carries the table, and the table is indexed by position.
+
+			The object here is a type pointer and nothing else, and the table holds one function this
+			jit compiled a moment ago. That is all the dispatch actually reads, so it is all that has
+			to exist for the reading to be checked.
+		*/
+		hl_type sig, obj_type;
+		hl_type_fun fun;
+		hl_type *args[2];
+		hl_type *regs[3];
+		hl_opcode ops[2];
+		static void *table[2];
+		static hl_type *instance[1];
+		int (*method)( void *, int );
+		int (*caller)( void *, int );
+
+		memset(&obj_type, 0, sizeof(obj_type));
+		obj_type.kind = HOBJ;
+		obj_type.vobj_proto = table;
+		instance[0] = &obj_type;
+
+		/** int method(receiver, n) { return n; } */
+		args[0] = &hlt_dyn;
+		args[1] = &hlt_i32;
+		signature(&sig, &fun, args, 2, &hlt_i32);
+		regs[0] = &hlt_dyn;
+		regs[1] = regs[2] = &hlt_i32;
+
+		memset(ops, 0, sizeof(ops));
+		ops[0].op = ORet; ops[0].p1 = 1;
+		method = (int (*)( void *, int ))build(&sig, regs, 3, ops, 1);
+		table[1] = (void *)method;
+
+		/** int caller(receiver, n) { return receiver.method_at_1(receiver, n); } */
+		regs[0] = &obj_type;
+		regs[1] = regs[2] = &hlt_i32;
+
+		memset(ops, 0, sizeof(ops));
+		ops[0].op = OCallThis; ops[0].p1 = 2; ops[0].p2 = 1; ops[0].p3 = 1;
+		ops[1].op = ORet;      ops[1].p1 = 2;
+
+		{
+			static int through[1];
+			through[0] = 1;
+			ops[0].extra = through;
+		}
+
+		caller = (int (*)( void *, int ))build(&sig, regs, 3, ops, 2);
+		report("a method through the object's table", caller == NULL ? -1 : caller(instance, 42), 42);
+	}
+
+	{
+		/**
+			A closure, which only says at run time whether it carries a receiver, so both ways of
+			arranging the arguments are emitted and one is jumped over. Both are checked here, since
+			the branch is the whole of what there is to get wrong.
+		*/
+		hl_type sig, fsig;
+		hl_type_fun fun, ffun;
+		hl_type *args[2];
+		hl_type *regs[3];
+		hl_opcode ops[2];
+		static vclosure bare, bound;
+		int (*plain)( int );
+		int (*two)( void *, int );
+		int (*call)( vclosure * );
+
+		/** int plain(n) { return n; } */
+		args[0] = &hlt_i32;
+		signature(&fsig, &ffun, args, 1, &hlt_i32);
+		regs[0] = regs[1] = &hlt_i32;
+
+		memset(ops, 0, sizeof(ops));
+		ops[0].op = ORet; ops[0].p1 = 0;
+		plain = (int (*)( int ))build(&fsig, regs, 2, ops, 1);
+
+		/** int two(receiver, n) { return n; } */
+		args[0] = &hlt_dyn;
+		args[1] = &hlt_i32;
+		signature(&sig, &fun, args, 2, &hlt_i32);
+		regs[0] = &hlt_dyn;
+		regs[1] = regs[2] = &hlt_i32;
+
+		memset(ops, 0, sizeof(ops));
+		ops[0].op = ORet; ops[0].p1 = 1;
+		two = (int (*)( void *, int ))build(&sig, regs, 3, ops, 1);
+
+		memset(&bare, 0, sizeof(bare));
+		bare.t = &fsig;
+		bare.fun = (void *)plain;
+		bare.hasValue = 0;
+
+		memset(&bound, 0, sizeof(bound));
+		bound.t = &fsig;
+		bound.fun = (void *)two;
+		bound.hasValue = 1;
+		bound.value = (void *)&bare;
+
+		/** int call(c) { return c(42); } */
+		args[0] = &fsig;
+		signature(&sig, &fun, args, 1, &hlt_i32);
+		regs[0] = &fsig;
+		regs[1] = regs[2] = &hlt_i32;
+
+		memset(ops, 0, sizeof(ops));
+		ops[0].op = OInt;         ops[0].p1 = 1; ops[0].p2 = 0;
+		ops[1].op = OCallClosure; ops[1].p1 = 2; ops[1].p2 = 0; ops[1].p3 = 1;
+
+		{
+			static int through[1];
+			through[0] = 1;
+			ops[1].extra = through;
+		}
+
+		{
+			hl_opcode full[3];
+			memset(full, 0, sizeof(full));
+			full[0] = ops[0];
+			full[1] = ops[1];
+			full[2].op = ORet; full[2].p1 = 2;
+
+			call = (int (*)( vclosure * ))build(&sig, regs, 3, full, 3);
+		}
+
+		report("a closure with no receiver", call == NULL ? -1 : call(&bare), 42);
+		report("a closure carrying one", call == NULL ? -1 : call(&bound), 42);
+	}
+
+	{
+		/**
 			An opcode this jit does not know, which has to be refused rather than guessed at.
 
 			OSwitch, because hxScript's emitter lowers a switch to a chain of comparisons and never
