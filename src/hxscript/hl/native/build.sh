@@ -54,8 +54,8 @@ esac
 
 # --- the compiler, and which architecture it is building for --------------------------------------
 #
-# Both are needed before there is anything to decide, because the loader is x86-64 only and what to
-# compile follows from that. The compiler is asked rather than the machine: a cross build
+# Both are needed before there is anything to decide: which backend to compile follows from the
+# architecture, and so does which HashLink is the right one to link against. The compiler is asked rather than the machine: a cross build
 # is for whatever CC targets, which uname does not know, and CC may be carrying the flag that decides
 # it, as CC="clang -arch arm64" does on macOS.
 
@@ -92,21 +92,118 @@ note "architecture: $ARCH"
 # hl.h has to be the one the running libhl was built from, so it is taken from an installation rather
 # than carried. Everything else the loader needs is internal to hashlink and is not shipped, which is
 # what vendor/ is for.
+#
+# Every candidate also has to be for the architecture being built for, which is read out of its own
+# libhl rather than assumed from where it sits. Building for one and linking against another produces
+# a module that loads nowhere, and on a machine cross compiling the easiest installation to find is
+# the wrong one.
 
-if [ -z "$HL" ]; then
-	for guess in /c/hashlink/* /usr/local /usr /opt/hashlink "$HOME/hashlink"; do
-		if [ -f "$guess/include/hl.h" ] || [ -f "$guess/hl.h" ]; then HL=$guess; break; fi
+# Which architecture a library was built for, read out of its header. ELF says so two bytes at
+# offset 18, Mach-O says so in its second word. Anything else answers nothing, and nothing is taken
+# to mean unknown rather than wrong.
+machine_of_file() {
+	head_hex=$(od -An -N 20 -tx1 -v "$1" 2>/dev/null | tr -d ' \n')
+	[ -n "$head_hex" ] || return 0
+
+	case "$head_hex" in
+		7f454c46*)
+			case "$head_hex" in
+				??????????????????????????????????????3e00*) echo "x86-64" ;;
+				??????????????????????????????????????b700*) echo "arm64" ;;
+			esac
+			;;
+		cffaedfe*|cefaedfe*)
+			case "$head_hex" in
+				????????07000001*) echo "x86-64" ;;
+				????????0c000001*) echo "arm64" ;;
+			esac
+			;;
+		4d5a*)
+			# PE keeps its header wherever the four bytes at 0x3C point, and the machine two bytes in.
+			off_hex=$(od -An -j 60 -N 4 -tx1 -v "$1" 2>/dev/null | tr -d ' 
+')
+			[ -n "$off_hex" ] || return 0
+
+			b0=$(printf '%s' "$off_hex" | cut -c1-2)
+			b1=$(printf '%s' "$off_hex" | cut -c3-4)
+			b2=$(printf '%s' "$off_hex" | cut -c5-6)
+			b3=$(printf '%s' "$off_hex" | cut -c7-8)
+			off=$((0x$b3$b2$b1$b0))
+
+			case "$(od -An -j $((off + 4)) -N 2 -tx1 -v "$1" 2>/dev/null | tr -d ' 
+')" in
+				6486) echo "x86-64" ;;
+				64aa) echo "arm64" ;;
+			esac
+			;;
+	esac
+}
+
+# The library an installation links against, which is also the file that says what it is for.
+library_of() {
+	ls "$1"/libhl.* "$1"/lib/libhl.* 2>/dev/null | head -1
+}
+
+# @return 0 when this candidate is one to build against, and remembers the first wrong one.
+consider() {
+	[ -f "$1/include/hl.h" ] || [ -f "$1/hl.h" ] || return 1
+
+	# An installation is where hl.h and libhl both are, because -lhl is resolved against it. A
+	# directory holding only headers is part of one rather than one, and accepting it puts the wrong
+	# path on the link line and reads nothing about the architecture.
+	lib=$(library_of "$1")
+	[ -n "$lib" ] || return 1
+
+	said=$(machine_of_file "$lib")
+
+	if [ -z "$said" ] || [ "$said" = "$ARCH" ]; then
+		HL="$1"
+		return 0
+	fi
+
+	if [ -z "$WRONG" ]; then
+		WRONG="$1"
+		WRONG_ARCH="$said"
+	fi
+
+	return 1
+}
+
+WRONG=
+WRONG_ARCH=
+
+if [ -n "$HL" ]; then
+	CANDIDATES="$HL"
+	HL=
+else
+	CANDIDATES="$(command -v hl 2>/dev/null | sed 's|/[^/]*$||') /c/hashlink/* /usr/local /usr /opt/hashlink $HOME/hashlink"
+fi
+
+for guess in $CANDIDATES; do
+	[ -n "$guess" ] || continue
+	consider "$guess" && break
+
+	# One level down, because the binary distributions unpack into a versioned directory.
+	[ -d "$guess" ] || continue
+
+	for inside in "$guess"/*; do
+		[ -d "$inside" ] || continue
+		consider "$inside" && break
 	done
+
+	[ -n "$HL" ] && break
+done
+
+if [ -z "$HL" ] && [ -n "$WRONG" ]; then
+	die "the HashLink at $WRONG was built for $WRONG_ARCH and this build is for $ARCH: set HLPATH to one built for $ARCH"
 fi
 
 [ -n "$HL" ] || die "no HashLink installation found: pass --hl DIR or set HLPATH"
 
 if [ -f "$HL/include/hl.h" ]; then
 	INC="$HL/include"
-elif [ -f "$HL/hl.h" ]; then
-	INC="$HL"
 else
-	die "no hl.h under $HL"
+	INC="$HL"
 fi
 
 # --- the loader sources ---------------------------------------------------------------------------

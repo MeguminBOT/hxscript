@@ -51,6 +51,18 @@ enum Outcome {
 	Missing(reason:String, remedy:String);
 }
 
+/** What looking for a HashLink to build against turned up. */
+typedef Search = {
+	/** One built for what this build targets, or null when none is here. */
+	var found:Null<String>;
+
+	/** One that was there and was built for something else, so that saying so is possible. */
+	var wrong:Null<String>;
+
+	/** What that one was built for. */
+	var wrongArch:Null<String>;
+}
+
 /** What a build is for, as the compiler in front of it answers rather than as the machine looks. */
 typedef Arch = {
 	/** The architecture, as `hxs_arch.h` names it. */
@@ -151,10 +163,38 @@ class Native {
 			return Missing('the library\'s own sources were not on the class path',
 				'this is a fault in the build rather than in your machine; check that -lib hxscript resolves');
 
-		var hl:Null<String> = installation();
-		if (hl == null)
+		var cc:Null<String> = compiler();
+		if (cc == null)
+			return Missing('no C compiler was found', 'install one, or set CC to the one to use');
+
+		/**
+		 * What this build is for is settled before the HashLink to build against is chosen, because
+		 * the answer decides which one is the right one. Building for one architecture against a
+		 * libhl for another links and then loads nothing, and the machine doing the building is the
+		 * one whose HashLink is easiest to find.
+		 */
+		var arch:Arch = architecture(cc, carried);
+		var search:Search = installation(arch);
+
+		if (search.found == null && search.wrong != null)
+			return Missing('the HashLink at '
+				+ search.wrong
+				+ ' was built for '
+				+ search.wrongArch
+				+ ' and this build is for '
+				+ arch.name,
+				'set HLPATH to a HashLink built for '
+				+ arch.name
+				+ ', which for a cross build means one you built yourself:
+'
+				+ '  make libhl   in a hashlink 1.16 tree, with a compiler targeting '
+				+ arch.name);
+
+		if (search.found == null)
 			return Missing('no HashLink installation was found',
 				'set HLPATH to the directory holding hl.h and libhl, or put hl on the path');
+
+		var hl:String = search.found;
 
 		var headers:Null<String> = include(hl);
 		if (headers == null)
@@ -179,12 +219,6 @@ class Native {
 				+ '  sh '
 				+ Path.join([carried, 'build.sh'])
 				+ ' --src <hashlink tree>');
-
-		var cc:Null<String> = compiler();
-		if (cc == null)
-			return Missing('no C compiler was found', 'install one, or set CC to the one to use');
-
-		var arch:Arch = architecture(cc, carried);
 
 		return Path.extension(out) == 'c' ? program(out, carried, hl, headers, cc, version,
 			arch) : library(out, carried, hl, headers, cc, version, arch);
@@ -510,29 +544,36 @@ class Native {
 	 * `HLPATH` is hashlink's own convention and is tried first, then what `hl` on the path resolves
 	 * to, then where the installers put it.
 	 *
-	 * @return The directory, or null when there is no HashLink here.
+	 * Every candidate has to be for the architecture being built for, which is read out of its own
+	 * libhl rather than assumed from where it sits. A machine building for itself finds the same
+	 * installation it always did; a machine cross compiling walks past its own and says so, instead
+	 * of linking against it and producing a module that loads nowhere.
+	 *
+	 * @param arch What this build is for.
+	 * @return What was found, and what was passed over.
 	 */
-	static function installation():Null<String> {
+	static function installation(arch:Arch):Search {
+		var out:Search = {found: null, wrong: null, wrongArch: null};
+		var guesses:Array<String> = [];
+
 		var told:Null<String> = Sys.getEnv('HLPATH');
-		if (told != null && include(told) != null)
-			return told;
+		if (told != null)
+			guesses.push(told);
 
 		var found:Null<String> = onPath(windows() ? 'hl.exe' : 'hl');
-		if (found != null) {
-			var beside:String = Path.directory(found);
-			if (include(beside) != null)
-				return beside;
-		}
+		if (found != null)
+			guesses.push(Path.directory(found));
 
-		var guesses:Array<String> = windows() ? ['C:/hashlink', 'C:/Program Files/HashLink'] : ['/usr/local', '/usr', '/opt/hashlink'];
+		for (guess in (windows() ? ['C:/hashlink', 'C:/Program Files/HashLink'] : ['/usr/local', '/usr', '/opt/hashlink']))
+			guesses.push(guess);
 
 		var home:Null<String> = Sys.getEnv('HOME');
 		if (home != null)
 			guesses.push(Path.join([home, 'hashlink']));
 
 		for (guess in guesses) {
-			if (include(guess) != null)
-				return guess;
+			if (consider(guess, arch, out))
+				return out;
 
 			/** One level down, because the binary distributions unpack into a versioned directory. */
 			if (!FileSystem.exists(guess) || !FileSystem.isDirectory(guess))
@@ -540,8 +581,152 @@ class Native {
 
 			for (entry in FileSystem.readDirectory(guess)) {
 				var inside:String = Path.join([guess, entry]);
-				if (FileSystem.isDirectory(inside) && include(inside) != null)
-					return inside;
+
+				if (FileSystem.isDirectory(inside) && consider(inside, arch, out))
+					return out;
+			}
+		}
+
+		return out;
+	}
+
+	/**
+	 * Weighs one candidate.
+	 *
+	 * @param at The directory.
+	 * @param arch What this build is for.
+	 * @param out Filled in when this is the one, or when it is the wrong one and nothing better has
+	 *            been passed over yet.
+	 * @return Whether looking can stop.
+	 *
+	 * An installation whose architecture cannot be read is taken, not skipped. Refusing what cannot
+	 * be identified would break every platform whose libraries this does not know how to read, and
+	 * the version check behind this still has to agree either way.
+	 */
+	static function consider(at:String, arch:Arch, out:Search):Bool {
+		if (include(at) == null || libraryOf(at) == null)
+			return false;
+
+		var machine:Null<String> = machineOf(at);
+
+		if (machine == null || machine == arch.name) {
+			out.found = at;
+			return true;
+		}
+
+		if (out.wrong == null) {
+			out.wrong = at;
+			out.wrongArch = machine;
+		}
+
+		return false;
+	}
+
+	/**
+	 * Which architecture a HashLink installation was built for, read out of its own library.
+	 *
+	 * The file says so in its header and nothing else has to be trusted: not the directory it sits
+	 * in, not the machine doing the building, not what the name suggests. That matters because the
+	 * usual way to get this wrong is to cross compile, where the obvious installation is the host's
+	 * and linking against it produces a module that cannot load and says nothing useful about why.
+	 *
+	 * @param hl The installation.
+	 * @return The architecture as `hxs_arch.h` names them, or null when nothing here can be read.
+	 *         Null means unknown rather than wrong, and an unknown one is allowed through: refusing
+	 *         what cannot be identified would break every platform this does not know about.
+	 */
+	static function machineOf(hl:String):Null<String> {
+		var lib:Null<String> = libraryOf(hl);
+		return lib == null ? null : machineOfFile(lib);
+	}
+
+	/**
+	 * @param hl An installation.
+	 * @return The libhl in it, or null when there is none.
+	 *
+	 * Found by looking rather than by naming, because the extension differs per platform and a
+	 * version can be part of it. What this answers also decides whether a directory is an
+	 * installation at all: `-lhl` is resolved against it, so headers without a library are part of
+	 * one rather than one.
+	 */
+	static function libraryOf(hl:String):Null<String> {
+		for (where in [hl, Path.join([hl, 'lib'])]) {
+			if (!FileSystem.exists(where) || !FileSystem.isDirectory(where))
+				continue;
+
+			for (entry in FileSystem.readDirectory(where)) {
+				if (StringTools.startsWith(entry, 'libhl.'))
+					return Path.join([where, entry]);
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * @param at A shared library.
+	 * @return What it was built for, or null when its format is not one of the three read here.
+	 */
+	static function machineOfFile(at:String):Null<String> {
+		var bytes:haxe.io.Bytes;
+
+		try {
+			bytes = File.getBytes(at);
+		} catch (e:Dynamic) {
+			return null;
+		}
+
+		if (bytes.length < 64)
+			return null;
+
+		/**
+		 * ELF, which is Linux and most of the rest. The machine is a two byte field 18 bytes in, and
+		 * byte 5 says which way round the file's numbers are written.
+		 */
+		if (bytes.get(0) == 0x7F && bytes.get(1) == 0x45 && bytes.get(2) == 0x4C && bytes.get(3) == 0x46) {
+			var little:Bool = bytes.get(5) == 1;
+			var machine:Int = little ? bytes.get(18) | (bytes.get(19) << 8) : (bytes.get(18) << 8) | bytes.get(19);
+
+			return switch (machine) {
+				case 0x3E: 'x86-64';
+				case 0xB7: 'arm64';
+				default: null;
+			}
+		}
+
+		/** Mach-O, which is macOS. The cpu type is the second word, and 0x0100_0000 marks the 64 bit ones. */
+		var magic:Int = bytes.get(0) | (bytes.get(1) << 8) | (bytes.get(2) << 16) | (bytes.get(3) << 24);
+
+		if (magic == 0xFEEDFACF || magic == 0xFEEDFACE) {
+			var cpu:Int = bytes.get(4) | (bytes.get(5) << 8) | (bytes.get(6) << 16) | (bytes.get(7) << 24);
+
+			return switch (cpu) {
+				case 0x01000007: 'x86-64';
+				case 0x0100000C: 'arm64';
+				default: null;
+			}
+		}
+
+		/**
+		 * A universal binary holds several at once and is right for whichever is being built, so it
+		 * is read as matching rather than as one of them.
+		 */
+		if (bytes.get(0) == 0xCA && bytes.get(1) == 0xFE && bytes.get(2) == 0xBA && bytes.get(3) == 0xBE)
+			return null;
+
+		/** PE, which is Windows. The header's offset is at 0x3C and the machine two bytes into it. */
+		if (bytes.get(0) == 0x4D && bytes.get(1) == 0x5A) {
+			var at32:Int = bytes.get(0x3C) | (bytes.get(0x3D) << 8) | (bytes.get(0x3E) << 16) | (bytes.get(0x3F) << 24);
+
+			if (at32 <= 0 || at32 + 6 > bytes.length)
+				return null;
+
+			var machine:Int = bytes.get(at32 + 4) | (bytes.get(at32 + 5) << 8);
+
+			return switch (machine) {
+				case 0x8664: 'x86-64';
+				case 0xAA64: 'arm64';
+				default: null;
 			}
 		}
 
