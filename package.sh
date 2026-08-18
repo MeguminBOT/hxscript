@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # Builds the haxelib submission zip from a committed ref, and optionally submits it.
 #
-# The package is the library only: src/, the manifest, the readme and the licence. No examples, no
-# tests, no docs tooling -- those are worth having in the repository and are dead weight in every
-# install of the library.
+# The package is the library only: src/, extraParams.hxml, the manifest, the readme and the licence.
+# No examples, no tests, no docs tooling -- those are worth having in the repository and are dead
+# weight in every install of the library.
+#
+# extraParams.hxml is not documentation and not optional. haxelib applies it to every build that says
+# -lib hxscript, and it is the whole of how the setup macros come to run, so a package without it
+# installs a library that quietly does nothing: no dead code kept, nothing wired, no banner, and a
+# host left to write those three lines itself without being told it has to.
 #
 # `git archive` rather than a directory zip, for two reasons. Entry paths come out with forward
 # slashes (Windows' Compress-Archive writes backslashes, which break the package on haxelib's Linux
@@ -54,7 +59,7 @@ version=$(git show "$ref:$manifest" | grep -o '"version"[[:space:]]*:[[:space:]]
 
 # Everything the package ships. Anything missing from the ref is a mistake worth stopping for
 # rather than silently shipping a package without a licence.
-files="src $manifest README.md LICENSE"
+files="src extraParams.hxml $manifest README.md LICENSE"
 for f in $files; do
 	git cat-file -e "$ref:$f" 2>/dev/null || { echo "missing from $ref: $f" >&2; exit 1; }
 done
