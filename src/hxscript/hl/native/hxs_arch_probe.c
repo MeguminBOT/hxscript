@@ -8,4 +8,4 @@
 */
 #include "hxs_arch.h"
 
-hxs_arch HXS_ARCH_NAME HXS_ARCH_HAS_JIT
+hxs_arch HXS_ARCH_NAME HXS_ARCH_HAS_JIT HXS_ARCH_JIT

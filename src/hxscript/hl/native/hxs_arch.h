@@ -58,14 +58,25 @@
 #endif
 
 /*
-	Whether the loader can be compiled for this architecture at all. jit.c guards itself with
-	__arm__, which 64 bit ARM does not define, so it is not a guard there: on arm64 it compiles, emits
-	x86, and on Windows does not get that far.
+	Whether a loader can be compiled for this architecture, and whose jit it uses.
+
+	Two answers rather than one, because the two supported architectures do not share a backend.
+	x86-64 uses the jit hashlink ships, carried in vendor/. arm64 uses this library's own, in arm64/,
+	because hashlink has none: its jit.c guards itself with __arm__, which 64 bit ARM does not define,
+	so left to itself it compiles, emits x86, and on Windows does not get that far.
+
+	HXS_ARCH_JIT names the directory, and the build reads it out of the probe rather than deciding for
+	itself, so which backend a build uses is decided in one place.
 */
 #if HXS_ARCH == HXS_ARCH_X86_64
 #	define HXS_ARCH_HAS_JIT 1
+#	define HXS_ARCH_JIT "vendor"
+#elif HXS_ARCH == HXS_ARCH_ARM64
+#	define HXS_ARCH_HAS_JIT 1
+#	define HXS_ARCH_JIT "arm64"
 #else
 #	define HXS_ARCH_HAS_JIT 0
+#	define HXS_ARCH_JIT "none"
 #endif
 
 #endif

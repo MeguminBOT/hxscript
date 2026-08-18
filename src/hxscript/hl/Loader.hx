@@ -66,6 +66,9 @@ enum abstract Availability(Int) from Int to Int {
  * Only 64 bit is named. hashlink's jit reaches 32 bit x86 as well and this library does not go
  * there, so a 32 bit build reads as `Unrecognised` and interprets, which is what every architecture
  * with no loader does.
+ *
+ * The two that are named do not share a backend. x86-64 uses the jit hashlink ships; arm64 uses this
+ * library's own, under `src/hxscript/hl/native/arm64`, because hashlink has none for it.
  */
 enum abstract Architecture(Int) from Int to Int {
 	/** Neither of the two below, which is every 32 bit architecture and everything unnamed. */
@@ -74,7 +77,7 @@ enum abstract Architecture(Int) from Int to Int {
 	/** The one architecture the carried loader compiles for. */
 	var X86_64 = 1;
 
-	/** 64 bit ARM, which has no loader yet, so everything on it is interpreted. */
+	/** 64 bit ARM, which uses this library's own jit, since hashlink has none for it. */
 	var Arm64 = 2;
 }
 
@@ -174,11 +177,12 @@ class Loader {
 						+ 'build the module again without it';
 
 					case null:
-						'this build carries no loader, because the carried one is x86-64 only; '
+						'this build carries no loader, because the ones here reach x86-64 and arm64 only; '
 						+ 'every script is interpreted';
 
 					case on:
-						'this build carries no loader, because the carried one is x86-64 only and this is '
+						'this build carries no loader, because the ones here reach x86-64 and arm64 only '
+						+ 'and this is '
 						+ spell(on)
 						+ '; every script is interpreted';
 				}

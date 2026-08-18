@@ -87,6 +87,26 @@ same reason.
 
 ### Added
 
+- **An AArch64 jit, so arm64 compiles scripts rather than interpreting them.** hashlink's `src/jit.c`
+  is an x86 and x86-64 instruction encoder with no other backend behind it, and its own guard is
+  `#ifdef __arm__`, which 64 bit ARM does not define, so on arm64 it compiled and emitted instructions
+  the processor cannot run. `src/hxscript/hl/native/arm64/` is the counterpart: it answers the same
+  seven functions `module.c` reaches a jit through, so `code.c` and `module.c` are shared with the
+  x86-64 build and only the encoder differs. Every one of the 57 opcodes hxScript's emitter produces
+  is compiled, and an opcode outside that set fails the module rather than being guessed at, which
+  leaves it interpreted instead of wrong.
+
+  **The encoder is checked against an assembler rather than against itself.** `a64.h` is pure
+  functions from operands to instruction words, so `test/hl/native/a64` compares 134 of them byte for
+  byte against what clang assembles the same mnemonics into, on any machine and without running
+  anything. Checking against a disassembler would only prove the encoder agrees with what it already
+  believed.
+
+  **What runs is checked on arm64, in `test/hl/arm64`**, an emulated aarch64 Debian with libhl built
+  from the same hashlink the loader is carried from. Emulation cannot measure speed, so no performance
+  figure is claimed here: the HashLink benchmarks remain x86-64's.
+
+
 - **Presets for five more libraries**, so `-lib` is still the whole of the setup for each.
 
   **hxvlc**, video playback through libVLC, which is the case a mod that plays a cutscene needs.

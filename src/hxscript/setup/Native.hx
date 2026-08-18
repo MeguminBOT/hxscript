@@ -56,8 +56,17 @@ typedef Arch = {
 	/** The architecture, as `hxs_arch.h` names it. */
 	var name:String;
 
-	/** Whether the carried loader can be compiled for it, which is x86-64 and nothing else. */
+	/** Whether a loader can be compiled for it at all. */
 	var jit:Bool;
+
+	/**
+	 * Whose jit it uses: `vendor` for the one hashlink ships, `arm64` for this library's own.
+	 *
+	 * The two supported architectures do not share a backend, because hashlink has none for arm64.
+	 * Read out of `hxs_arch.h` through the probe rather than decided here, so the answer lives in one
+	 * place.
+	 */
+	var backend:String;
 }
 
 /**
@@ -216,6 +225,14 @@ class Native {
 		args.push('-lhl');
 
 		/**
+		 * The AArch64 jit calls `fmod` for the remainder of two floats, which is what hashlink's own
+		 * jit does on x86 as well, so libm is not optional wherever that backend is compiled in. It is
+		 * part of the C runtime on Windows and has no library to name there.
+		 */
+		if (!windows())
+			args.push('-lm');
+
+		/**
 		 * Built under another name and renamed once whole, so an interrupted build cannot leave
 		 * behind something that loads.
 		 */
@@ -302,6 +319,8 @@ class Native {
 			headers,
 			'-I',
 			loader,
+			'-I',
+			Path.join([carried, 'arm64']),
 			Path.join([carried, 'hxs.c'])
 		];
 
@@ -317,16 +336,25 @@ class Native {
 			return args;
 		}
 
-		/**
-		 * jit.c guards itself with `__arm__`, which 64 bit ARM does not define, so compiling it here
-		 * anyway is not merely dead weight: on arm64 it emits x86, and on arm64 Windows it does not
-		 * compile at all and would fail a build that was going to work.
-		 */
 		if (!arch.jit)
 			return args;
 
-		for (name in ['code.c', 'module.c', 'jit.c'])
+		/**
+		 * `code.c` reads a module and `module.c` links it, and neither has an architecture in it, so
+		 * both are shared whatever the backend. Only `jit.c` is replaced, because only `jit.c` is an
+		 * x86 encoder: its own guard is `__arm__`, which 64 bit ARM does not define, so compiling it
+		 * on arm64 is not dead weight but working code that emits instructions the processor cannot
+		 * run.
+		 */
+		for (name in ['code.c', 'module.c'])
 			args.push(Path.join([loader, name]));
+
+		if (arch.backend == 'arm64') {
+			args.push(Path.join([carried, 'arm64', 'jit_arm64.c']));
+			args.push(Path.join([carried, 'arm64', 'exec.c']));
+		} else {
+			args.push(Path.join([loader, 'jit.c']));
+		}
 
 		return args;
 	}
@@ -614,14 +642,19 @@ class Native {
 				if (end < 0)
 					continue;
 
+				var tail:String = StringTools.trim(rest.substr(end + 1));
+				var open:Int = tail.indexOf('"');
+				var close:Int = open < 0 ? -1 : tail.indexOf('"', open + 1);
+
 				return {
 					name: rest.substring(0, end),
-					jit: StringTools.trim(rest.substr(end + 1)) == '1'
+					jit: tail.charAt(0) == '1',
+					backend: open >= 0 && close > open ? tail.substring(open + 1, close) : 'vendor'
 				};
 			}
 		}
 
-		return {name: 'x86-64', jit: true};
+		return {name: 'x86-64', jit: true, backend: 'vendor'};
 	}
 
 	/**

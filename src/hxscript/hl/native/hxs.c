@@ -28,8 +28,10 @@
 #include "hxs_arch.h"
 
 /**
-	Whether this build carries the loader. It is x86-64 only, so on arm64 this module is the runtime
-	and nothing else, and every script is interpreted.
+	Whether this build carries the loader.
+
+	x86-64 uses the jit hashlink ships and arm64 uses this library's own, so both have one. Anywhere
+	else this module is the runtime and nothing besides, and every script is interpreted.
 */
 #if !defined(HXS_NO_JIT) && HXS_ARCH_HAS_JIT
 #	define HXS_LOADER
@@ -1587,7 +1589,7 @@ HL_PRIM vbyte *HL_NAME(last_error)( void ) {
 #elif defined(HXS_NO_JIT)
 	return (vbyte *)"this module was built with the loader left out";
 #else
-	return (vbyte *)"this is " HXS_ARCH_NAME ", and the loader is x86-64 only";
+	return (vbyte *)"this is " HXS_ARCH_NAME ", and the loader reaches x86-64 and arm64 only";
 #endif
 }
 

@@ -30,7 +30,8 @@ check "hashlink" "$(awk '/define HL_VERSION/{ print $3; exit }' /opt/hl/include/
 echo
 echo "-- what the build works out for itself --"
 check "architecture probed" "$(probe 2)" "arm64"
-check "loader available" "$(probe NF)" "0"
+check "loader available" "$(probe 3)" "1"
+check "backend it selects" "$(probe 4)" "arm64"
 
 echo
 echo "-- the module --"
@@ -41,15 +42,23 @@ sh src/hxscript/hl/native/build.sh --hl /opt/hl --out /tmp/hxscript.hdll > /tmp/
 }
 
 check "machine it was built for" "$(readelf -h /tmp/hxscript.hdll | awk -F: '/Machine/{ gsub(/^ +/, "", $2); print $2 }')" "AArch64"
-check "natives it defines" "$(nm -D --defined-only /tmp/hxscript.hdll | grep -c hxscript_)" "21"
-check "jit symbols it needs" "$(nm -u /tmp/hxscript.hdll | grep -c jit || true)" "0"
+# Counted as hlp_ wrappers, which DEFINE_PRIM makes exactly one of per native. Counting hxscript_
+# instead counts the implementations as well, and how many of those there are depends on whether the
+# loader was compiled in, which is not what this check is about.
+check "natives it offers" "$(nm -D --defined-only /tmp/hxscript.hdll | grep -c ' hlp_')" "21"
 
-gcc test/hl/arm64/ask.c -o /tmp/ask -ldl
+# The jit is compiled in rather than linked against, so these are defined here and needed from
+# nowhere. A count above zero would mean the module expects an x86 loader to turn up at run time.
+check "jit entry points it carries" "$(nm /tmp/hxscript.hdll | grep -c ' [tT] hxs_jit_' || true)" "7"
+check "jit symbols it needs from elsewhere" "$(nm -u /tmp/hxscript.hdll | grep -c jit || true)" "0"
+
+gcc -I /opt/hl/include test/hl/arm64/ask.c -o /tmp/ask -ldl -L/opt/hl/lib -lhl
 answered=$(/tmp/ask /tmp/hxscript.hdll)
 
-# 1 is HXS_STATE_NO_LOADER and 2 is HXS_ARCH_ARM64, which are also Loader.Availability.NoLoader and
-# Loader.Architecture.Arm64, since the Haxe side reads these numbers straight out of the module.
-check "the state it reports" "$(echo "$answered" | cut -d' ' -f1)" "1"
+# 0 is HXS_STATE_USABLE and 2 is HXS_ARCH_ARM64, which are also Loader.Availability.Usable and
+# Loader.Architecture.Arm64, since the Haxe side reads these numbers straight out of the module. The
+# state was 1 for no loader until this branch gave arm64 one.
+check "the state it reports" "$(echo "$answered" | cut -d' ' -f1)" "0"
 check "the architecture it reports" "$(echo "$answered" | cut -d' ' -f2)" "2"
 
 echo

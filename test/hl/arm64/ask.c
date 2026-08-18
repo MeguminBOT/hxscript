@@ -9,11 +9,25 @@
 #include <dlfcn.h>
 #include <stdio.h>
 
+#include <hl.h>
+
 int main( int argc, char **argv ) {
 	const char *path = argc > 1 ? argv[1] : "/tmp/hxscript.hdll";
-	void *module = dlopen(path, RTLD_NOW);
+	void *module;
 	int (*state)( void );
 	int (*arch)( void );
+	int stack_top = 0;
+
+	/**
+		Asking a module whether it agrees with the VM makes it allocate a closure, an array and a
+		dynamic and compare what came back against what it expects, so the collector has to be running
+		before the question is put. A host has done this long before it asks; a program written only to
+		ask has to be told.
+	*/
+	hl_global_init();
+	hl_register_thread(&stack_top);
+
+	module = dlopen(path, RTLD_NOW);
 
 	if( module == NULL ) {
 		printf("it did not load: %s\n", dlerror());

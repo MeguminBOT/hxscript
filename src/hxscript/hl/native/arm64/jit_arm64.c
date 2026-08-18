@@ -90,6 +90,13 @@ struct _jit_ctx {
 	/** Its frame size in bytes, a multiple of 16 because the stack pointer must stay so aligned. */
 	int frame;
 
+	/** Where its trap contexts begin, and how many it has. */
+	int trap_off;
+	int ntraps;
+
+	/** Which trap slot the next OTrap takes, counted as the opcodes are compiled in order. */
+	int trap_at;
+
 	/**
 		Where each of its opcodes begins, as an index into buf.
 
@@ -304,6 +311,43 @@ static void store_reg( jit_ctx *ctx, int r, int from ) {
 }
 
 /**
+	Puts the address of somewhere in the frame into a register.
+
+	The one instruction form reaches 4095 bytes, which every ordinary frame is inside. A frame with
+	traps in it is not ordinary: a trap context is over three hundred bytes, so a handful of them puts
+	the far end out of reach and it has to be built instead.
+*/
+static void emit_fp_offset( jit_ctx *ctx, int off, int into ) {
+	if( off <= 0xFFF ) {
+		emit(ctx, a64_add_imm(1, into, A64_FP, (unsigned int)off));
+		return;
+	}
+
+	emit_imm32(ctx, into, off);
+	emit(ctx, a64_add_reg(1, into, A64_FP, into));
+}
+
+/**
+	Moves the stack pointer by any amount a frame can be.
+
+	One instruction reaches 4095 bytes and a second shifted one reaches sixteen megabytes, which is
+	past anything a function could want. Written as one place rather than at both ends, so the
+	prologue and the epilogue cannot disagree about how far they moved.
+
+	@param add Whether to give the space back rather than take it.
+*/
+static void adjust_sp( jit_ctx *ctx, int bytes, int add ) {
+	int hi = bytes >> 12;
+	int lo = bytes & 0xFFF;
+
+	if( hi )
+		emit(ctx, a64_addsub_imm(1, !add, 0, A64_SP, A64_SP, (unsigned int)hi, 1));
+
+	if( lo )
+		emit(ctx, a64_addsub_imm(1, !add, 0, A64_SP, A64_SP, (unsigned int)lo, 0));
+}
+
+/**
 	Works out where every register of a function lives, and how big its frame is.
 
 	The saved frame pointer and link register take the first sixteen bytes, so homes start above
@@ -352,8 +396,26 @@ static int layout( jit_ctx *ctx, hl_function *f ) {
 		at += size;
 	}
 
+	/**
+		Room for the trap contexts, one per OTrap in the function.
+
+		Each is over three hundred bytes, so they are counted rather than assumed. Reusing a slot
+		across iterations is safe because a trap is entered and left within the same stretch of
+		execution: a loop containing a try reaches the same OTrap only after the OEndTrap that closed
+		the last one.
+	*/
+	at = (at + 15) & ~15;
+	ctx->trap_off = at;
+	ctx->ntraps = 0;
+
+	for(i=0;i<f->nops;i++)
+		if( f->ops[i].op == OTrap )
+			ctx->ntraps++;
+
+	at += ctx->ntraps * (int)sizeof(hl_trap_ctx);
+
 	ctx->frame = (at + 15) & ~15;
-	return ctx->frame <= 4095;
+	return ctx->frame <= 0xFFFFFF;
 }
 
 /**
@@ -370,7 +432,7 @@ static int prologue( jit_ctx *ctx, hl_function *f ) {
 	hl_type_fun *sig = f->type->fun;
 	int i, ints = 0, floats = 0;
 
-	emit(ctx, a64_sub_imm(1, A64_SP, A64_SP, (unsigned int)ctx->frame));
+	adjust_sp(ctx, ctx->frame, 0);
 	emit(ctx, a64_stp(1, A64_PAIR_OFF, A64_FP, A64_LR, A64_SP, 0));
 	emit(ctx, a64_mov_sp(1, A64_FP, A64_SP));
 
@@ -400,7 +462,7 @@ static int prologue( jit_ctx *ctx, hl_function *f ) {
 /** Closes the frame and returns. Emitted at every return rather than jumped to, since it is three instructions. */
 static void epilogue( jit_ctx *ctx ) {
 	emit(ctx, a64_ldp(1, A64_PAIR_OFF, A64_FP, A64_LR, A64_SP, 0));
-	emit(ctx, a64_add_imm(1, A64_SP, A64_SP, (unsigned int)ctx->frame));
+	adjust_sp(ctx, ctx->frame, 1);
 	emit(ctx, a64_ret(A64_LR));
 }
 
@@ -763,7 +825,7 @@ static void *get_helper( hl_type *t ) {
 	one of the quieter reasons for keeping every register in memory.
 */
 static void emit_addr_of( jit_ctx *ctx, int r, int into ) {
-	emit(ctx, a64_add_imm(1, into, A64_FP, (unsigned int)ctx->regs[r].offset));
+	emit_fp_offset(ctx, ctx->regs[r].offset, into);
 }
 
 /**
@@ -1155,6 +1217,57 @@ static int compile_op( jit_ctx *ctx, hl_function *f, hl_opcode *op, int index ) 
 			store_reg(ctx, op->p1, S0);
 			return 1;
 
+		/**
+			Entering a try.
+
+			The context goes on the frame, is linked into the thread's chain of them, and setjmp
+			marks the place. Coming back through it a second time is a throw arriving, and then the
+			exception is read out of the thread and control goes to the handler.
+
+			The thread is asked for twice on purpose. A longjmp restores the callee-saved registers
+			and nothing else, so anything held in a scratch register across setjmp is gone by the time
+			the second return happens, and reusing it would read whatever the throwing code left
+			there.
+		*/
+		case OTrap: {
+			int off = ctx->trap_off + ctx->trap_at * (int)sizeof(hl_trap_ctx);
+			int cont;
+
+			ctx->trap_at++;
+
+			emit_call(ctx, (void *)(size_t)&hl_get_thread);
+			emit(ctx, a64_mov_reg(1, S2, 0));
+			emit_fp_offset(ctx, off, S1);
+
+			emit(ctx, a64_str_imm(A64_X, A64_ZR, S1, (unsigned int)(offsetof(hl_trap_ctx, tcheck) / 8)));
+			emit(ctx, a64_ldr_imm(A64_X, S0, S2, (unsigned int)(offsetof(hl_thread_info, trap_current) / 8)));
+			emit(ctx, a64_str_imm(A64_X, S0, S1, (unsigned int)(offsetof(hl_trap_ctx, prev) / 8)));
+			emit(ctx, a64_str_imm(A64_X, S1, S2, (unsigned int)(offsetof(hl_thread_info, trap_current) / 8)));
+
+			/** The buffer is the first thing in the context, so its address is the context's. */
+			emit(ctx, a64_mov_reg(1, 0, S1));
+			emit_call(ctx, (void *)(size_t)&setjmp);
+
+			cont = ctx->len;
+			emit(ctx, a64_cbz(0, 0, 0));
+
+			emit_call(ctx, (void *)(size_t)&hl_get_thread);
+			emit(ctx, a64_ldr_imm(A64_X, S0, 0, (unsigned int)(offsetof(hl_thread_info, exc_value) / 8)));
+			store_reg(ctx, op->p1, S0);
+			emit_jump(ctx, a64_b(0), index + 1 + op->p2);
+
+			ctx->buf[cont] = a64_cbz(0, 0, ctx->len - cont);
+			return 1;
+		}
+
+		/** Leaving a try, which is unlinking the context the matching OTrap put in the chain. */
+		case OEndTrap:
+			emit_call(ctx, (void *)(size_t)&hl_get_thread);
+			emit(ctx, a64_ldr_imm(A64_X, S0, 0, (unsigned int)(offsetof(hl_thread_info, trap_current) / 8)));
+			emit(ctx, a64_ldr_imm(A64_X, S0, S0, (unsigned int)(offsetof(hl_trap_ctx, prev) / 8)));
+			emit(ctx, a64_str_imm(A64_X, S0, 0, (unsigned int)(offsetof(hl_thread_info, trap_current) / 8)));
+			return 1;
+
 		/** Both leave through the runtime and neither comes back, so nothing follows them. */
 		case OThrow:
 			load_reg(ctx, op->p1, 0);
@@ -1426,6 +1539,7 @@ int hl_jit_function( jit_ctx *ctx, hl_module *m, hl_function *f ) {
 	}
 
 	ctx->njumps = 0;
+	ctx->trap_at = 0;
 
 	if( !prologue(ctx, f) )
 		return -1;

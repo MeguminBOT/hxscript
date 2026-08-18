@@ -145,6 +145,13 @@ static int build_module( fndef *defs, int n, void **out ) {
 	return 1;
 }
 
+/** No frames, because nothing here is testing what a stack trace says. */
+static int no_stack( void **stack, int size ) {
+	(void)stack;
+	(void)size;
+	return 0;
+}
+
 static void report( const char *what, long long got, long long want ) {
 	if( got == want ) {
 		printf("  %-42s %lld\n", what, got);
@@ -176,7 +183,24 @@ static void signature( hl_type *out, hl_type_fun *fun, hl_type **args, int nargs
 }
 
 int main( void ) {
+	int stack_top = 0;
+
 	hl_global_init();
+
+	/**
+		Registering the thread is what gives hl_get_thread something to answer with, and the traps
+		read the answer. Without it the first OTrap dereferences null, which is a real program's
+		mistake as much as a test's: hlc_main.c does this on its second line.
+	*/
+	hl_register_thread(&stack_top);
+
+	/**
+		hl_throw asks hl_setup.capture_stack for a trace and does not check whether there is one, and
+		what normally puts it there is hl_module_init. Nothing here loads a module, so it is supplied
+		instead. A real program always has one; a hand built function does not, and the difference
+		reads as a crash inside the jit rather than as the missing hook it is.
+	*/
+	hl_setup.capture_stack = no_stack;
 
 	memset(&code, 0, sizeof(code));
 	memset(&m, 0, sizeof(m));
@@ -832,6 +856,94 @@ int main( void ) {
 
 		report("a closure with no receiver", call == NULL ? -1 : call(&bare), 42);
 		report("a closure carrying one", call == NULL ? -1 : call(&bound), 42);
+	}
+
+	{
+		/**
+			A throw caught by the function that armed the trap, which is the only way to check either
+			half: a throw that is not caught cannot be observed, and a trap that catches nothing has
+			not been shown to work.
+
+			  try { throw box(n) } catch( e ) { return unbox(e) }
+		*/
+		hl_type sig;
+		hl_type_fun fun;
+		hl_type *args[1];
+		hl_type *regs[4];
+		hl_opcode ops[6];
+		int (*f)( int );
+
+		args[0] = &hlt_i32;
+		signature(&sig, &fun, args, 1, &hlt_i32);
+		regs[0] = &hlt_i32;
+		regs[1] = &hlt_dyn;
+		regs[2] = &hlt_dyn;
+		regs[3] = &hlt_i32;
+
+		memset(ops, 0, sizeof(ops));
+		ops[0].op = OTrap;     ops[0].p1 = 1; ops[0].p2 = 3;
+		ops[1].op = OToDyn;    ops[1].p1 = 2; ops[1].p2 = 0;
+		ops[2].op = OThrow;    ops[2].p1 = 2;
+		ops[3].op = OEndTrap;  ops[3].p1 = 0;
+		ops[4].op = OSafeCast; ops[4].p1 = 3; ops[4].p2 = 1;
+		ops[5].op = ORet;      ops[5].p1 = 3;
+
+		f = (int (*)( int ))build(&sig, regs, 4, ops, 6);
+		report("a throw caught where it was armed", f == NULL ? -1 : f(42), 42);
+		report("and again, so the frame is reusable", f == NULL ? -1 : f(7), 7);
+	}
+
+	{
+		/**
+			A try that throws nothing, and then a throw from outside it.
+
+			The second half is the point. If OEndTrap did not unlink the context, the throw below
+			would land in a frame that has already returned instead of in the handler here, which is
+			a crash rather than a wrong answer.
+		*/
+		hl_type sig;
+		hl_type_fun fun;
+		hl_type *args[1];
+		hl_type *regs[4];
+		hl_opcode ops[5];
+		int (*quiet)( int );
+		hl_trap_ctx trap;
+		vdynamic *exc = NULL;
+		vdynamic *thrown;
+		int caught = 0;
+
+		args[0] = &hlt_i32;
+		signature(&sig, &fun, args, 1, &hlt_i32);
+		regs[0] = &hlt_i32;
+		regs[1] = &hlt_dyn;
+		regs[2] = &hlt_dyn;
+		regs[3] = &hlt_i32;
+
+		memset(ops, 0, sizeof(ops));
+		ops[0].op = OTrap;     ops[0].p1 = 1; ops[0].p2 = 2;
+		ops[1].op = OEndTrap;  ops[1].p1 = 0;
+		ops[2].op = ORet;      ops[2].p1 = 0;
+		ops[3].op = OSafeCast; ops[3].p1 = 3; ops[3].p2 = 1;
+		ops[4].op = ORet;      ops[4].p1 = 3;
+
+		quiet = (int (*)( int ))build(&sig, regs, 4, ops, 5);
+		report("a try that throws nothing", quiet == NULL ? -1 : quiet(42), 42);
+
+		thrown = hl_alloc_dynamic(&hlt_i32);
+		thrown->v.i = 42;
+
+		hl_trap(trap, exc, on_catch);
+		if( quiet != NULL )
+			quiet(1);
+		hl_throw(thrown);
+		goto after;
+
+	on_catch:
+		caught = exc != NULL && exc->v.i == 42;
+
+	after:
+		hl_endtrap(trap);
+		report("a later throw reaches this frame, not the closed one", caught, 1);
 	}
 
 	{

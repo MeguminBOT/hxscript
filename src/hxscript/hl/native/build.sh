@@ -75,11 +75,13 @@ fi
 # missing on a machine that could have had it.
 PROBED=$($CC -E "$HERE/hxs_arch_probe.c" 2>/dev/null | grep -a '^hxs_arch ' | tail -1)
 ARCH=$(printf '%s' "$PROBED" | awk -F'"' '{print $2}')
-ARCH_JIT=$(printf '%s' "$PROBED" | awk '{print $NF}')
+ARCH_JIT=$(printf '%s' "$PROBED" | awk '{print $3}')
+ARCH_BACKEND=$(printf '%s' "$PROBED" | awk -F'"' '{print $4}')
 
 if [ -z "$ARCH" ]; then
 	ARCH="unknown"
 	ARCH_JIT=1
+	ARCH_BACKEND="vendor"
 fi
 
 note "compiler: $CC"
@@ -134,6 +136,11 @@ elif [ -n "$SRC" ]; then
 	# a question that can go wrong.
 	ANY_VERSION="-DHXS_HL_ANY_VERSION"
 	note "loader: $SRC (given)"
+elif [ "$ARCH_BACKEND" = "arm64" ]; then
+	# code.c reads a module and module.c links it, and neither has an architecture in it, so both are
+	# shared with the x86-64 build. Only jit.c is replaced, because only jit.c is an x86 encoder.
+	LOADER="$VENDOR/hl116/code.c $VENDOR/hl116/module.c $HERE/arm64/jit_arm64.c $HERE/arm64/exec.c"
+	note "loader: carried hashlink 1.16, with this library's own AArch64 jit"
 else
 	LOADER="$VENDOR/hl116/code.c $VENDOR/hl116/module.c $VENDOR/hl116/jit.c"
 	note "loader: carried hashlink 1.16"
@@ -141,7 +148,7 @@ fi
 
 # --- what to compile with -------------------------------------------------------------------------
 
-CFLAGS="-O3 -std=c11 -fvisibility=hidden -DHXS_NATIVE_TABLE $ANY_VERSION -include $VENDOR/hxs_vendor.h -I $INC -I $LOADER_INC"
+CFLAGS="-O3 -std=c11 -fvisibility=hidden -DHXS_NATIVE_TABLE $ANY_VERSION -include $VENDOR/hxs_vendor.h -I $INC -I $LOADER_INC -I $HERE/arm64"
 SOURCES="$HERE/hxs.c"
 
 # -DHXS_NO_JIT is what was asked for rather than what was worked out, so a module built on an
@@ -157,7 +164,9 @@ fi
 if [ "$WINDOWS" = "1" ]; then
 	LINK="-L $HL -lhl"
 else
-	LINK="-L $HL -L $HL/lib -lhl"
+	# The AArch64 jit calls fmod for the remainder of two floats, which is what hashlink's own jit
+	# does on x86 as well, so libm is not optional wherever that backend is compiled in.
+	LINK="-L $HL -L $HL/lib -lhl -lm"
 fi
 
 if [ "$FLAGS_ONLY" = "1" ]; then
