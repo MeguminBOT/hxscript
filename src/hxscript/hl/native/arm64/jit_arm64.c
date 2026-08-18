@@ -41,6 +41,7 @@
 #include <hl.h>
 #include <hlmodule.h>
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -87,6 +88,28 @@ struct _jit_ctx {
 
 	/** Its frame size in bytes, a multiple of 16 because the stack pointer must stay so aligned. */
 	int frame;
+
+	/**
+		Where each of its opcodes begins, as an index into buf.
+
+		A jump in HashLink's bytecode names its destination as a count of opcodes, and where those
+		opcodes ended up is only known once they have all been compiled. So this is filled in as they
+		are, and the jumps are patched afterwards against it.
+	*/
+	int *op_pos;
+	int cap_ops;
+
+	/** Jumps waiting for their destination to be known. */
+	struct {
+		/** Which instruction in buf is the branch. */
+		int at;
+
+		/** Which opcode it goes to. */
+		int target;
+	} *jumps;
+
+	int njumps;
+	int cap_jumps;
 };
 
 /** @return Whether there is room for that many more instructions, growing the buffer if not. */
@@ -118,6 +141,72 @@ static void emit( jit_ctx *ctx, a64_insn w ) {
 		return;
 
 	ctx->buf[ctx->len++] = w;
+}
+
+/** @return Whether there is room for one more jump to patch, growing the list if not. */
+static int room_jump( jit_ctx *ctx ) {
+	int cap;
+	void *grown;
+
+	if( ctx->njumps < ctx->cap_jumps )
+		return 1;
+
+	cap = ctx->cap_jumps ? ctx->cap_jumps * 2 : 64;
+	grown = realloc(ctx->jumps, sizeof(*ctx->jumps) * (size_t)cap);
+
+	if( grown == NULL ) {
+		ctx->failed = 1;
+		return 0;
+	}
+
+	ctx->jumps = grown;
+	ctx->cap_jumps = cap;
+	return 1;
+}
+
+/**
+	Emits a branch whose destination is not known yet and remembers to come back to it.
+
+	@param w The branch, with a zero offset in it.
+	@param target The opcode it goes to.
+*/
+static void emit_jump( jit_ctx *ctx, a64_insn w, int target ) {
+	if( !room_jump(ctx) )
+		return;
+
+	ctx->jumps[ctx->njumps].at = ctx->len;
+	ctx->jumps[ctx->njumps].target = target;
+	ctx->njumps++;
+
+	emit(ctx, w);
+}
+
+/**
+	Fills in every branch now that every opcode has a position.
+
+	The offset a branch carries is in instructions rather than bytes, and it is measured from the
+	branch itself, which is what makes patching a rewrite of one field rather than a recalculation of
+	anything around it.
+*/
+static void patch_jumps( jit_ctx *ctx ) {
+	int i;
+
+	for(i=0;i<ctx->njumps;i++) {
+		int at = ctx->jumps[i].at;
+		int to = ctx->op_pos[ctx->jumps[i].target];
+		int off = to - at;
+		a64_insn w = ctx->buf[at];
+
+		/**
+			Which field the offset goes in depends on the branch. An unconditional one carries 26
+			bits at the bottom of the word and a conditional one carries 19 starting five bits up,
+			and they are told apart by the opcode bits that are already there.
+		*/
+		if( (w & 0xFC000000u) == ((a64_insn)5 << 26) )
+			ctx->buf[at] = a64_b(off);
+		else
+			ctx->buf[at] = (w & ~(0x7FFFFu << 5)) | (((a64_insn)off & 0x7FFFF) << 5);
+	}
 }
 
 /** @return Whether a type is held in the floating point bank. */
@@ -289,19 +378,311 @@ static void epilogue( jit_ctx *ctx ) {
 }
 
 /**
+	The registers everything here computes in.
+
+	x16 and x17 are the platform's intra-procedure-call scratch, which no ABI expects preserved, and
+	x15 is an ordinary caller-saved temporary. The floating point bank uses the same three numbers:
+	d16 and d17 are caller-saved there too, so one pair of names covers both banks and load_reg picks
+	which by the type of what it is loading.
+*/
+#define S0	A64_IP0
+#define S1	A64_IP1
+#define S2	15
+
+/** @return Whether a register is held in 64 bits rather than 32. */
+static int wide( jit_ctx *ctx, int r ) {
+	return ctx->regs[r].size == 8;
+}
+
+/** @return Which precision a floating point register holds. */
+static int fp_type( jit_ctx *ctx, int r ) {
+	return ctx->regs[r].size == 8 ? A64_F64 : A64_F32;
+}
+
+/** Puts a 64 bit constant in a register, which is how an address that must survive a copy gets there. */
+static void emit_imm64( jit_ctx *ctx, int rd, unsigned long long v ) {
+	emit(ctx, a64_movz(1, rd, (unsigned int)(v & 0xFFFF), A64_HW0));
+	emit(ctx, a64_movk(1, rd, (unsigned int)((v >> 16) & 0xFFFF), A64_HW16));
+	emit(ctx, a64_movk(1, rd, (unsigned int)((v >> 32) & 0xFFFF), A64_HW32));
+	emit(ctx, a64_movk(1, rd, (unsigned int)((v >> 48) & 0xFFFF), A64_HW48));
+}
+
+/**
+	Calls a C function, with the arguments already in place.
+
+	The address is built out of movz and movk rather than reached by a relative branch, because the
+	buffer is assembled in one place and copied somewhere else before it runs, so a relative offset
+	computed here would point at whatever now sits at that distance from there.
+*/
+static void emit_call( jit_ctx *ctx, void *fn ) {
+	emit_imm64(ctx, S0, (unsigned long long)(size_t)fn);
+	emit(ctx, a64_blr(S0));
+}
+
+/**
+	Puts a floating point constant in a register.
+
+	Through the general bank and across, rather than out of a pool of constants next to the code.
+	A pool would be one load instead of five instructions, and it would have to be found by an
+	address this cannot know until hl_jit_code has copied the buffer somewhere executable.
+*/
+static void emit_float( jit_ctx *ctx, int r, double v ) {
+	if( ctx->regs[r].size == 8 ) {
+		unsigned long long bits;
+		memcpy(&bits, &v, sizeof(bits));
+
+		emit_imm64(ctx, S0, bits);
+		emit(ctx, a64_fmov_from_gpr(1, A64_F64, S0, S0));
+	} else {
+		float single = (float)v;
+		unsigned int bits;
+		memcpy(&bits, &single, sizeof(bits));
+
+		emit_imm32(ctx, S0, (int)bits);
+		emit(ctx, a64_fmov_from_gpr(0, A64_F32, S0, S0));
+	}
+
+	store_reg(ctx, r, S0);
+}
+
+/**
+	Compiles one arithmetic or bitwise instruction.
+
+	@return Whether it is one this knows.
+*/
+static int arith( jit_ctx *ctx, hl_opcode *op ) {
+	int d = op->p1;
+	int w = wide(ctx, d);
+
+	if( ctx->regs[d].is_float ) {
+		int t = fp_type(ctx, d);
+
+		/**
+			The remainder of two floats is a call, on every architecture. hashlink's own jit calls
+			fmod here too, so this is the same answer arrived at the same way rather than a
+			shortcut.
+		*/
+		if( op->op == OSMod ) {
+			load_reg(ctx, op->p2, 0);
+			load_reg(ctx, op->p3, 1);
+			emit_call(ctx, t == A64_F64 ? (void *)(size_t)&fmod : (void *)(size_t)&fmodf);
+			store_reg(ctx, d, 0);
+			return 1;
+		}
+
+		load_reg(ctx, op->p2, S0);
+		load_reg(ctx, op->p3, S1);
+
+		switch( op->op ) {
+			case OAdd:  emit(ctx, a64_fadd(t, S0, S0, S1)); break;
+			case OSub:  emit(ctx, a64_fsub(t, S0, S0, S1)); break;
+			case OMul:  emit(ctx, a64_fmul(t, S0, S0, S1)); break;
+			case OSDiv: emit(ctx, a64_fdiv(t, S0, S0, S1)); break;
+			default: return 0;
+		}
+
+		store_reg(ctx, d, S0);
+		return 1;
+	}
+
+	load_reg(ctx, op->p2, S0);
+	load_reg(ctx, op->p3, S1);
+
+	switch( op->op ) {
+		case OAdd:  emit(ctx, a64_add_reg(w, S0, S0, S1)); break;
+		case OSub:  emit(ctx, a64_sub_reg(w, S0, S0, S1)); break;
+		case OMul:  emit(ctx, a64_mul(w, S0, S0, S1)); break;
+		case OSDiv: emit(ctx, a64_sdiv(w, S0, S0, S1)); break;
+		case OAnd:  emit(ctx, a64_and_reg(w, S0, S0, S1)); break;
+		case OOr:   emit(ctx, a64_orr_reg(w, S0, S0, S1)); break;
+		case OXor:  emit(ctx, a64_eor_reg(w, S0, S0, S1)); break;
+		case OShl:  emit(ctx, a64_shift_reg(w, A64_SHIFT_LSLV, S0, S0, S1)); break;
+		case OSShr: emit(ctx, a64_shift_reg(w, A64_SHIFT_ASRV, S0, S0, S1)); break;
+		case OUShr: emit(ctx, a64_shift_reg(w, A64_SHIFT_LSRV, S0, S0, S1)); break;
+
+		/**
+			Division answers what HashLink means by it without any help: sdiv gives 0 for a divide by
+			zero, which is what the bytecode says, and INT_MIN divided by -1 wraps to INT_MIN, which
+			is what its own jit produces by multiplying instead. The remainder needs one correction,
+			since a % 0 comes out as a here and HashLink says 0. Done with a select rather than a
+			branch, so the common path has nothing to predict.
+		*/
+		case OSMod:
+			emit(ctx, a64_sdiv(w, S2, S0, S1));
+			emit(ctx, a64_msub(w, S0, S2, S1, S0));
+			emit(ctx, a64_cmp_imm(w, S1, 0));
+			emit(ctx, a64_csel(w, S0, A64_ZR, S0, A64_EQ));
+			break;
+
+		default: return 0;
+	}
+
+	store_reg(ctx, d, S0);
+	return 1;
+}
+
+/**
+	Compiles a comparison that is also a jump, which is the only kind HashLink has.
+
+	There is no instruction here that turns a comparison into a boolean either, so the two sides
+	agree about that and a condition is control flow on both.
+
+	@param index Which opcode this is, since a jump is measured from the one after it.
+	@return Whether it is one this knows.
+*/
+static int compare_jump( jit_ctx *ctx, hl_opcode *op, int index ) {
+	int target = index + 1 + op->p3;
+	int cond;
+
+	load_reg(ctx, op->p1, S0);
+	load_reg(ctx, op->p2, S1);
+
+	if( ctx->regs[op->p1].is_float ) {
+		emit(ctx, a64_fcmp(fp_type(ctx, op->p1), S0, S1));
+
+		/**
+			MI and LS rather than LT and LE, which is what makes a comparison against NaN answer
+			false instead of true: an unordered result sets the carry, and LT reads that as less
+			than where MI does not.
+		*/
+		switch( op->op ) {
+			case OJSLt:   cond = A64_MI; break;
+			case OJSGte:  cond = A64_GE; break;
+			case OJSGt:   cond = A64_GT; break;
+			case OJSLte:  cond = A64_LS; break;
+			case OJEq:    cond = A64_EQ; break;
+			case OJNotEq: cond = A64_NE; break;
+			default: return 0;
+		}
+	} else {
+		emit(ctx, a64_cmp_reg(wide(ctx, op->p1), S0, S1));
+
+		switch( op->op ) {
+			case OJSLt:   cond = A64_LT; break;
+			case OJSGte:  cond = A64_GE; break;
+			case OJSGt:   cond = A64_GT; break;
+			case OJSLte:  cond = A64_LE; break;
+			case OJEq:    cond = A64_EQ; break;
+			case OJNotEq: cond = A64_NE; break;
+			default: return 0;
+		}
+	}
+
+	emit_jump(ctx, a64_bcond(cond, 0), target);
+	return 1;
+}
+
+/**
 	Compiles one instruction.
 
+	@param index Which opcode this is, since a jump is measured in opcodes from the one after it.
 	@return Whether it was compiled. False means this jit does not know the opcode yet, which fails
 	        the whole module and leaves it to be interpreted.
 */
-static int compile_op( jit_ctx *ctx, hl_function *f, hl_opcode *op ) {
+static int compile_op( jit_ctx *ctx, hl_function *f, hl_opcode *op, int index ) {
 	(void)f;
 
 	switch( op->op ) {
-		case OInt:
-			emit_imm32(ctx, A64_IP0, ctx->m->code->ints[op->p2]);
-			store_reg(ctx, op->p1, A64_IP0);
+		case OMov:
+			load_reg(ctx, op->p2, S0);
+			store_reg(ctx, op->p1, S0);
 			return 1;
+
+		case OInt:
+			emit_imm32(ctx, S0, ctx->m->code->ints[op->p2]);
+			store_reg(ctx, op->p1, S0);
+			return 1;
+
+		case OFloat:
+			emit_float(ctx, op->p1, ctx->m->code->floats[op->p2]);
+			return 1;
+
+		case OBool:
+			emit_imm32(ctx, S0, op->p2 ? 1 : 0);
+			store_reg(ctx, op->p1, S0);
+			return 1;
+
+		case ONull:
+			emit(ctx, a64_mov_reg(1, S0, A64_ZR));
+			store_reg(ctx, op->p1, S0);
+			return 1;
+
+		/** A marker for where a jump lands, which is bookkeeping rather than work. */
+		case OLabel:
+		case ONop:
+			return 1;
+
+		case OAdd:
+		case OSub:
+		case OMul:
+		case OSDiv:
+		case OSMod:
+		case OShl:
+		case OSShr:
+		case OUShr:
+		case OAnd:
+		case OOr:
+		case OXor:
+			return arith(ctx, op);
+
+		case ONeg:
+			load_reg(ctx, op->p2, S0);
+
+			if( ctx->regs[op->p1].is_float )
+				emit(ctx, a64_fneg(fp_type(ctx, op->p1), S0, S0));
+			else
+				emit(ctx, a64_neg(wide(ctx, op->p1), S0, S0));
+
+			store_reg(ctx, op->p1, S0);
+			return 1;
+
+		/** Logical rather than bitwise: HashLink's ONot is on a Bool, so it answers 1 or 0. */
+		case ONot:
+			load_reg(ctx, op->p2, S0);
+			emit(ctx, a64_cmp_imm(wide(ctx, op->p2), S0, 0));
+			emit(ctx, a64_cset(wide(ctx, op->p1), S0, A64_EQ));
+			store_reg(ctx, op->p1, S0);
+			return 1;
+
+		case OIncr:
+		case ODecr:
+			load_reg(ctx, op->p1, S0);
+
+			if( op->op == OIncr )
+				emit(ctx, a64_add_imm(wide(ctx, op->p1), S0, S0, 1));
+			else
+				emit(ctx, a64_sub_imm(wide(ctx, op->p1), S0, S0, 1));
+
+			store_reg(ctx, op->p1, S0);
+			return 1;
+
+		case OJAlways:
+			emit_jump(ctx, a64_b(0), index + 1 + op->p1);
+			return 1;
+
+		/**
+			A test against zero, which is one instruction rather than a compare and a branch. Null
+			and false are both zero here, so the same pair covers all four.
+		*/
+		case OJTrue:
+		case OJNotNull:
+			load_reg(ctx, op->p1, S0);
+			emit_jump(ctx, a64_cbnz(wide(ctx, op->p1), S0, 0), index + 1 + op->p2);
+			return 1;
+
+		case OJFalse:
+		case OJNull:
+			load_reg(ctx, op->p1, S0);
+			emit_jump(ctx, a64_cbz(wide(ctx, op->p1), S0, 0), index + 1 + op->p2);
+			return 1;
+
+		case OJSLt:
+		case OJSGte:
+		case OJSGt:
+		case OJSLte:
+		case OJEq:
+		case OJNotEq:
+			return compare_jump(ctx, op, index);
 
 		case ORet:
 			if( ctx->regs[op->p1].size != 0 )
@@ -331,6 +712,8 @@ void hl_jit_free( jit_ctx *ctx, h_bool can_reset ) {
 	if( !can_reset ) {
 		free(ctx->buf);
 		free(ctx->regs);
+		free(ctx->op_pos);
+		free(ctx->jumps);
 		free(ctx);
 	}
 }
@@ -362,13 +745,36 @@ int hl_jit_function( jit_ctx *ctx, hl_module *m, hl_function *f ) {
 	if( !layout(ctx, f) )
 		return -1;
 
+	/**
+		One more than there are opcodes, because a jump may name the position after the last one and
+		that is a place the bytecode is allowed to point at.
+	*/
+	if( f->nops + 1 > ctx->cap_ops ) {
+		int *grown = (int *)realloc(ctx->op_pos, sizeof(int) * (size_t)(f->nops + 1));
+
+		if( grown == NULL ) {
+			ctx->failed = 1;
+			return -1;
+		}
+
+		ctx->op_pos = grown;
+		ctx->cap_ops = f->nops + 1;
+	}
+
+	ctx->njumps = 0;
+
 	if( !prologue(ctx, f) )
 		return -1;
 
 	for(i=0;i<f->nops;i++) {
-		if( !compile_op(ctx, f, f->ops + i) )
+		ctx->op_pos[i] = ctx->len;
+
+		if( !compile_op(ctx, f, f->ops + i, i) )
 			return -1;
 	}
+
+	ctx->op_pos[f->nops] = ctx->len;
+	patch_jumps(ctx);
 
 	/**
 		A function that runs off its end is one whose last instruction was not a return, which
