@@ -129,6 +129,9 @@ struct _jit_ctx {
 
 		/** Which function, by the index the bytecode calls it. */
 		int findex;
+
+		/** Which register it is built in, since a closure wants it as an argument rather than a target. */
+		int reg;
 	} *calls;
 
 	int ncalls;
@@ -560,6 +563,7 @@ static int emit_hl_call( jit_ctx *ctx, int dst, int findex, int *args, int nargs
 
 		ctx->calls[ctx->ncalls].at = ctx->len;
 		ctx->calls[ctx->ncalls].findex = findex;
+		ctx->calls[ctx->ncalls].reg = S0;
 		ctx->ncalls++;
 
 		/** Four words of nothing in particular, rewritten once the address exists. */
@@ -620,6 +624,84 @@ static int mem_access( jit_ctx *ctx, int base, int off, int r, int into, int sto
 	else
 		emit(ctx, store ? a64_str_imm(width, into, base, scaled) : a64_ldr_imm(width, into, base, scaled));
 
+	return 1;
+}
+
+/**
+	@return Whether the runtime's dynamic helpers for this kind take the destination type.
+
+	hl_dyn_getd and hl_dyn_castd and their float and 64 bit relatives already know what they are
+	producing from the function that was chosen, so they take two arguments where the others take
+	three. Getting that wrong passes a type pointer as nothing in particular.
+*/
+static int helper_is_short( hl_type *t ) {
+	return t->kind == HF32 || t->kind == HF64 || t->kind == HI64 || t->kind == HGUID;
+}
+
+/** @return The runtime's cast for this destination kind. */
+static void *cast_helper( hl_type *t ) {
+	switch( t->kind ) {
+		case HF32: return (void *)(size_t)&hl_dyn_castf;
+		case HF64: return (void *)(size_t)&hl_dyn_castd;
+		case HI64:
+		case HGUID: return (void *)(size_t)&hl_dyn_casti64;
+		case HI32:
+		case HUI16:
+		case HUI8:
+		case HBOOL: return (void *)(size_t)&hl_dyn_casti;
+		default: return (void *)(size_t)&hl_dyn_castp;
+	}
+}
+
+/** @return The runtime's dynamic field read for this destination kind. */
+static void *get_helper( hl_type *t ) {
+	switch( t->kind ) {
+		case HF32: return (void *)(size_t)&hl_dyn_getf;
+		case HF64: return (void *)(size_t)&hl_dyn_getd;
+		case HI64:
+		case HGUID: return (void *)(size_t)&hl_dyn_geti64;
+		case HI32:
+		case HUI16:
+		case HUI8:
+		case HBOOL: return (void *)(size_t)&hl_dyn_geti;
+		default: return (void *)(size_t)&hl_dyn_getp;
+	}
+}
+
+/**
+	Puts the address of one of the function's registers in a machine register.
+
+	Several of the runtime's entry points take a pointer to a value rather than the value, because
+	they have to read it as whatever its type says. The home in the frame is that pointer, which is
+	one of the quieter reasons for keeping every register in memory.
+*/
+static void emit_addr_of( jit_ctx *ctx, int r, int into ) {
+	emit(ctx, a64_add_imm(1, into, A64_FP, (unsigned int)ctx->regs[r].offset));
+}
+
+/**
+	Builds the address of a function into a register, for something that wants it as a value.
+
+	A native has one already. Anything else joins the list that hl_jit_code rewrites, exactly as a
+	call does, since the two are the same problem: an address that does not exist yet.
+
+	@return Whether it could be arranged.
+*/
+static int emit_func_addr( jit_ctx *ctx, int findex, int into ) {
+	if( is_native(ctx, findex) ) {
+		emit_imm64(ctx, into, (unsigned long long)(size_t)ctx->m->functions_ptrs[findex]);
+		return 1;
+	}
+
+	if( !room_call(ctx) )
+		return 0;
+
+	ctx->calls[ctx->ncalls].at = ctx->len;
+	ctx->calls[ctx->ncalls].findex = findex;
+	ctx->calls[ctx->ncalls].reg = into;
+	ctx->ncalls++;
+
+	emit_imm64(ctx, into, 0);
 	return 1;
 }
 
@@ -986,6 +1068,89 @@ static int compile_op( jit_ctx *ctx, hl_function *f, hl_opcode *op, int index ) 
 			store_reg(ctx, op->p1, S0);
 			return 1;
 
+		/** Both leave through the runtime and neither comes back, so nothing follows them. */
+		case OThrow:
+			load_reg(ctx, op->p1, 0);
+			emit_call(ctx, (void *)(size_t)&hl_throw);
+			return 1;
+
+		case ORethrow:
+			load_reg(ctx, op->p1, 0);
+			emit_call(ctx, (void *)(size_t)&hl_rethrow);
+			return 1;
+
+		/**
+			Boxing, which reads the value through its home rather than out of a register, since what
+			the runtime does with it depends on the type it is told.
+
+			A null pointer boxes to null rather than to a dynamic holding null, which is what
+			hashlink's own jit arranges too, and the reason for the branch.
+		*/
+		case OToDyn: {
+			int at = -1;
+
+			if( hl_is_ptr(ctx->regs[op->p2].t) ) {
+				load_reg(ctx, op->p2, S1);
+				at = ctx->len;
+				emit(ctx, a64_cbnz(1, S1, 0));
+				emit(ctx, a64_mov_reg(1, 0, A64_ZR));
+			}
+
+			if( at >= 0 ) {
+				int over = ctx->len;
+				emit(ctx, a64_b(0));
+				ctx->buf[at] = a64_cbnz(1, S1, ctx->len - at);
+
+				emit_addr_of(ctx, op->p2, 0);
+				emit_imm64(ctx, 1, (unsigned long long)(size_t)ctx->regs[op->p2].t);
+				emit_call(ctx, (void *)(size_t)&hl_make_dyn);
+
+				ctx->buf[over] = a64_b(ctx->len - over);
+			} else {
+				emit_addr_of(ctx, op->p2, 0);
+				emit_imm64(ctx, 1, (unsigned long long)(size_t)ctx->regs[op->p2].t);
+				emit_call(ctx, (void *)(size_t)&hl_make_dyn);
+			}
+
+			store_reg(ctx, op->p1, 0);
+			return 1;
+		}
+
+		case OSafeCast:
+			emit_addr_of(ctx, op->p2, 0);
+			emit_imm64(ctx, 1, (unsigned long long)(size_t)ctx->regs[op->p2].t);
+
+			if( !helper_is_short(ctx->regs[op->p1].t) )
+				emit_imm64(ctx, 2, (unsigned long long)(size_t)ctx->regs[op->p1].t);
+
+			emit_call(ctx, cast_helper(ctx->regs[op->p1].t));
+			store_reg(ctx, op->p1, 0);
+			return 1;
+
+		case ODynGet:
+			load_reg(ctx, op->p2, 0);
+			/** The string pool is utf-8, so this is hl_hash_utf8 and not the wide hl_hash_gen. */
+			emit_imm32(ctx, 1, hl_hash_utf8(ctx->m->code->strings[op->p3]));
+
+			if( !helper_is_short(ctx->regs[op->p1].t) )
+				emit_imm64(ctx, 2, (unsigned long long)(size_t)ctx->regs[op->p1].t);
+
+			emit_call(ctx, get_helper(ctx->regs[op->p1].t));
+			store_reg(ctx, op->p1, 0);
+			return 1;
+
+		/** A closure carrying its receiver, which the runtime allocates given the two and a type. */
+		case OInstanceClosure:
+			emit_imm64(ctx, 0, (unsigned long long)(size_t)ctx->m->ctx.functions_types[op->p2]);
+
+			if( !emit_func_addr(ctx, op->p2, 1) )
+				return 0;
+
+			load_reg(ctx, op->p3, 2);
+			emit_call(ctx, (void *)(size_t)&hl_alloc_closure_ptr);
+			store_reg(ctx, op->p1, 0);
+			return 1;
+
 		case OCall0:
 			return emit_hl_call(ctx, op->p1, op->p2, NULL, 0);
 
@@ -1162,10 +1327,12 @@ void *hl_jit_code( jit_ctx *ctx, hl_module *m, int *codesize, hl_debug_infos **d
 			+ (unsigned long long)(size_t)ctx->m->functions_ptrs[ctx->calls[i].findex];
 		int w = ctx->calls[i].at;
 
-		ctx->buf[w + 0] = a64_movz(1, S0, (unsigned int)(to & 0xFFFF), A64_HW0);
-		ctx->buf[w + 1] = a64_movk(1, S0, (unsigned int)((to >> 16) & 0xFFFF), A64_HW16);
-		ctx->buf[w + 2] = a64_movk(1, S0, (unsigned int)((to >> 32) & 0xFFFF), A64_HW32);
-		ctx->buf[w + 3] = a64_movk(1, S0, (unsigned int)((to >> 48) & 0xFFFF), A64_HW48);
+		int r = ctx->calls[i].reg;
+
+		ctx->buf[w + 0] = a64_movz(1, r, (unsigned int)(to & 0xFFFF), A64_HW0);
+		ctx->buf[w + 1] = a64_movk(1, r, (unsigned int)((to >> 16) & 0xFFFF), A64_HW16);
+		ctx->buf[w + 2] = a64_movk(1, r, (unsigned int)((to >> 32) & 0xFFFF), A64_HW32);
+		ctx->buf[w + 3] = a64_movk(1, r, (unsigned int)((to >> 48) & 0xFFFF), A64_HW48);
 	}
 
 	hxs_exec_unseal(at, bytes);

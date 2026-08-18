@@ -662,6 +662,49 @@ int main( void ) {
 
 	{
 		/**
+			Boxing and unboxing, which both go through the runtime because what they do depends on
+			the type they are told rather than on the instruction.
+		*/
+		hl_type box_sig, unbox_sig;
+		hl_type_fun box_fun, unbox_fun;
+		hl_type *box_args[1];
+		hl_type *unbox_args[1];
+		hl_type *box_regs[2];
+		hl_type *unbox_regs[2];
+		hl_opcode ops[2];
+		vdynamic *(*box)( int );
+		int (*unbox)( vdynamic * );
+		vdynamic *boxed;
+
+		box_args[0] = &hlt_i32;
+		signature(&box_sig, &box_fun, box_args, 1, &hlt_dyn);
+		box_regs[0] = &hlt_i32;
+		box_regs[1] = &hlt_dyn;
+
+		memset(ops, 0, sizeof(ops));
+		ops[0].op = OToDyn; ops[0].p1 = 1; ops[0].p2 = 0;
+		ops[1].op = ORet;   ops[1].p1 = 1;
+		box = (vdynamic *(*)( int ))build(&box_sig, box_regs, 2, ops, 2);
+
+		unbox_args[0] = &hlt_dyn;
+		signature(&unbox_sig, &unbox_fun, unbox_args, 1, &hlt_i32);
+		unbox_regs[0] = &hlt_dyn;
+		unbox_regs[1] = &hlt_i32;
+
+		memset(ops, 0, sizeof(ops));
+		ops[0].op = OSafeCast; ops[0].p1 = 1; ops[0].p2 = 0;
+		ops[1].op = ORet;      ops[1].p1 = 1;
+		unbox = (int (*)( vdynamic * ))build(&unbox_sig, unbox_regs, 2, ops, 2);
+
+		boxed = box == NULL ? NULL : box(42);
+
+		report("an int boxed, and what it holds", boxed == NULL ? -1 : boxed->v.i, 42);
+		report("and the type it says it is", boxed == NULL ? -1 : (int)boxed->t->kind, (int)HI32);
+		report("that box cast back to an int", unbox == NULL || boxed == NULL ? -1 : unbox(boxed), 42);
+	}
+
+	{
+		/**
 			An opcode this jit does not know, which has to be refused rather than guessed at.
 
 			OSwitch, because hxScript's emitter lowers a switch to a chain of comparisons and never
