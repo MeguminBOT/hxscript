@@ -193,9 +193,26 @@ static inline a64_insn a64_tst_reg( int is64, int rn, int rm ) {
 	return a64_logic_reg(is64, A64_LOGIC_ANDS, 0, A64_ZR, rn, rm, A64_LSL, 0);
 }
 
-/** Register to register move, which is ORR from the zero register. */
+/**
+	Register to register move, which is ORR from the zero register.
+
+	Not usable with the stack pointer, in either position. Register 31 means ZR in this encoding and
+	not SP, so `a64_mov_reg(1, rd, A64_SP)` is `mov rd, xzr`: it assembles, it runs, and it writes
+	zero. `a64_mov_sp` is the one that means the stack pointer.
+*/
 static inline a64_insn a64_mov_reg( int is64, int rd, int rm ) {
 	return a64_logic_reg(is64, A64_LOGIC_ORR, 0, rd, A64_ZR, rm, A64_LSL, 0);
+}
+
+/**
+	A move where either side may be the stack pointer, which is ADD of zero rather than ORR.
+
+	AArch64 spells register 31 as ZR in some encodings and as SP in others, and the add-immediate
+	form is one of the second kind. That is the whole of why `mov x29, sp` is a different instruction
+	from `mov x29, x0`, and why writing the obvious one silently zeroes the frame pointer.
+*/
+static inline a64_insn a64_mov_sp( int is64, int rd, int rn ) {
+	return a64_addsub_imm(is64, 0, 0, rd, rn, 0, 0);
 }
 
 /** Bitwise not, which is ORN from the zero register. */

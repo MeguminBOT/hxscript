@@ -53,6 +53,11 @@ check "the state it reports" "$(echo "$answered" | cut -d' ' -f1)" "1"
 check "the architecture it reports" "$(echo "$answered" | cut -d' ' -f2)" "2"
 
 echo
+echo "-- machine code this emitted, run on this machine --"
+gcc -O2 -Wall -I src/hxscript/hl/native/arm64 	test/hl/arm64/emit.c src/hxscript/hl/native/arm64/exec.c -o /tmp/emit
+/tmp/emit || fail=$((fail + 1))
+
+echo
 if [ "$fail" = "0" ]; then
 	echo "== everything checked passed =="
 else

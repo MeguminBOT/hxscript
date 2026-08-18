@@ -48,6 +48,17 @@ A64_CASE(a64_mov_reg(1, 0, 1),			"mov x0, x1")
 A64_CASE(a64_mov_reg(0, 19, 20),		"mov w19, w20")
 A64_CASE(a64_mvn(0, 2, 3),			"mvn w2, w3")
 A64_CASE(a64_mvn(1, 16, 17),			"mvn x16, x17")
+
+/**
+	The stack pointer, which is register 31 in an encoding where 31 does not mean the zero register.
+
+	mov x29, sp through the logical encoding is mov x29, xzr: it assembles, it runs, and it zeroes
+	the frame pointer. These are here because that cost an afternoon once.
+*/
+A64_CASE(a64_mov_sp(1, A64_FP, A64_SP),		"mov x29, sp")
+A64_CASE(a64_mov_sp(1, A64_SP, A64_FP),		"mov sp, x29")
+A64_CASE(a64_mov_sp(1, 0, A64_SP),		"mov x0, sp")
+A64_CASE(a64_mov_reg(1, A64_FP, A64_ZR),	"mov x29, xzr")
 A64_CASE(a64_logic_reg(1, A64_LOGIC_AND, 1, 0, 1, 2, A64_LSL, 0),	"bic x0, x1, x2")
 
 /** Shifts by a constant, and the extensions, which share one encoding. */
