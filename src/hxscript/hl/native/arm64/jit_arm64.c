@@ -2076,6 +2076,154 @@ static int compile_op( jit_ctx *ctx, hl_function *f, hl_opcode *op, int index ) 
 	}
 }
 
+/**
+	Entering compiled code from C, which the runtime cannot do by itself.
+
+	hl_dyn_call and everything built on it reach a function through hl_setup.static_call, handing over
+	the arguments as an array of pointers and a place to put the result. Turning that into a real call
+	means putting each argument in the register the ABI wants it in, and which register that is depends
+	on the signature, which is only known at run time.
+
+	So a small function is compiled for each signature the first time it is needed, and kept. It is the
+	same problem the rest of this file solves and it is solved the same way, which is the reason there
+	is no hand written assembly anywhere in here.
+
+	The trampoline is called as tramp(fun, args, out) and does:
+
+	    load each args[i] through its pointer into the register its type belongs in
+	    call fun
+	    store what came back into out
+
+	x16 holds the argument array while the argument registers are filled, because it is not one of
+	them, and the function pointer is kept in the frame because x0 stops being available the moment
+	the first argument goes in.
+*/
+typedef struct hxs_entry hxs_entry;
+
+struct hxs_entry {
+	hl_type *t;
+	void *code;
+	hxs_entry *next;
+};
+
+static hxs_entry *hxs_entries = NULL;
+
+/** @return A trampoline for that signature, compiling one if this is the first time it is asked for. */
+static void *hxs_entry_for( hl_type *t ) {
+	hxs_entry *e;
+	jit_ctx ctx;
+	hl_type_fun *fun = t->fun;
+	int i, ints = 0, floats = 0, frame = 32;
+	size_t bytes;
+	void *at;
+
+	for(e = hxs_entries; e; e = e->next)
+		if( e->t->fun->nargs == fun->nargs && e->t == t )
+			return e->code;
+
+	/** Signatures are compared by shape rather than by pointer, since two types can say the same. */
+	for(e = hxs_entries; e; e = e->next) {
+		hl_type_fun *o = e->t->fun;
+		int same = o->nargs == fun->nargs && o->ret->kind == fun->ret->kind;
+
+		for(i=0;same && i<fun->nargs;i++)
+			same = o->args[i]->kind == fun->args[i]->kind;
+
+		if( same )
+			return e->code;
+	}
+
+	memset(&ctx, 0, sizeof(ctx));
+
+	emit(&ctx, a64_sub_imm(1, A64_SP, A64_SP, (unsigned int)frame));
+	emit(&ctx, a64_stp(1, A64_PAIR_OFF, A64_FP, A64_LR, A64_SP, 0));
+	emit(&ctx, a64_mov_sp(1, A64_FP, A64_SP));
+
+	emit(&ctx, a64_str_imm(A64_X, 0, A64_FP, 2));
+	emit(&ctx, a64_str_imm(A64_X, 2, A64_FP, 3));
+	emit(&ctx, a64_mov_reg(1, S0, 1));
+
+	for(i=0;i<fun->nargs;i++) {
+		hl_type *a = fun->args[i];
+		int size = hl_type_size(a);
+		int isf = a->kind == HF32 || a->kind == HF64;
+
+		if( size == 0 )
+			continue;
+
+		if( (isf ? floats : ints) > 7 ) {
+			ctx.failed = 1;
+			break;
+		}
+
+		emit(&ctx, a64_ldr_imm(A64_X, S1, S0, (unsigned int)i));
+
+		if( isf )
+			emit(&ctx, a64_ldr_fp_imm(width_of(size), floats++, S1, 0));
+		else
+			emit(&ctx, a64_ldr_imm(width_of(size), ints++, S1, 0));
+	}
+
+	emit(&ctx, a64_ldr_imm(A64_X, S0, A64_FP, 2));
+	emit(&ctx, a64_blr(S0));
+
+	if( fun->ret->kind != HVOID ) {
+		int size = hl_type_size(fun->ret);
+		int isf = fun->ret->kind == HF32 || fun->ret->kind == HF64;
+
+		emit(&ctx, a64_ldr_imm(A64_X, S1, A64_FP, 3));
+
+		if( isf )
+			emit(&ctx, a64_str_fp_imm(width_of(size), 0, S1, (unsigned int)(offsetof(vdynamic, v) / size)));
+		else
+			emit(&ctx, a64_str_imm(width_of(size), 0, S1, (unsigned int)(offsetof(vdynamic, v) / size)));
+	}
+
+	emit(&ctx, a64_ldp(1, A64_PAIR_OFF, A64_FP, A64_LR, A64_SP, 0));
+	emit(&ctx, a64_add_imm(1, A64_SP, A64_SP, (unsigned int)frame));
+	emit(&ctx, a64_ret(A64_LR));
+
+	if( ctx.failed ) {
+		free(ctx.buf);
+		return NULL;
+	}
+
+	bytes = (size_t)ctx.len * sizeof(a64_insn);
+	at = hxs_exec_alloc(bytes);
+
+	if( at == NULL ) {
+		free(ctx.buf);
+		return NULL;
+	}
+
+	hxs_exec_unseal(at, bytes);
+	memcpy(at, ctx.buf, bytes);
+	hxs_exec_seal(at, bytes);
+	free(ctx.buf);
+
+	e = (hxs_entry *)malloc(sizeof(hxs_entry));
+
+	if( e == NULL )
+		return NULL;
+
+	e->t = t;
+	e->code = at;
+	e->next = hxs_entries;
+	hxs_entries = e;
+
+	return at;
+}
+
+/** What hl_setup.static_call points at: enter a compiled function with arguments the runtime arranged. */
+static void *hxs_static_call( void *fun, hl_type *t, void **args, vdynamic *out ) {
+	void *(*tramp)( void *, void **, vdynamic * ) = (void *(*)( void *, void **, vdynamic * ))hxs_entry_for(t);
+
+	if( tramp == NULL )
+		hl_error("no way into a function of this shape");
+
+	return tramp(fun, args, out);
+}
+
 jit_ctx *hl_jit_alloc( void ) {
 	return (jit_ctx *)calloc(1, sizeof(jit_ctx));
 }
@@ -2227,6 +2375,17 @@ void *hl_jit_code( jit_ctx *ctx, hl_module *m, int *codesize, hl_debug_infos **d
 
 	*codesize = (int)bytes;
 	*debug = ctx->debug;
+
+	/**
+		The runtime reaches compiled code through this, and nothing else provides it on the VM, where
+		every function including the standard library is jitted. An HL/C program has its own, generated
+		beside the rest of its C, so this only fills a gap that is there rather than taking one over:
+		it is set once and only when nobody has set it already.
+	*/
+	if( hl_setup.static_call == NULL ) {
+		hl_setup.static_call = hxs_static_call;
+		hl_setup.static_call_ref = false;
+	}
 
 	return at;
 }

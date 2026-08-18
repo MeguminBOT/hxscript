@@ -71,6 +71,12 @@ if command -v haxe >/dev/null 2>&1; then
 	rm -rf "$ROOT/bin_test/hlc-arm64"
 	( cd "$ROOT" && haxe -cp src -cp test/hl/loader -D hxscript_hl -D hxscript_no_native \
 		-D hl-ver=1.16.0 -D no-compilation -main EmitProbe -hl bin_test/hlc-arm64/main.c )
+
+	# An ordinary Haxe program as bytecode, for hashlink's own VM to run on this jit. Nothing to do
+	# with hxScript: it is the wider instruction set, which a jit written for the narrower one has no
+	# right to handle unless it really is complete.
+	mkdir -p "$ROOT/bin_test/vm"
+	( cd "$ROOT" && haxe -cp test/hl/arm64/vm -main Real -hl bin_test/vm/real.hl )
 else
 	echo "-- no Haxe here, so the corpus is skipped and only the jit's own checks run --" >&2
 fi

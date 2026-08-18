@@ -100,6 +100,37 @@ if [ -f bin_test/hlc-arm64/hlc.json ]; then
 	fi
 fi
 
+if [ -f bin_test/vm/real.hl ]; then
+	echo
+	echo "-- hashlink's own VM, built with this jit in place of its own --"
+
+	# jit.c is what hashlink builds hl.exe out of, and this replaces exactly that file. No renaming
+	# here: the vendored copy is renamed for hxScript's module so the two cannot meet in one process,
+	# and hashlink's own module.c calls the names as they are.
+	( cd /opt/hashlink && gcc -O2 -std=c11 -I src -I /work/src/hxscript/hl/native/arm64 \
+		-D LIBHL_EXPORTS src/code.c src/main.c src/module.c src/debugger.c src/profile.c \
+		/work/src/hxscript/hl/native/arm64/jit_arm64.c /work/src/hxscript/hl/native/arm64/exec.c \
+		-o /tmp/hl -L/opt/hl/lib -lhl -lm -ldl -lpthread ) > /tmp/vm.log 2>&1 || {
+		echo "  the VM did not build:"
+		sed 's/^/    /' /tmp/vm.log
+		fail=$((fail + 1))
+	}
+
+	if [ -x /tmp/hl ]; then
+		( cd bin_test/vm && /tmp/hl real.hl > /tmp/vm.out 2>&1 ) || true
+		sed 's/^/  /' /tmp/vm.out
+
+		# Each line is checkable by eye, so the answers are named rather than counted.
+		for want in 'loop      285' 'array     6 6' 'map       42' 'object    hello world' \
+			'enum      42' 'catch     thrown' 'anon      7' 'string    ab 1.5'; do
+			grep -qF "$want" /tmp/vm.out || {
+				echo "  missing from what it printed: $want"
+				fail=$((fail + 1))
+			}
+		done
+	fi
+fi
+
 echo
 if [ "$fail" = "0" ]; then
 	echo "== everything checked passed =="
