@@ -64,6 +64,87 @@ static void *build( hl_type *sig, hl_type **regs, int nregs, hl_opcode *ops, int
 	return (void *)((unsigned char *)base + at);
 }
 
+/** One function to compile, as build_module takes them. */
+typedef struct {
+	hl_type *sig;
+	hl_type **regs;
+	int nregs;
+	hl_opcode *ops;
+	int nops;
+	int findex;
+} fndef;
+
+static hl_function built[8];
+static int indexes[8];
+static void *pointers[8];
+
+/**
+	Compiles several functions as one module, the way module.c does it.
+
+	Calls between them are the reason this exists. A call names its target by index, and the address
+	behind that index is an offset until every function has been compiled and hl_jit_code has said
+	where the code went, so a call cannot be checked one function at a time.
+
+	The order here is module.c's order, deliberately: compile each and keep the offset it returns,
+	ask for the code, then turn the offsets into addresses.
+
+	@param defs The functions.
+	@param n How many.
+	@param out Filled with somewhere to call for each.
+	@return Whether all of them compiled.
+*/
+static int build_module( fndef *defs, int n, void **out ) {
+	jit_ctx *ctx;
+	hl_debug_infos *debug = NULL;
+	unsigned char *base;
+	int i, size = 0;
+
+	memset(built, 0, sizeof(built));
+	memset(indexes, 0, sizeof(indexes));
+	memset(pointers, 0, sizeof(pointers));
+
+	for(i=0;i<n;i++) {
+		built[i].findex = defs[i].findex;
+		built[i].nregs = defs[i].nregs;
+		built[i].nops = defs[i].nops;
+		built[i].type = defs[i].sig;
+		built[i].regs = defs[i].regs;
+		built[i].ops = defs[i].ops;
+
+		indexes[defs[i].findex] = i;
+	}
+
+	code.functions = built;
+	code.nfunctions = n;
+	code.nnatives = 0;
+	m.functions_indexes = indexes;
+	m.functions_ptrs = pointers;
+
+	ctx = hl_jit_alloc();
+	if( ctx == NULL )
+		return 0;
+
+	hl_jit_init(ctx, &m);
+
+	for(i=0;i<n;i++) {
+		int fpos = hl_jit_function(ctx, &m, built + i);
+
+		if( fpos < 0 )
+			return 0;
+
+		m.functions_ptrs[built[i].findex] = (void *)(size_t)fpos;
+	}
+
+	base = (unsigned char *)hl_jit_code(ctx, &m, &size, &debug, NULL);
+	if( base == NULL )
+		return 0;
+
+	for(i=0;i<n;i++)
+		out[i] = base + (size_t)m.functions_ptrs[built[i].findex];
+
+	return 1;
+}
+
 static void report( const char *what, long long got, long long want ) {
 	if( got == want ) {
 		printf("  %-42s %lld\n", what, got);
@@ -430,6 +511,153 @@ int main( void ) {
 			f = (int (*)( int, int ))build(&sig, regs, 3, ops, 5);
 			report(cases[i].what, f == NULL ? -1 : f(cases[i].a, cases[i].b), cases[i].want);
 		}
+	}
+
+	{
+		/** Between the two banks, which is one instruction each way. */
+		hl_type sig;
+		hl_type_fun fun;
+		hl_type *args[1];
+		hl_type *regs[2];
+		hl_opcode ops[2];
+		double (*widen)( int );
+		int (*narrow)( double );
+
+		args[0] = &hlt_i32;
+		signature(&sig, &fun, args, 1, &hlt_f64);
+		regs[0] = &hlt_i32;
+		regs[1] = &hlt_f64;
+
+		memset(ops, 0, sizeof(ops));
+		ops[0].op = OToSFloat; ops[0].p1 = 1; ops[0].p2 = 0;
+		ops[1].op = ORet;      ops[1].p1 = 1;
+		widen = (double (*)( int ))build(&sig, regs, 2, ops, 2);
+		report_d("an int widened to a float", widen == NULL ? -1 : widen(42), 42.0);
+
+		args[0] = &hlt_f64;
+		signature(&sig, &fun, args, 1, &hlt_i32);
+		regs[0] = &hlt_f64;
+		regs[1] = &hlt_i32;
+
+		memset(ops, 0, sizeof(ops));
+		ops[0].op = OToInt; ops[0].p1 = 1; ops[0].p2 = 0;
+		ops[1].op = ORet;   ops[1].p1 = 1;
+		narrow = (int (*)( double ))build(&sig, regs, 2, ops, 2);
+		report("42.9 truncated towards zero", narrow == NULL ? -1 : narrow(42.9), 42);
+		report("-42.9 truncated towards zero", narrow == NULL ? -1 : narrow(-42.9), -42);
+	}
+
+	{
+		/**
+			A global, which lives at an address that exists before any of this is compiled.
+		*/
+		hl_type sig;
+		hl_type_fun fun;
+		hl_type *regs[1];
+		hl_opcode ops[2];
+		int (*f)( void );
+		static int storage[2];
+		static int where[1];
+
+		storage[0] = 0;
+		storage[1] = 42;
+		where[0] = (int)sizeof(int);
+
+		m.globals_data = (unsigned char *)storage;
+		m.globals_indexes = where;
+		code.nglobals = 1;
+
+		signature(&sig, &fun, NULL, 0, &hlt_i32);
+		regs[0] = &hlt_i32;
+
+		memset(ops, 0, sizeof(ops));
+		ops[0].op = OGetGlobal; ops[0].p1 = 0; ops[0].p2 = 0;
+		ops[1].op = ORet;       ops[1].p1 = 0;
+
+		f = (int (*)( void ))build(&sig, regs, 1, ops, 2);
+		report("a global read", f == NULL ? -1 : f(), 42);
+	}
+
+	{
+		/**
+			One function calling another, which is the case a single function cannot check: the
+			address of the target does not exist until both have been compiled and the code has been
+			put somewhere.
+		*/
+		hl_type add_sig, call_sig;
+		hl_type_fun add_fun, call_fun;
+		hl_type *add_args[2];
+		hl_type *call_args[1];
+		hl_type *add_regs[3];
+		hl_type *call_regs[3];
+		hl_opcode add_ops[2];
+		hl_opcode call_ops[3];
+		fndef defs[2];
+		void *out[2];
+		int (*f)( int );
+
+		add_args[0] = add_args[1] = &hlt_i32;
+		signature(&add_sig, &add_fun, add_args, 2, &hlt_i32);
+		add_regs[0] = add_regs[1] = add_regs[2] = &hlt_i32;
+
+		memset(add_ops, 0, sizeof(add_ops));
+		add_ops[0].op = OAdd; add_ops[0].p1 = 2; add_ops[0].p2 = 0; add_ops[0].p3 = 1;
+		add_ops[1].op = ORet; add_ops[1].p1 = 2;
+
+		call_args[0] = &hlt_i32;
+		signature(&call_sig, &call_fun, call_args, 1, &hlt_i32);
+		call_regs[0] = call_regs[1] = call_regs[2] = &hlt_i32;
+
+		memset(call_ops, 0, sizeof(call_ops));
+		call_ops[0].op = OInt;   call_ops[0].p1 = 1; call_ops[0].p2 = 5;
+		call_ops[1].op = OCall2; call_ops[1].p1 = 2; call_ops[1].p2 = 0;
+		call_ops[1].p3 = 0;      call_ops[1].extra = (int *)(size_t)1;
+		call_ops[2].op = ORet;   call_ops[2].p1 = 2;
+
+		defs[0].sig = &add_sig;  defs[0].regs = add_regs;  defs[0].nregs = 3;
+		defs[0].ops = add_ops;   defs[0].nops = 2;         defs[0].findex = 0;
+		defs[1].sig = &call_sig; defs[1].regs = call_regs; defs[1].nregs = 3;
+		defs[1].ops = call_ops;  defs[1].nops = 3;         defs[1].findex = 1;
+
+		f = build_module(defs, 2, out) ? (int (*)( int ))out[1] : NULL;
+		report("one function calling another", f == NULL ? -1 : f(40), 42);
+	}
+
+	{
+		/**
+			A function calling itself, which is the same patching read from the other side: the
+			target is the function being compiled, so its offset is known but its address is not.
+
+			  fact(n) = n <= 1 ? 1 : n * fact(n - 1)
+		*/
+		hl_type sig;
+		hl_type_fun fun;
+		hl_type *args[1];
+		hl_type *regs[3];
+		hl_opcode ops[8];
+		fndef defs[1];
+		void *out[1];
+		int (*f)( int );
+
+		args[0] = &hlt_i32;
+		signature(&sig, &fun, args, 1, &hlt_i32);
+		regs[0] = regs[1] = regs[2] = &hlt_i32;
+
+		memset(ops, 0, sizeof(ops));
+		ops[0].op = OInt;    ops[0].p1 = 1; ops[0].p2 = 3;
+		ops[1].op = OJSGt;   ops[1].p1 = 0; ops[1].p2 = 1; ops[1].p3 = 1;
+		ops[2].op = ORet;    ops[2].p1 = 1;
+		ops[3].op = OSub;    ops[3].p1 = 2; ops[3].p2 = 0; ops[3].p3 = 1;
+		ops[4].op = OCall1;  ops[4].p1 = 2; ops[4].p2 = 7; ops[4].p3 = 2;
+		ops[5].op = OMul;    ops[5].p1 = 2; ops[5].p2 = 0; ops[5].p3 = 2;
+		ops[6].op = ORet;    ops[6].p1 = 2;
+
+		defs[0].sig = &sig;  defs[0].regs = regs; defs[0].nregs = 3;
+		defs[0].ops = ops;   defs[0].nops = 7;    defs[0].findex = 7;
+
+		f = build_module(defs, 1, out) ? (int (*)( int ))out[0] : NULL;
+		report("a function calling itself, 5 factorial", f == NULL ? -1 : f(5), 120);
+		report("the same at its base case", f == NULL ? -1 : f(1), 1);
 	}
 
 	{

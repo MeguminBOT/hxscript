@@ -110,6 +110,29 @@ struct _jit_ctx {
 
 	int njumps;
 	int cap_jumps;
+
+	/**
+		Calls to functions of this module, whose addresses are not known until all of them are
+		compiled.
+
+		module.c fills functions_ptrs with offsets as each function is compiled and turns them into
+		addresses only after hl_jit_code has said where the code went, so a call emitted now names a
+		target that does not have an address yet. The four instructions that build the address are
+		left as they are and rewritten once it does.
+
+		A native is not in here. Its address is real before any of this runs, so it is built into the
+		call at the point the call is emitted.
+	*/
+	struct {
+		/** The first of the four words that build the address. */
+		int at;
+
+		/** Which function, by the index the bytecode calls it. */
+		int findex;
+	} *calls;
+
+	int ncalls;
+	int cap_calls;
 };
 
 /** @return Whether there is room for that many more instructions, growing the buffer if not. */
@@ -445,6 +468,161 @@ static void emit_float( jit_ctx *ctx, int r, double v ) {
 	store_reg(ctx, r, S0);
 }
 
+/** @return Whether there is room for one more call to patch, growing the list if not. */
+static int room_call( jit_ctx *ctx ) {
+	int cap;
+	void *grown;
+
+	if( ctx->ncalls < ctx->cap_calls )
+		return 1;
+
+	cap = ctx->cap_calls ? ctx->cap_calls * 2 : 64;
+	grown = realloc(ctx->calls, sizeof(*ctx->calls) * (size_t)cap);
+
+	if( grown == NULL ) {
+		ctx->failed = 1;
+		return 0;
+	}
+
+	ctx->calls = grown;
+	ctx->cap_calls = cap;
+	return 1;
+}
+
+/**
+	@param findex A function as the bytecode names it.
+	@return Whether that is a native rather than a function of this module.
+
+	Which one it is decides whether the address can be built now or has to wait: module.c gives a
+	native its real address before any of this runs, and gives a function of the module an offset that
+	only becomes an address after hl_jit_code.
+*/
+static int is_native( jit_ctx *ctx, int findex ) {
+	return ctx->m->functions_indexes[findex] >= ctx->m->code->nfunctions;
+}
+
+/**
+	Puts the arguments of a call where the ABI expects them.
+
+	@param args The registers holding them.
+	@param nargs How many.
+	@return Whether they all fit in registers. Anything past the eighth of either bank goes on the
+	        stack, and where it goes there differs between AAPCS64 and Apple's ABI, so it is refused
+	        until there is an Apple machine to settle it on.
+
+	Each one is read out of its home in the frame, so loading into x1 cannot disturb what x0 needs.
+	That is a property of holding every register in memory, and it is most of why doing so is worth
+	the loads.
+*/
+static int pass_args( jit_ctx *ctx, int *args, int nargs ) {
+	int i, ints = 0, floats = 0;
+
+	for(i=0;i<nargs;i++) {
+		vreg *v = ctx->regs + args[i];
+
+		if( v->size == 0 )
+			continue;
+
+		if( v->is_float ) {
+			if( floats > 7 )
+				return 0;
+
+			load_reg(ctx, args[i], floats++);
+		} else {
+			if( ints > 7 )
+				return 0;
+
+			load_reg(ctx, args[i], ints++);
+		}
+	}
+
+	return 1;
+}
+
+/**
+	Calls a function of this module or a native, and keeps what comes back.
+
+	@param dst Where the result goes, or a register of no size when there is none.
+	@param findex The function.
+	@param args Its arguments.
+	@param nargs How many.
+	@return Whether the call could be built.
+*/
+static int emit_hl_call( jit_ctx *ctx, int dst, int findex, int *args, int nargs ) {
+	if( !pass_args(ctx, args, nargs) )
+		return 0;
+
+	if( is_native(ctx, findex) ) {
+		emit_call(ctx, ctx->m->functions_ptrs[findex]);
+	} else {
+		if( !room_call(ctx) )
+			return 0;
+
+		ctx->calls[ctx->ncalls].at = ctx->len;
+		ctx->calls[ctx->ncalls].findex = findex;
+		ctx->ncalls++;
+
+		/** Four words of nothing in particular, rewritten once the address exists. */
+		emit_imm64(ctx, S0, 0);
+		emit(ctx, a64_blr(S0));
+	}
+
+	if( ctx->regs[dst].size != 0 )
+		store_reg(ctx, dst, 0);
+
+	return 1;
+}
+
+/**
+	Reads the byte offset of one of an object's fields.
+
+	@return The offset, or -1 when the field is not one this can reach directly. A virtual or a
+	        dynamic resolves its fields by name at run time and is left to the interpreter for now.
+*/
+static int field_offset( hl_type *t, int field ) {
+	hl_runtime_obj *rt;
+
+	if( t->kind != HOBJ && t->kind != HSTRUCT )
+		return -1;
+
+	rt = hl_get_obj_rt(t);
+
+	if( rt == NULL || field < 0 || field >= rt->nfields )
+		return -1;
+
+	return rt->fields_indexes[field];
+}
+
+/**
+	Reads from or writes to memory at a constant offset from a pointer already in a register.
+
+	@param base The register holding the pointer.
+	@param off The offset in bytes.
+	@param r Which of the function's registers is the other end, for its width and its bank.
+	@param into The register to load into or store from.
+	@param store Whether this is a write.
+	@return Whether the offset can be reached.
+*/
+static int mem_access( jit_ctx *ctx, int base, int off, int r, int into, int store ) {
+	vreg *v = ctx->regs + r;
+	int width = width_of(v->size);
+	unsigned int scaled;
+
+	if( v->size == 0 || off < 0 || (off % v->size) != 0 )
+		return 0;
+
+	scaled = (unsigned int)(off / v->size);
+	if( scaled > 0xFFF )
+		return 0;
+
+	if( v->is_float )
+		emit(ctx, store ? a64_str_fp_imm(width, into, base, scaled) : a64_ldr_fp_imm(width, into, base, scaled));
+	else
+		emit(ctx, store ? a64_str_imm(width, into, base, scaled) : a64_ldr_imm(width, into, base, scaled));
+
+	return 1;
+}
+
 /**
 	Compiles one arithmetic or bitwise instruction.
 
@@ -684,6 +862,171 @@ static int compile_op( jit_ctx *ctx, hl_function *f, hl_opcode *op, int index ) 
 		case OJNotEq:
 			return compare_jump(ctx, op, index);
 
+		case ONullCheck: {
+			int at;
+
+			load_reg(ctx, op->p1, S0);
+
+			at = ctx->len;
+			emit(ctx, a64_cbnz(1, S0, 0));
+			emit_call(ctx, (void *)(size_t)&hl_null_access);
+			ctx->buf[at] = a64_cbnz(1, S0, ctx->len - at);
+			return 1;
+		}
+
+		/**
+			A global lives at a fixed place in memory that exists before any of this is compiled, so
+			the address is built into the instruction rather than looked up.
+		*/
+		case OGetGlobal:
+			emit_imm64(ctx, S1, (unsigned long long)(size_t)(ctx->m->globals_data + ctx->m->globals_indexes[op->p2]));
+
+			if( !mem_access(ctx, S1, 0, op->p1, S0, 0) )
+				return 0;
+
+			store_reg(ctx, op->p1, S0);
+			return 1;
+
+		case OSetGlobal:
+			load_reg(ctx, op->p2, S0);
+			emit_imm64(ctx, S1, (unsigned long long)(size_t)(ctx->m->globals_data + ctx->m->globals_indexes[op->p1]));
+			return mem_access(ctx, S1, 0, op->p2, S0, 1);
+
+		case OField:
+		case OGetThis: {
+			int obj = op->op == OField ? op->p2 : 0;
+			int field = op->op == OField ? op->p3 : op->p2;
+			int off = field_offset(ctx->regs[obj].t, field);
+
+			if( off < 0 )
+				return 0;
+
+			load_reg(ctx, obj, S1);
+
+			if( !mem_access(ctx, S1, off, op->p1, S0, 0) )
+				return 0;
+
+			store_reg(ctx, op->p1, S0);
+			return 1;
+		}
+
+		case OSetField:
+		case OSetThis: {
+			int obj = op->op == OSetField ? op->p1 : 0;
+			int field = op->op == OSetField ? op->p2 : op->p1;
+			int value = op->op == OSetField ? op->p3 : op->p2;
+			int off = field_offset(ctx->regs[obj].t, field);
+
+			if( off < 0 )
+				return 0;
+
+			load_reg(ctx, obj, S1);
+			load_reg(ctx, value, S0);
+			return mem_access(ctx, S1, off, value, S0, 1);
+		}
+
+		/** Allocation, which is a call into the collector with the type as its argument. */
+		case ONew: {
+			hl_type *t = ctx->regs[op->p1].t;
+
+			switch( t->kind ) {
+				case HOBJ:
+				case HSTRUCT:
+					emit_imm64(ctx, 0, (unsigned long long)(size_t)t);
+					emit_call(ctx, (void *)(size_t)&hl_alloc_obj);
+					break;
+
+				case HDYNOBJ:
+					emit_call(ctx, (void *)(size_t)&hl_alloc_dynobj);
+					break;
+
+				case HVIRTUAL:
+					emit_imm64(ctx, 0, (unsigned long long)(size_t)t);
+					emit_call(ctx, (void *)(size_t)&hl_alloc_virtual);
+					break;
+
+				default:
+					return 0;
+			}
+
+			store_reg(ctx, op->p1, 0);
+			return 1;
+		}
+
+		/**
+			Between the two banks, rounding towards zero on the way in, which is what Haxe means by
+			Std.int. A dynamic on either side is a call and is not one of these yet.
+		*/
+		case OToSFloat:
+			if( ctx->regs[op->p1].is_float && !ctx->regs[op->p2].is_float ) {
+				load_reg(ctx, op->p2, S0);
+				emit(ctx, a64_scvtf(wide(ctx, op->p2), fp_type(ctx, op->p1), S0, S0));
+				store_reg(ctx, op->p1, S0);
+				return 1;
+			}
+
+			if( ctx->regs[op->p1].is_float && ctx->regs[op->p2].is_float ) {
+				load_reg(ctx, op->p2, S0);
+
+				if( ctx->regs[op->p1].size != ctx->regs[op->p2].size )
+					emit(ctx, ctx->regs[op->p1].size == 8 ? a64_fcvt_s2d(S0, S0) : a64_fcvt_d2s(S0, S0));
+
+				store_reg(ctx, op->p1, S0);
+				return 1;
+			}
+
+			return 0;
+
+		case OToInt:
+			if( !ctx->regs[op->p2].is_float || ctx->regs[op->p1].is_float )
+				return 0;
+
+			load_reg(ctx, op->p2, S0);
+			emit(ctx, a64_fcvtzs(wide(ctx, op->p1), fp_type(ctx, op->p2), S0, S0));
+			store_reg(ctx, op->p1, S0);
+			return 1;
+
+		case OCall0:
+			return emit_hl_call(ctx, op->p1, op->p2, NULL, 0);
+
+		case OCall1: {
+			int args[1];
+			args[0] = op->p3;
+			return emit_hl_call(ctx, op->p1, op->p2, args, 1);
+		}
+
+		/**
+			Four operands, so the fourth is the value sitting in `extra` rather than a list it points
+			at. Five and more put p3 first and the rest in a list, which is why these read differently
+			from one another rather than being one case with a count.
+		*/
+		case OCall2: {
+			int args[2];
+			args[0] = op->p3;
+			args[1] = (int)(int_val)op->extra;
+			return emit_hl_call(ctx, op->p1, op->p2, args, 2);
+		}
+
+		case OCall3: {
+			int args[3];
+			args[0] = op->p3;
+			args[1] = op->extra[0];
+			args[2] = op->extra[1];
+			return emit_hl_call(ctx, op->p1, op->p2, args, 3);
+		}
+
+		case OCall4: {
+			int args[4];
+			args[0] = op->p3;
+			args[1] = op->extra[0];
+			args[2] = op->extra[1];
+			args[3] = op->extra[2];
+			return emit_hl_call(ctx, op->p1, op->p2, args, 4);
+		}
+
+		case OCallN:
+			return emit_hl_call(ctx, op->p1, op->p2, op->extra, op->p3);
+
 		case ORet:
 			if( ctx->regs[op->p1].size != 0 )
 				load_reg(ctx, op->p1, 0);
@@ -714,6 +1057,7 @@ void hl_jit_free( jit_ctx *ctx, h_bool can_reset ) {
 		free(ctx->regs);
 		free(ctx->op_pos);
 		free(ctx->jumps);
+		free(ctx->calls);
 		free(ctx);
 	}
 }
@@ -722,6 +1066,9 @@ void hl_jit_init( jit_ctx *ctx, hl_module *m ) {
 	ctx->m = m;
 	ctx->len = 0;
 	ctx->failed = 0;
+
+	/** Per module rather than per function, since they are all patched together at the end. */
+	ctx->ncalls = 0;
 
 	if( m->code->hasdebug ) {
 		ctx->debug = (hl_debug_infos *)malloc(sizeof(hl_debug_infos) * (size_t)m->code->nfunctions);
@@ -789,6 +1136,7 @@ int hl_jit_function( jit_ctx *ctx, hl_module *m, hl_function *f ) {
 void *hl_jit_code( jit_ctx *ctx, hl_module *m, int *codesize, hl_debug_infos **debug, hl_module *previous ) {
 	size_t bytes = (size_t)ctx->len * sizeof(a64_insn);
 	void *at;
+	int i;
 
 	(void)m;
 	(void)previous;
@@ -799,6 +1147,26 @@ void *hl_jit_code( jit_ctx *ctx, hl_module *m, int *codesize, hl_debug_infos **d
 	at = hxs_exec_alloc(bytes);
 	if( at == NULL )
 		return NULL;
+
+	/**
+		Now that there is somewhere for the code to live, every call to a function of this module has
+		an address at last. module.c has been filling functions_ptrs with offsets as each function
+		was compiled, so an address is the base plus one of those, and the four instructions left
+		behind at each call site are rewritten to build it.
+
+		Before the copy rather than after, so what lands in executable memory is already finished and
+		nothing has to be written through pages that may no longer allow it.
+	*/
+	for(i=0;i<ctx->ncalls;i++) {
+		unsigned long long to = (unsigned long long)(size_t)at
+			+ (unsigned long long)(size_t)ctx->m->functions_ptrs[ctx->calls[i].findex];
+		int w = ctx->calls[i].at;
+
+		ctx->buf[w + 0] = a64_movz(1, S0, (unsigned int)(to & 0xFFFF), A64_HW0);
+		ctx->buf[w + 1] = a64_movk(1, S0, (unsigned int)((to >> 16) & 0xFFFF), A64_HW16);
+		ctx->buf[w + 2] = a64_movk(1, S0, (unsigned int)((to >> 32) & 0xFFFF), A64_HW32);
+		ctx->buf[w + 3] = a64_movk(1, S0, (unsigned int)((to >> 48) & 0xFFFF), A64_HW48);
+	}
 
 	hxs_exec_unseal(at, bytes);
 	memcpy(at, ctx->buf, bytes);
