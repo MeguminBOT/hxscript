@@ -950,8 +950,9 @@ int main( void ) {
 		/**
 			An opcode this jit does not know, which has to be refused rather than guessed at.
 
-			OSwitch, because hxScript's emitter lowers a switch to a chain of comparisons and never
-			produces one, so this stays a case about refusing rather than a note to come back to.
+			OAsm, because it is literal machine code the bytecode carries, which cannot be anything but
+			the architecture it was written for. So this stays a case about refusing rather than a note
+			to come back to, the way an opcode merely not written yet would be.
 		*/
 		hl_type sig;
 		hl_type_fun fun;
@@ -963,8 +964,8 @@ int main( void ) {
 		regs[0] = &hlt_i32;
 
 		memset(ops, 0, sizeof(ops));
-		ops[0].op = OSwitch; ops[0].p1 = 0; ops[0].p2 = 0; ops[0].p3 = 0;
-		ops[1].op = ORet;    ops[1].p1 = 0;
+		ops[0].op = OAsm; ops[0].p1 = 0; ops[0].p2 = 0; ops[0].p3 = 0;
+		ops[1].op = ORet; ops[1].p1 = 0;
 
 		f = build(&sig, regs, 1, ops, 2);
 		report("an unknown opcode is refused", f == NULL ? 1 : 0, 1);

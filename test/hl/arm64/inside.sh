@@ -69,7 +69,7 @@ gcc -O2 -Wall -I src/hxscript/hl/native/arm64 	test/hl/arm64/emit.c src/hxscript
 echo
 echo "-- functions the jit compiled, run on this machine --"
 N=src/hxscript/hl/native
-gcc -O2 -Wall -Wextra -std=c11 -DHXS_NATIVE_TABLE 	-include $N/vendor/hxs_vendor.h -I /opt/hl/include -I $N/vendor/hl116 -I $N/arm64 	test/hl/arm64/jit.c $N/arm64/jit_arm64.c $N/arm64/exec.c 	-o /tmp/jit -L/opt/hl/lib -lhl -lm
+gcc -O2 -Wall -Wextra -std=c11 -DHXS_NATIVE_TABLE 	-include $N/vendor/hxs_vendor.h -I /opt/hl/include -I $N/vendor/hl116 -I $N/arm64 	test/hl/arm64/jit.c $N/arm64/jit_arm64.c $N/arm64/exec.c $N/vendor/hl116/code.c 	-o /tmp/jit -L/opt/hl/lib -lhl -lm
 /tmp/jit || fail=$((fail + 1))
 
 if [ -f bin_test/hlc-arm64/hlc.json ]; then

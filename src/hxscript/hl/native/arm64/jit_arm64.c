@@ -43,6 +43,7 @@
 
 #include <math.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -144,6 +145,15 @@ struct _jit_ctx {
 
 	int ncalls;
 	int cap_calls;
+
+	/** Static closures whose function has no address yet, for the same reason a call has none. */
+	struct {
+		vclosure *c;
+		int findex;
+	} *closures;
+
+	int nclosures;
+	int cap_closures;
 };
 
 /** @return Whether there is room for that many more instructions, growing the buffer if not. */
@@ -817,6 +827,73 @@ static void *get_helper( hl_type *t ) {
 	}
 }
 
+/** @return The runtime's dynamic field write for this value kind. */
+static void *set_helper( hl_type *t ) {
+	switch( t->kind ) {
+		case HF32: return (void *)(size_t)&hl_dyn_setf;
+		case HF64: return (void *)(size_t)&hl_dyn_setd;
+		case HI64:
+		case HGUID: return (void *)(size_t)&hl_dyn_seti64;
+		case HI32:
+		case HUI16:
+		case HUI8:
+		case HBOOL: return (void *)(size_t)&hl_dyn_seti;
+		default: return (void *)(size_t)&hl_dyn_setp;
+	}
+}
+
+/**
+	Makes the one closure a static closure hands out, rather than a new one each time it runs.
+
+	It lives in the module's own allocator, so it lasts as long as the module does, and a loop that
+	reaches the same OStaticClosure a million times hands out the same object a million times instead
+	of allocating one per iteration.
+
+	A native already has an address. Anything else joins the list hl_jit_code walks, which fills in
+	the address once there is one, the same problem a call has and answered the same way.
+
+	@return The closure, or NULL when it could not be made.
+*/
+static vclosure *static_closure( jit_ctx *ctx, int findex ) {
+	hl_module *m = ctx->m;
+	int fidx = m->functions_indexes[findex];
+	vclosure *c = (vclosure *)hl_malloc(&m->ctx.alloc, sizeof(vclosure));
+
+	if( c == NULL )
+		return NULL;
+
+	c->hasValue = 0;
+	c->value = NULL;
+
+	if( fidx >= m->code->nfunctions ) {
+		c->t = m->code->natives[fidx - m->code->nfunctions].t;
+		c->fun = m->functions_ptrs[findex];
+		return c;
+	}
+
+	c->t = m->code->functions[fidx].type;
+	c->fun = NULL;
+
+	if( ctx->nclosures == ctx->cap_closures ) {
+		int cap = ctx->cap_closures ? ctx->cap_closures * 2 : 32;
+		void *grown = realloc(ctx->closures, sizeof(*ctx->closures) * (size_t)cap);
+
+		if( grown == NULL ) {
+			ctx->failed = 1;
+			return NULL;
+		}
+
+		ctx->closures = grown;
+		ctx->cap_closures = cap;
+	}
+
+	ctx->closures[ctx->nclosures].c = c;
+	ctx->closures[ctx->nclosures].findex = findex;
+	ctx->nclosures++;
+
+	return c;
+}
+
 /**
 	Puts the address of one of the function's registers in a machine register.
 
@@ -961,6 +1038,16 @@ static int compare_jump( jit_ctx *ctx, hl_opcode *op, int index ) {
 			case OJSLte:  cond = A64_LS; break;
 			case OJEq:    cond = A64_EQ; break;
 			case OJNotEq: cond = A64_NE; break;
+
+			/**
+				Not less than is the inverse of less than, which on this architecture is the condition
+				with its bottom bit flipped. For a float that is what makes a comparison against NaN
+				answer the way HashLink says: unordered is not less than, so the inverse is taken.
+			*/
+			case OJNotLt:  cond = A64_MI ^ 1; break;
+			case OJNotGte: cond = A64_GE ^ 1; break;
+			case OJULt:    cond = A64_CC; break;
+			case OJUGte:   cond = A64_CS; break;
 			default: return 0;
 		}
 	} else {
@@ -973,6 +1060,10 @@ static int compare_jump( jit_ctx *ctx, hl_opcode *op, int index ) {
 			case OJSLte:  cond = A64_LE; break;
 			case OJEq:    cond = A64_EQ; break;
 			case OJNotEq: cond = A64_NE; break;
+			case OJULt:   cond = A64_CC; break;
+			case OJUGte:  cond = A64_CS; break;
+			case OJNotLt:  cond = A64_GE; break;
+			case OJNotGte: cond = A64_LT; break;
 			default: return 0;
 		}
 	}
@@ -1127,7 +1218,51 @@ static int compile_op( jit_ctx *ctx, hl_function *f, hl_opcode *op, int index ) 
 		case OGetThis: {
 			int obj = op->op == OField ? op->p2 : 0;
 			int field = op->op == OField ? op->p3 : op->p2;
-			int off = field_offset(ctx->regs[obj].t, field);
+			hl_type *t = ctx->regs[obj].t;
+			int off;
+
+			/**
+				A structural type keeps a pointer to wherever the underlying object holds each field,
+				or nothing at all when that object has no such field. So both answers are emitted:
+				read straight through the pointer when there is one, ask the runtime by name when
+				there is not.
+
+				Each branch stores the result itself rather than meeting at a shared register, because
+				the fast path leaves a float in the scratch bank and a call leaves one where a return
+				value goes.
+			*/
+			if( t->kind == HVIRTUAL ) {
+				int slow, over;
+
+				load_reg(ctx, obj, S1);
+				emit(ctx, a64_ldr_imm(A64_X, S2, S1, (unsigned int)(sizeof(vvirtual) / 8 + field)));
+
+				slow = ctx->len;
+				emit(ctx, a64_cbz(1, S2, 0));
+
+				if( !mem_access(ctx, S2, 0, op->p1, S0, 0) )
+					return 0;
+
+				store_reg(ctx, op->p1, S0);
+
+				over = ctx->len;
+				emit(ctx, a64_b(0));
+				ctx->buf[slow] = a64_cbz(1, S2, ctx->len - slow);
+
+				load_reg(ctx, obj, 0);
+				emit_imm32(ctx, 1, t->virt->fields[field].hashed_name);
+
+				if( !helper_is_short(ctx->regs[op->p1].t) )
+					emit_imm64(ctx, 2, (unsigned long long)(size_t)ctx->regs[op->p1].t);
+
+				emit_call(ctx, get_helper(ctx->regs[op->p1].t));
+				store_reg(ctx, op->p1, 0);
+
+				ctx->buf[over] = a64_b(ctx->len - over);
+				return 1;
+			}
+
+			off = field_offset(t, field);
 
 			if( off < 0 )
 				return 0;
@@ -1146,7 +1281,46 @@ static int compile_op( jit_ctx *ctx, hl_function *f, hl_opcode *op, int index ) 
 			int obj = op->op == OSetField ? op->p1 : 0;
 			int field = op->op == OSetField ? op->p2 : op->p1;
 			int value = op->op == OSetField ? op->p3 : op->p2;
-			int off = field_offset(ctx->regs[obj].t, field);
+			hl_type *t = ctx->regs[obj].t;
+			int off;
+
+			/** The same two answers the reading side has, for the same reason. */
+			if( t->kind == HVIRTUAL ) {
+				hl_type *vt = ctx->regs[value].t;
+				int slow, over;
+
+				load_reg(ctx, obj, S1);
+				emit(ctx, a64_ldr_imm(A64_X, S2, S1, (unsigned int)(sizeof(vvirtual) / 8 + field)));
+
+				slow = ctx->len;
+				emit(ctx, a64_cbz(1, S2, 0));
+
+				load_reg(ctx, value, S0);
+
+				if( !mem_access(ctx, S2, 0, value, S0, 1) )
+					return 0;
+
+				over = ctx->len;
+				emit(ctx, a64_b(0));
+				ctx->buf[slow] = a64_cbz(1, S2, ctx->len - slow);
+
+				load_reg(ctx, obj, 0);
+				emit_imm32(ctx, 1, t->virt->fields[field].hashed_name);
+
+				if( helper_is_short(vt) ) {
+					load_reg(ctx, value, vt->kind == HF32 || vt->kind == HF64 ? 0 : 2);
+				} else {
+					emit_imm64(ctx, 2, (unsigned long long)(size_t)vt);
+					load_reg(ctx, value, 3);
+				}
+
+				emit_call(ctx, set_helper(vt));
+
+				ctx->buf[over] = a64_b(ctx->len - over);
+				return 1;
+			}
+
+			off = field_offset(t, field);
 
 			if( off < 0 )
 				return 0;
@@ -1208,12 +1382,30 @@ static int compile_op( jit_ctx *ctx, hl_function *f, hl_opcode *op, int index ) 
 
 			return 0;
 
+		/**
+			To an integer, from a float or from an integer of another width.
+
+			Rounding towards zero is what Haxe means by Std.int, and it is what this instruction does
+			by definition here, where x86 has to set a rounding mode around the conversion and put it
+			back afterwards.
+		*/
 		case OToInt:
-			if( !ctx->regs[op->p2].is_float || ctx->regs[op->p1].is_float )
+			if( ctx->regs[op->p1].is_float )
 				return 0;
 
+			if( ctx->regs[op->p2].is_float ) {
+				load_reg(ctx, op->p2, S0);
+				emit(ctx, a64_fcvtzs(wide(ctx, op->p1), fp_type(ctx, op->p2), S0, S0));
+				store_reg(ctx, op->p1, S0);
+				return 1;
+			}
+
 			load_reg(ctx, op->p2, S0);
-			emit(ctx, a64_fcvtzs(wide(ctx, op->p1), fp_type(ctx, op->p2), S0, S0));
+
+			/** Narrowing happens by storing at the destination's width; widening has to take the sign. */
+			if( ctx->regs[op->p1].size == 8 && ctx->regs[op->p2].size <= 4 )
+				emit(ctx, a64_sxtw(S0, S0));
+
 			store_reg(ctx, op->p1, S0);
 			return 1;
 
@@ -1416,15 +1608,53 @@ static int compile_op( jit_ctx *ctx, hl_function *f, hl_opcode *op, int index ) 
 		/**
 			Calling a closure, which may or may not be carrying a receiver, and only says which at run
 			time. So both ways of arranging the arguments are emitted and one is jumped over.
-
-			A closure held as a dynamic is a different thing again: its arguments have to be boxed
-			into an array for hl_dyn_call. That is left to the interpreter for now.
 		*/
 		case OCallClosure: {
 			int over, plain;
 
-			if( ctx->regs[op->p2].t->kind != HFUN )
-				return 0;
+			/**
+				A closure held as a dynamic goes through the runtime instead. Its arguments are already
+				dynamics and have to be handed over as an array, so room for them is taken from the
+				stack, filled, and given back after. The result is a dynamic too, and casting it to
+				whatever the destination is wants a pointer to it, which is why it is put back on the
+				stack before the cast rather than kept in a register.
+			*/
+			if( ctx->regs[op->p2].t->kind != HFUN ) {
+				int space = ((op->p3 * 8) + 15) & ~15;
+				int i;
+
+				if( space == 0 )
+					space = 16;
+
+				adjust_sp(ctx, space, 0);
+				emit(ctx, a64_mov_sp(1, S1, A64_SP));
+
+				for(i=0;i<op->p3;i++) {
+					load_reg(ctx, op->extra[i], S0);
+					emit(ctx, a64_str_imm(A64_X, S0, S1, (unsigned int)i));
+				}
+
+				load_reg(ctx, op->p2, 0);
+				emit(ctx, a64_mov_reg(1, 1, S1));
+				emit_imm32(ctx, 2, op->p3);
+				emit_call(ctx, (void *)(size_t)&hl_dyn_call);
+
+				emit(ctx, a64_mov_sp(1, S1, A64_SP));
+				emit(ctx, a64_str_imm(A64_X, 0, S1, 0));
+				emit(ctx, a64_mov_reg(1, 0, S1));
+				emit_imm64(ctx, 1, (unsigned long long)(size_t)&hlt_dyn);
+
+				if( !helper_is_short(ctx->regs[op->p1].t) )
+					emit_imm64(ctx, 2, (unsigned long long)(size_t)ctx->regs[op->p1].t);
+
+				emit_call(ctx, cast_helper(ctx->regs[op->p1].t));
+				adjust_sp(ctx, space, 1);
+
+				if( ctx->regs[op->p1].size != 0 )
+					store_reg(ctx, op->p1, 0);
+
+				return 1;
+			}
 
 			load_reg(ctx, op->p2, S1);
 			emit(ctx, a64_ldr_imm(A64_X, S0, S1, (unsigned int)(offsetof(vclosure, fun) / 8)));
@@ -1457,6 +1687,383 @@ static int compile_op( jit_ctx *ctx, hl_function *f, hl_opcode *op, int index ) 
 			return 1;
 		}
 
+		/**
+			Constants that are addresses of things the module already holds, so each is a materialised
+			pointer rather than a lookup. The string pool is wide and the byte pool is not, and which
+			pool the bytes come from depends on how old the bytecode is.
+		*/
+		case OString:
+			emit_imm64(ctx, S0, (unsigned long long)(size_t)hl_get_ustring(ctx->m->code, op->p2));
+			store_reg(ctx, op->p1, S0);
+			return 1;
+
+		case OBytes: {
+			const void *at = ctx->m->code->version >= 5
+				? (const void *)(ctx->m->code->bytes + ctx->m->code->bytes_pos[op->p2])
+				: (const void *)ctx->m->code->strings[op->p2];
+
+			emit_imm64(ctx, S0, (unsigned long long)(size_t)at);
+			store_reg(ctx, op->p1, S0);
+			return 1;
+		}
+
+		case OType:
+			emit_imm64(ctx, S0, (unsigned long long)(size_t)(ctx->m->code->types + op->p2));
+			store_reg(ctx, op->p1, S0);
+			return 1;
+
+		/** A value's own type is the first thing in it, and null has no first thing, so null is void. */
+		case OGetType: {
+			int has, over;
+
+			load_reg(ctx, op->p2, S1);
+
+			has = ctx->len;
+			emit(ctx, a64_cbnz(1, S1, 0));
+			emit_imm64(ctx, S0, (unsigned long long)(size_t)&hlt_void);
+
+			over = ctx->len;
+			emit(ctx, a64_b(0));
+
+			ctx->buf[has] = a64_cbnz(1, S1, ctx->len - has);
+			emit(ctx, a64_ldr_imm(A64_X, S0, S1, 0));
+			ctx->buf[over] = a64_b(ctx->len - over);
+
+			store_reg(ctx, op->p1, S0);
+			return 1;
+		}
+
+		/** The kind is the first field of a type, and a type is the first field of a value. */
+		case OGetTID:
+			load_reg(ctx, op->p2, S1);
+			emit(ctx, a64_ldr_imm(A64_W, S0, S1, 0));
+			store_reg(ctx, op->p1, S0);
+			return 1;
+
+		/**
+			How many elements an array holds, which sits after the type and the element type in a
+			varray and after the type and one int in an abstract one.
+		*/
+		case OArraySize:
+			load_reg(ctx, op->p2, S1);
+			emit(ctx, a64_ldr_imm(A64_W, S0, S1,
+				(unsigned int)((ctx->regs[op->p2].t->kind == HABSTRACT ? sizeof(void *) + 4 : sizeof(void *) * 2) / 4)));
+			store_reg(ctx, op->p1, S0);
+			return 1;
+
+		/** A reference to one of the function's own registers, which is its home in the frame. */
+		case ORef:
+			emit_addr_of(ctx, op->p2, S0);
+			store_reg(ctx, op->p1, S0);
+			return 1;
+
+		case OUnref:
+			load_reg(ctx, op->p2, S1);
+
+			if( !mem_access(ctx, S1, 0, op->p1, S0, 0) )
+				return 0;
+
+			store_reg(ctx, op->p1, S0);
+			return 1;
+
+		case OSetref:
+			load_reg(ctx, op->p1, S1);
+			load_reg(ctx, op->p2, S0);
+			return mem_access(ctx, S1, 0, op->p2, S0, 1);
+
+		/** A cast the bytecode has already decided is safe, so it is a move. */
+		case OUnsafeCast:
+			load_reg(ctx, op->p2, S0);
+			store_reg(ctx, op->p1, S0);
+			return 1;
+
+		case OToUFloat:
+			load_reg(ctx, op->p2, S0);
+			emit(ctx, a64_ucvtf(wide(ctx, op->p2), fp_type(ctx, op->p1), S0, S0));
+			store_reg(ctx, op->p1, S0);
+			return 1;
+
+		/** A hint to the memory system, which is allowed to be nothing at all. */
+		case OPrefetch:
+			return 1;
+
+		/** Reached only where the bytecode has already gone wrong, so it stops rather than continues. */
+		case OAssert:
+			emit_call(ctx, (void *)(size_t)&hl_assert);
+			return 1;
+
+		/**
+			Memory reached as a base and a byte offset, which is what hl.Bytes and a native array are.
+
+			The offset is an i32 and the addressing mode extends it, so the extension is part of the
+			instruction rather than something emitted before it. Signed, because HashLink's offsets are
+			signed ints.
+		*/
+		case OGetI8:
+		case OGetI16:
+		case OGetMem: {
+			int width = op->op == OGetI8 ? A64_B : (op->op == OGetI16 ? A64_H : width_of(ctx->regs[op->p1].size));
+
+			load_reg(ctx, op->p2, S1);
+			load_reg(ctx, op->p3, S2);
+
+			if( ctx->regs[op->p1].is_float && op->op == OGetMem )
+				emit(ctx, a64_ls_reg(width, 1, A64_LS_LDR, S0, S1, S2, A64_EXT_SXTW, 0));
+			else
+				emit(ctx, a64_ls_reg(width, 0, A64_LS_LDR, S0, S1, S2, A64_EXT_SXTW, 0));
+
+			store_reg(ctx, op->p1, S0);
+			return 1;
+		}
+
+		case OSetI8:
+		case OSetI16:
+		case OSetMem: {
+			int width = op->op == OSetI8 ? A64_B : (op->op == OSetI16 ? A64_H : width_of(ctx->regs[op->p3].size));
+
+			load_reg(ctx, op->p1, S1);
+			load_reg(ctx, op->p2, S2);
+			load_reg(ctx, op->p3, S0);
+
+			if( ctx->regs[op->p3].is_float && op->op == OSetMem )
+				emit(ctx, a64_ls_reg(width, 1, A64_LS_STR, S0, S1, S2, A64_EXT_SXTW, 0));
+			else
+				emit(ctx, a64_ls_reg(width, 0, A64_LS_STR, S0, S1, S2, A64_EXT_SXTW, 0));
+
+			return 1;
+		}
+
+		/**
+			An element of an array, which is the elements themselves laid out after the varray header,
+			indexed by the element's own width.
+
+			An abstract array is a different shape and its elements may be whole structures, which is a
+			copy rather than a load, so it is refused rather than half done.
+		*/
+		case OGetArray: {
+			vreg *dst = ctx->regs + op->p1;
+
+			if( ctx->regs[op->p2].t->kind == HABSTRACT )
+				return 0;
+
+			load_reg(ctx, op->p2, S1);
+			load_reg(ctx, op->p3, S2);
+			emit(ctx, a64_add_imm(1, S1, S1, (unsigned int)sizeof(varray)));
+
+			emit(ctx, a64_ls_reg(width_of(dst->size), dst->is_float ? 1 : 0, A64_LS_LDR, S0, S1, S2, A64_EXT_SXTW, 1));
+			store_reg(ctx, op->p1, S0);
+			return 1;
+		}
+
+		case OSetArray: {
+			vreg *src = ctx->regs + op->p3;
+
+			if( ctx->regs[op->p1].t->kind == HABSTRACT )
+				return 0;
+
+			load_reg(ctx, op->p1, S1);
+			load_reg(ctx, op->p2, S2);
+			emit(ctx, a64_add_imm(1, S1, S1, (unsigned int)sizeof(varray)));
+			load_reg(ctx, op->p3, S0);
+
+			emit(ctx, a64_ls_reg(width_of(src->size), src->is_float ? 1 : 0, A64_LS_STR, S0, S1, S2, A64_EXT_SXTW, 1));
+			return 1;
+		}
+
+		/** Unsigned division, and its remainder, which needs the same correction the signed one does. */
+		case OUDiv:
+		case OUMod: {
+			int w = wide(ctx, op->p1);
+
+			load_reg(ctx, op->p2, S0);
+			load_reg(ctx, op->p3, S1);
+
+			if( op->op == OUDiv ) {
+				emit(ctx, a64_udiv(w, S0, S0, S1));
+			} else {
+				emit(ctx, a64_udiv(w, S2, S0, S1));
+				emit(ctx, a64_msub(w, S0, S2, S1, S0));
+				emit(ctx, a64_cmp_imm(w, S1, 0));
+				emit(ctx, a64_csel(w, S0, A64_ZR, S0, A64_EQ));
+			}
+
+			store_reg(ctx, op->p1, S0);
+			return 1;
+		}
+
+		case OJULt:
+		case OJUGte:
+		case OJNotLt:
+		case OJNotGte:
+			return compare_jump(ctx, op, index);
+
+		/**
+			An enum value: the type, then the construct index, then that construct's fields at offsets
+			the type carries.
+		*/
+		case OEnumAlloc:
+			emit_imm64(ctx, 0, (unsigned long long)(size_t)ctx->regs[op->p1].t);
+			emit_imm32(ctx, 1, op->p2);
+			emit_call(ctx, (void *)(size_t)&hl_alloc_enum);
+			store_reg(ctx, op->p1, 0);
+			return 1;
+
+		case OEnumIndex:
+			load_reg(ctx, op->p2, S1);
+			emit(ctx, a64_ldr_imm(A64_W, S0, S1, (unsigned int)(sizeof(void *) / 4)));
+			store_reg(ctx, op->p1, S0);
+			return 1;
+
+		case OEnumField: {
+			hl_type *t = ctx->regs[op->p2].t;
+			hl_enum_construct *c;
+			int at = (int)(int_val)op->extra;
+
+			if( t->kind != HENUM )
+				return 0;
+
+			c = t->tenum->constructs + op->p3;
+			load_reg(ctx, op->p2, S1);
+
+			if( !mem_access(ctx, S1, c->offsets[at], op->p1, S0, 0) )
+				return 0;
+
+			store_reg(ctx, op->p1, S0);
+			return 1;
+		}
+
+		case OSetEnumField: {
+			hl_type *t = ctx->regs[op->p1].t;
+			hl_enum_construct *c;
+
+			if( t->kind != HENUM )
+				return 0;
+
+			c = t->tenum->constructs;
+			load_reg(ctx, op->p1, S1);
+			load_reg(ctx, op->p3, S0);
+			return mem_access(ctx, S1, c->offsets[op->p2], op->p3, S0, 1);
+		}
+
+		/**
+			Building an enum value in one instruction, which is an allocation followed by a field write
+			per argument. The construct decides the offsets, so they are read here and written into the
+			instructions rather than worked out at run time.
+		*/
+		case OMakeEnum: {
+			hl_type *t = ctx->regs[op->p1].t;
+			hl_enum_construct *c;
+			int i;
+
+			if( t->kind != HENUM )
+				return 0;
+
+			c = t->tenum->constructs + op->p2;
+
+			emit_imm64(ctx, 0, (unsigned long long)(size_t)t);
+			emit_imm32(ctx, 1, op->p2);
+			emit_call(ctx, (void *)(size_t)&hl_alloc_enum);
+			store_reg(ctx, op->p1, 0);
+
+			for(i=0;i<op->p3;i++) {
+				load_reg(ctx, op->p1, S1);
+				load_reg(ctx, op->extra[i], S0);
+
+				if( !mem_access(ctx, S1, c->offsets[i], op->extra[i], S0, 1) )
+					return 0;
+			}
+
+			return 1;
+		}
+
+		/**
+			Writing a field by name at run time. The short forms take the value where the type would
+			have gone, exactly as the reading side does, and for the same reason: the function chosen
+			already knows what it is being handed.
+		*/
+		case ODynSet: {
+			hl_type *vt = ctx->regs[op->p3].t;
+
+			load_reg(ctx, op->p1, 0);
+			emit_imm32(ctx, 1, hl_hash_utf8(ctx->m->code->strings[op->p2]));
+
+			if( helper_is_short(vt) ) {
+				load_reg(ctx, op->p3, vt->kind == HF32 || vt->kind == HF64 ? 0 : 2);
+			} else {
+				emit_imm64(ctx, 2, (unsigned long long)(size_t)vt);
+				load_reg(ctx, op->p3, 3);
+			}
+
+			emit_call(ctx, set_helper(vt));
+			return 1;
+		}
+
+		/** A closure over a function with nothing bound, allocated once rather than per execution. */
+		case OStaticClosure: {
+			vclosure *c = static_closure(ctx, op->p2);
+
+			if( c == NULL )
+				return 0;
+
+			emit_imm64(ctx, S0, (unsigned long long)(size_t)c);
+			store_reg(ctx, op->p1, S0);
+			return 1;
+		}
+
+		/**
+			A jump table, which is the one place a PC relative address is right here.
+
+			adr computes from where it sits, and the whole buffer moves as one block, so the distance
+			between an instruction and a table four instructions later is the same wherever the block
+			ends up. That is not true of anything pointing outside the buffer, which is why every other
+			address in this file is built rather than computed.
+		*/
+		case OSwitch: {
+			int over, i;
+
+			load_reg(ctx, op->p1, S0);
+			emit(ctx, a64_cmp_imm(0, S0, (unsigned int)op->p2));
+
+			over = ctx->len;
+			emit(ctx, a64_bcond(A64_CS, 0));
+
+			/** The table begins three instructions along: the adr, the add and the br. */
+			emit(ctx, a64_adr(S1, 3 * 4));
+			emit(ctx, a64_addsub_reg(1, 0, 0, S1, S1, S0, A64_LSL, 2));
+			emit(ctx, a64_br(S1));
+
+			for(i=0;i<op->p2;i++)
+				emit_jump(ctx, a64_b(0), index + 1 + op->extra[i]);
+
+			/** Out of range falls past the table, which is where the default belongs. */
+			ctx->buf[over] = a64_bcond(A64_CS, ctx->len - over);
+			return 1;
+		}
+
+		/**
+			Refused rather than half done, and each for its own reason.
+
+			A virtual resolves its fields by name at run time and answers a different way when it has
+			none. Making one out of an object walks its fields against the virtual's. Reference data
+			and reference offsets are for pointers into the middle of a structure. And OAsm is literal
+			machine code the bytecode carries, which cannot be anything but the architecture it was
+			written for.
+		*/
+		/** Wrapping an object as a structural type, which the runtime works out the fields for. */
+		case OToVirtual:
+			emit_imm64(ctx, 0, (unsigned long long)(size_t)ctx->regs[op->p1].t);
+			load_reg(ctx, op->p2, 1);
+			emit_call(ctx, (void *)(size_t)&hl_to_virtual);
+			store_reg(ctx, op->p1, 0);
+			return 1;
+
+		case OVirtualClosure:
+		case ORefData:
+		case ORefOffset:
+		case OAsm:
+		case OCatch:
+			return 0;
+
 		case ORet:
 			if( ctx->regs[op->p1].size != 0 )
 				load_reg(ctx, op->p1, 0);
@@ -1488,6 +2095,7 @@ void hl_jit_free( jit_ctx *ctx, h_bool can_reset ) {
 		free(ctx->op_pos);
 		free(ctx->jumps);
 		free(ctx->calls);
+		free(ctx->closures);
 		free(ctx);
 	}
 }
@@ -1499,6 +2107,7 @@ void hl_jit_init( jit_ctx *ctx, hl_module *m ) {
 
 	/** Per module rather than per function, since they are all patched together at the end. */
 	ctx->ncalls = 0;
+	ctx->nclosures = 0;
 
 	if( m->code->hasdebug ) {
 		ctx->debug = (hl_debug_infos *)malloc(sizeof(hl_debug_infos) * (size_t)m->code->nfunctions);
@@ -1547,8 +2156,19 @@ int hl_jit_function( jit_ctx *ctx, hl_module *m, hl_function *f ) {
 	for(i=0;i<f->nops;i++) {
 		ctx->op_pos[i] = ctx->len;
 
-		if( !compile_op(ctx, f, f->ops + i, i) )
+		if( !compile_op(ctx, f, f->ops + i, i) ) {
+			/**
+				Which opcode was refused, for whoever is extending this. Refusing is a normal answer
+				and not an error, so it says nothing unless asked: hxScript reports it once per module
+				and interprets, and a build that wants to know which instruction stopped it asks with
+				-D HXS_JIT_TRACE.
+			*/
+#			ifdef HXS_JIT_TRACE
+			fprintf(stderr, "hxs jit: no rule for %s, in function %d at %d\n",
+				hl_op_name(f->ops[i].op), f->findex, i);
+#			endif
 			return -1;
+		}
 	}
 
 	ctx->op_pos[f->nops] = ctx->len;

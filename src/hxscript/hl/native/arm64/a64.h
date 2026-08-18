@@ -610,6 +610,8 @@ static inline a64_insn a64_fcmp_zero( int type, int rn ) {
 */
 
 #define A64_CVT_SCVTF	0x02	/* rmode 00, opcode 010 */
+#define A64_CVT_UCVTF	0x03	/* rmode 00, opcode 011 */
+#define A64_CVT_FCVTZU	0x19	/* rmode 11, opcode 001 */
 #define A64_CVT_FCVTZS	0x18	/* rmode 11, opcode 000 */
 #define A64_CVT_FMOV_TO	0x06	/* rmode 00, opcode 110, fp to general */
 #define A64_CVT_FMOV_FROM	0x07	/* rmode 00, opcode 111, general to fp */
@@ -622,6 +624,16 @@ static inline a64_insn a64_cvt( int is64, int type, int op, int rd, int rn ) {
 /** Signed integer to floating point. */
 static inline a64_insn a64_scvtf( int is64, int type, int rd, int rn ) {
 	return a64_cvt(is64, type, A64_CVT_SCVTF, rd, rn);
+}
+
+/** Unsigned integer to floating point, which is what HashLink's OToUFloat means. */
+static inline a64_insn a64_ucvtf( int is64, int type, int rd, int rn ) {
+	return a64_cvt(is64, type, A64_CVT_UCVTF, rd, rn);
+}
+
+/** Floating point to unsigned integer, rounding towards zero. */
+static inline a64_insn a64_fcvtzu( int is64, int type, int rd, int rn ) {
+	return a64_cvt(is64, type, A64_CVT_FCVTZU, rd, rn);
 }
 
 /** Floating point to signed integer, rounding towards zero, which is what Haxe means by Std.int. */
