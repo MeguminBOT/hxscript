@@ -731,6 +731,22 @@ int hl_module_init( hl_module *m, h_bool hot_reload ) {
 		m->functions_ptrs[f->findex] = (void*)(int_val)fpos;
 	}
 	m->jit_code = hl_jit_code(ctx, m, &m->codesize, &m->jit_debug, NULL);
+#ifdef HXS_NATIVE_TABLE
+	/*
+		Patched: a jit that could not get memory to put code in says so by answering NULL, and the
+		offsets below would turn that into pointers just past address zero. The first call into the
+		module then jumps into nothing.
+
+		It can happen wherever a system declines to hand out executable pages: an SELinux policy
+		without execmem, a hardened kernel, or simply no memory left. Failing the link here makes that
+		a module hxScript interprets instead, which is what every other reason for not compiling
+		already does.
+	*/
+	if( m->jit_code == NULL ) {
+		hl_jit_free(ctx, false);
+		return 0;
+	}
+#endif
 	for(i=0;i<m->code->nfunctions;i++) {
 		hl_function *f = m->code->functions + i;
 		m->functions_ptrs[f->findex] = ((unsigned char*)m->jit_code) + ((int_val)m->functions_ptrs[f->findex]);

@@ -40,9 +40,9 @@ is checked at build time and probed again at run time.
 A different HashLink can be built against instead by pointing `HL_SRC` at its source tree, which
 takes its `code.c`, `module.c` and `jit.c` over the ones here.
 
-## The two patches
+## The three patches
 
-Both are in `module.c`, both marked `HXS_NATIVE_TABLE` where they sit.
+All three are in `module.c`, each marked `HXS_NATIVE_TABLE` where it sits.
 
 **`hl_module_init_natives`.** Hashlink resolves a module's natives by loading `<lib>.hdll` and looking
 up `hlp_<name>` in it. A script compiled at runtime needs to reach hxScript's own runtime, which is
@@ -57,13 +57,21 @@ of modules loaded at run time instead of its own from the first script onwards. 
 instead. `gc.c` checks the callback for NULL before using it, so a host that never set one is
 unaffected either way.
 
+**`hl_jit_code`'s answer, in the middle of `hl_module_init`.** A jit that could not get memory to put
+code in says so by returning NULL, and the loop underneath turns that into pointers just past address
+zero, so the first call into the module jumps into nothing. It is reachable wherever a system declines
+to hand out executable pages: an SELinux policy without `execmem`, a hardened kernel, or no memory
+left. Failing the link instead makes it a module hxScript interprets, which is what every other reason
+for not compiling already does. Checked both ways: with the guard the corpus reports every module
+rejected and still answers correctly, and without it the same build segfaults.
+
 Nothing else is modified. The symbols are renamed at compile time by `hxs_vendor.h` rather than in
-the files, so `diff` against a fresh checkout of the 1.16 tag shows those two hunks and nothing else.
+the files, so `diff` against a fresh checkout of the 1.16 tag shows those three hunks and nothing else.
 
 ## Updating
 
 1. Copy the four files out of the new tag into a new `hlNNN/` directory.
-2. Re-apply both `HXS_NATIVE_TABLE` hunks.
+2. Re-apply all three `HXS_NATIVE_TABLE` hunks.
 3. Check `nm -g --defined-only` on the three objects against the list in `hxs_vendor.h`, and add
    whatever the new version defines.
 4. Leave the old directory alone until the build's floor moves off it.
