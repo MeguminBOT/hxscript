@@ -175,8 +175,11 @@ note "hashlink: $HL"
 if [ -z "$HLC" ]; then
 	[ -n "$OUT" ] || OUT="$HERE/hxscript.$EXT"
 
+	# -fPIC belongs to every shared library and is not optional anywhere it matters. On arm64 Linux
+	# the linker refuses outright, naming an ADR_PREL_PG_HI21 relocation against a symbol that may
+	# bind externally; on Windows it is meaningless and ignored, and on macOS clang already does it.
 	# shellcheck disable=SC2086
-	$CC -shared $CFLAGS -o "$OUT" $SOURCES $LINK
+	$CC -shared -fPIC $CFLAGS -o "$OUT" $SOURCES $LINK
 
 	note "built: $OUT"
 	exit 0

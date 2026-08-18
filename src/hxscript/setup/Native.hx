@@ -202,7 +202,12 @@ class Native {
 		if (!FileSystem.exists(into))
 			FileSystem.createDirectory(into);
 
-		var args:Array<String> = ['-shared', '-fvisibility=hidden'];
+		/**
+		 * `-fPIC` belongs to every shared library and is not optional anywhere it matters. On arm64
+		 * Linux the linker refuses outright rather than producing something that does not load; on
+		 * Windows it is meaningless and ignored, and on macOS clang already does it.
+		 */
+		var args:Array<String> = ['-shared', '-fPIC', '-fvisibility=hidden'];
 		for (a in shared(carried, headers, arch))
 			args.push(a);
 

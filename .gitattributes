@@ -1,2 +1,7 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Shell scripts are LF everywhere, including in a Windows working tree. They are run on Linux and
+# macOS, and the arm64 container reads them straight out of a mount rather than out of a checkout,
+# where a carriage return reaches the shell and `set -e` becomes an illegal option.
+*.sh text eol=lf
