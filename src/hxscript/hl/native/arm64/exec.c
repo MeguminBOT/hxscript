@@ -20,6 +20,16 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
+/**
+	An anonymous mapping is POSIX rather than C, and -std=c11 asks glibc for C and nothing besides, so
+	the constant naming it is hidden. build.sh compiles with exactly that flag, so without this the
+	module does not build on Linux at all. It has to come before the first libc header, since that is
+	when glibc decides what to expose.
+*/
+#ifndef _DEFAULT_SOURCE
+#	define _DEFAULT_SOURCE 1
+#endif
+
 #include "exec.h"
 
 #include <sys/mman.h>
