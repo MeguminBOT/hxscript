@@ -21,6 +21,13 @@ typedef Library = {
 	 * `heaps3d`, and giving it that define anyway is what lets `hxscript_setup_skip` address the half
 	 * rather than the whole. So `define` is the name, `requires` is the switch, and they are the same
 	 * for every library that is one.
+	 *
+	 * **Several defines may be named, separated by commas, and then all of them must be set.** That is
+	 * for a library that is only compilable on one platform: `extension-androidtools` answers
+	 * `#error 'not supported on your current platform'` off Android, so a desktop build that merely has
+	 * the library must not have its packages force-compiled in. Requiring `extension-androidtools` and
+	 * `android` together is what keeps the record off that build, and asking for the library alone
+	 * would turn a working desktop build into one that does not compile.
 	 */
 	var ?requires:String;
 
@@ -60,6 +67,14 @@ typedef Library = {
 	/** Abstracts under `abstractPackages` the wrapper cannot generate for. */
 	var abstractExclude:Array<String>;
 
-	/** Types scripts may name without importing them. Everything else stays reachable by explicit `import`. */
+	/**
+	 * Types scripts may name without importing them, which every shipped preset leaves empty.
+	 *
+	 * A preset says what a script *can* import. What is already imported into every script is a
+	 * different question and not a library's to answer: the names occupy the global scope of every
+	 * script in the process, they shadow anything the host binds under the same name, and a script
+	 * reading `FlxG` gives no clue where it came from. So this is here for a host's own record in
+	 * `Presets.custom`, and the shipped ones offer nothing.
+	 */
 	var globals:Array<String>;
 }

@@ -2,17 +2,16 @@ package hxscript.setup;
 
 /**
  * One [`Library`](Library.hx) record per library hxScript knows how to wire up.
+ *
+ * A record says what a script may `import`: types to compile in, bases to bridge, abstracts to wrap.
+ * `globals` is empty in all of them on purpose, since pre-importing a name into every script is the
+ * host's call. See [`Boot.importGlobals`](Boot.hx).
  */
 class Presets {
-	/**
-	 * Records a host added for itself, for a library not shipped here, or to override one that is.
-	 */
+	/** Records a host added for itself, for a library not shipped here, or to override one shipped. */
 	public static var custom:Array<Library> = [];
 
-	/**
-	 * The library's own additions to what a script can reach, always on because `-lib hxscript`
-	 * defines `hxscript`.
-	 */
+	/** The library's own additions, always on because `-lib hxscript` defines `hxscript`. */
 	public static final CORE:Library = {
 		define: 'hxscript',
 		title: 'hxscript',
@@ -28,13 +27,10 @@ class Presets {
 		abstractPackages: [],
 		abstracts: [],
 		abstractExclude: [],
-		globals: ['hxscript.stdlib.BytesTools']
+		globals: []
 	};
 
-	/**
-	 * Lime is the layer under openfl, and a script reaches it for windows, input codes and timing
-	 * rather than for anything to draw with.
-	 */
+	/** The layer under openfl: windows, input codes and timing rather than anything to draw with. */
 	public static final LIME:Library = {
 		define: 'lime',
 		title: 'lime',
@@ -51,12 +47,10 @@ class Presets {
 		abstractPackages: [],
 		abstracts: ['lime.ui.KeyCode', 'lime.ui.MouseButton', 'lime.ui.GamepadButton'],
 		abstractExclude: [],
-		globals: ['lime.system.System', 'lime.ui.KeyCode', 'lime.ui.MouseButton']
+		globals: []
 	};
 
-	/**
-	 * OpenFL, with the two constraints its display list imposes.
-	 */
+	/** OpenFL, with the two constraints its display list imposes. */
 	public static final OPENFL:Library = {
 		define: 'openfl',
 		title: 'openfl',
@@ -74,7 +68,13 @@ class Presets {
 			'openfl.display._internal',
 			'openfl.text._internal'
 		],
-		types: ['hxscript.openfl.SoundTools'],
+		/**
+		 * `openfl.Lib` is here rather than left to the roots, and it is the one type in this record
+		 * the roots cannot reach: it sits at the `openfl` package root, and every root below names a
+		 * sub-package. Without this line nothing put it in the build, so `import openfl.Lib;` in a
+		 * script found no type to bind.
+		 */
+		types: ['hxscript.openfl.SoundTools', 'openfl.Lib'],
 		bases: ['openfl.display.Sprite'],
 		abstractPackages: [],
 		abstracts: [
@@ -84,25 +84,10 @@ class Presets {
 			'openfl.text.TextFormatAlign'
 		],
 		abstractExclude: [],
-		globals: [
-			'hxscript.openfl.SoundTools',
-			'openfl.display.Sprite',
-			'openfl.display.Shape',
-			'openfl.display.Bitmap',
-			'openfl.display.BitmapData',
-			'openfl.display.BlendMode',
-			'openfl.geom.Point',
-			'openfl.geom.Rectangle',
-			'openfl.geom.Matrix',
-			'openfl.text.TextField',
-			'openfl.text.TextFormat',
-			'openfl.Lib'
-		]
+		globals: []
 	};
 
-	/**
-	 * Flixel, which is the library this arrangement was designed against.
-	 */
+	/** Flixel, which is the library this arrangement was designed against. */
 	public static final FLIXEL:Library = {
 		define: 'flixel',
 		title: 'flixel',
@@ -121,35 +106,13 @@ class Presets {
 		abstractPackages: ['flixel'],
 		abstracts: [],
 		abstractExclude: [],
-		globals: [
-			'hxscript.flixel.TriangleTools',
-			'flixel.FlxG',
-			'flixel.FlxBasic',
-			'flixel.FlxObject',
-			'flixel.FlxSprite',
-			'flixel.FlxState',
-			'flixel.FlxSubState',
-			'flixel.FlxCamera',
-			'flixel.FlxStrip',
-			'flixel.group.FlxSpriteGroup',
-			'flixel.text.FlxText',
-			'flixel.ui.FlxButton',
-			'flixel.util.FlxColor',
-			'flixel.util.FlxTimer',
-			'flixel.math.FlxPoint',
-			'flixel.math.FlxRect',
-			'flixel.math.FlxMath',
-			'flixel.tweens.FlxTween',
-			'flixel.tweens.FlxEase'
-		]
+		globals: []
 	};
 
 	/**
-	 * flixel-addons. Covered by flixel's recursive include, so this is the skip list and the extra
-	 * bases.
-	 *
-	 * `nape` and `editors.spine` are integrations for libraries a project may not ship, and they
-	 * fail the build rather than being quietly absent.
+	 * flixel-addons, covered by flixel's recursive include, so this is the skip list and extra bases.
+	 * `nape` and `editors.spine` integrate libraries a project may not ship, and fail the build rather
+	 * than being quietly absent.
 	 */
 	public static final FLIXEL_ADDONS:Library = {
 		define: 'flixel-addons',
@@ -165,11 +128,7 @@ class Presets {
 		abstractPackages: [],
 		abstracts: [],
 		abstractExclude: [],
-		globals: [
-			'flixel.addons.display.FlxBackdrop',
-			'flixel.addons.effects.FlxSkewedSprite',
-			'flixel.addons.util.FlxFSM'
-		]
+		globals: []
 	};
 
 	/** flixel-ui. Also under the `flixel` root, so also just bases and names. */
@@ -187,24 +146,13 @@ class Presets {
 		abstractPackages: [],
 		abstracts: [],
 		abstractExclude: [],
-		globals: [
-			'flixel.addons.ui.FlxUI',
-			'flixel.addons.ui.FlxUIState',
-			'flixel.addons.ui.FlxUIButton',
-			'flixel.addons.ui.FlxUIText',
-			'flixel.addons.ui.FlxUIGroup'
-		]
+		globals: []
 	};
 
 	/**
-	 * Heaps, which shares no ancestry with the others and so is the honest test of whether the
-	 * arrangement generalises.
-	 *
-	 * **This is the 2D half and whatever 3D types the 2D half names**, with `HEAPS_3D` holding the
-	 * rest. The three that live here rather than there are not a judgement call: `h2d.Drawable`
-	 * declares `colorAdd` an `h3d.Vector` and `colorMatrix` an `h3d.Matrix`, and `h2d.Tile` is a
-	 * region of an `h3d.mat.Texture`, so a project that never draws a triangle in space still names
-	 * all three. Nothing else under `h3d` is reachable from `h2d`, which is what makes the cut a cut.
+	 * The 2D half of heaps, plus the `h3d` types the 2D half names: `h2d.Drawable` declares `colorAdd`
+	 * an `h3d.Vector` and `colorMatrix` an `h3d.Matrix`, and `h2d.Tile` is a region of an
+	 * `h3d.mat.Texture`. Nothing else under `h3d` is reachable from `h2d`, which is what makes the cut.
 	 */
 	public static final HEAPS:Library = {
 		define: 'heaps',
@@ -229,11 +177,7 @@ class Presets {
 			'h2d.filter.Glow',
 			'h2d.col.Point',
 			'hxd.Key',
-			/**
-			 * The other way a game is played. `hxd.Pad.wait` hands over a pad as one arrives, and its
-			 * sticks, triggers and buttons are read per frame the way the keyboard is, so a project
-			 * that wants both writes the same loop twice rather than anything special.
-			 */
+			/** Read per frame the way the keyboard is; `wait` hands over a pad as one arrives. */
 			'hxd.Pad',
 			'hxd.Timer',
 			'hxd.Math',
@@ -250,57 +194,19 @@ class Presets {
 		bases: ['h2d.Object'],
 		abstractPackages: [],
 		/**
-		 * `h2d.col.Point` is here because it is an `@:forward abstract` over `PointImpl`, so it has no
-		 * runtime class and `new h2d.col.Point(3, 4)` in a script resolved to nothing. A wrapper is
-		 * what gives an abstract something to resolve to, and this is the one a project reaches for
-		 * most: it is what `getBounds`, `globalToLocal` and every collision shape are written in.
-		 *
-		 * The three `h3d` ones are the same story for the 2D half. `colorAdd` and `colorMatrix` are
-		 * declared on `h2d.Drawable` as an `h3d.Vector` and an `h3d.Matrix`, and `color` on the same
-		 * class is an `h3d.Vector4`, so tinting a sprite names all three and nothing about it is 3D.
+		 * All five are `@:forward` abstracts with no runtime class, so without a wrapper
+		 * `new h2d.col.Point(3, 4)` resolves to nothing. `Point` is what `getBounds`, `globalToLocal`
+		 * and every collision shape are written in; the `h3d` three are what tinting a sprite names.
 		 */
 		abstracts: ['h2d.BlendMode', 'h2d.col.Point', 'h3d.Vector', 'h3d.Vector4', 'h3d.Matrix'],
 		abstractExclude: [],
-		globals: [
-			'hxscript.heaps.SoundTools',
-			'h2d.Object',
-			'h2d.Bitmap',
-			'h2d.Graphics',
-			'h2d.Text',
-			'h2d.Tile',
-			'hxd.Key',
-			'hxd.Timer',
-			'h3d.Vector'
-		]
+		globals: []
 	};
 
 	/**
-	 * The 3D half of heaps, which arrives with the rest of it and can be left out.
-	 *
-	 * heaps is not a 2D engine with 3D bolted on: a project picks one scene graph or the other, and
-	 * a preset offering only `h2d` says the library does not support half of what the framework is
-	 * for. So this is on whenever heaps is, and is a record of its own for the other reason, which is
-	 * that a project only ever wants one of the two graphs and this is the more expensive one. Nine
-	 * of the ten bridges the heaps presets generate are here, `h2d.Object` being the tenth, and a
-	 * bridge costs one generated override per inherited method.
-	 *
-	 * ```
-	 * -D hxscript_setup_skip=heaps3d
-	 * ```
-	 *
-	 * A 2D project that says that keeps every `h2d` type, `h3d.Vector`, `h3d.Matrix` and
-	 * `h3d.mat.Texture`, and stops paying for a scene graph it never builds into.
-	 *
-	 * **The 3D scene graph is bridgeable because a base no longer has to be rebuilt to be extended.**
-	 * A bridge used to copy the constructor of the class it extends, by turning the compiler's own
-	 * output back into source, and this branch does not survive that: `ObjectFlags` is an abstract
-	 * whose methods mutate `this`, so every flag property becomes arithmetic on the underlying `Int`
-	 * against a field typed as the abstract, which no source may write.
-	 *
-	 * Such a base is constructed by Haxe instead. The bridge gets a real constructor calling a real
-	 * `super`, and the instance is made through it, which means the base runs exactly as compiled and
-	 * nothing about it has to survive a round trip. Scripts can be part of the 3D scene rather than
-	 * only building into it.
+	 * The 3D half of heaps, on whenever heaps is and separable because a project uses one scene graph
+	 * or the other. Nine of the ten heaps bridges are here, and a bridge costs one generated override
+	 * per inherited method, so `-D hxscript_setup_skip=heaps3d` is what a 2D project turns off.
 	 */
 	public static final HEAPS_3D:Library = {
 		define: 'heaps3d',
@@ -332,16 +238,9 @@ class Presets {
 			'h3d.parts.GpuParticles',
 			'h3d.col.Sphere',
 			/**
-			 * The shape a game asks questions of rather than draws. `Ray` with
-			 * `Bounds.rayIntersection` is every hitscan shot and every ground probe, and both are
-			 * arithmetic with no device behind them, so a project can run its own collision without a
-			 * window and a test can drive it without one either.
-			 *
-			 * `h3d.col.Point` is not here beside it, and cannot be: it is a typedef to `h3d.Vector`,
-			 * which is an `@:forward abstract`, and the manifest holds a reference per type so that
-			 * dead code elimination keeps them. An abstract is not a value, so naming one there fails
-			 * the build inside a macro rather than where it was written. Nothing is lost, since the
-			 * 2D preset already wraps `h3d.Vector` and the alias resolves to that.
+			 * With `Bounds.rayIntersection`, every hitscan shot and ground probe, and arithmetic with no
+			 * device behind it. `h3d.col.Point` cannot join it: it aliases the `h3d.Vector` abstract, and
+			 * the manifest holds a value reference per type, which an abstract is not.
 			 */
 			'h3d.col.Ray',
 			/**
@@ -375,12 +274,10 @@ class Presets {
 		abstractPackages: [],
 		abstracts: [],
 		abstractExclude: [],
-		globals: ['h3d.scene.Object', 'h3d.scene.Mesh', 'h3d.prim.Cube', 'h3d.mat.Material']
+		globals: []
 	};
 
-	/**
-	 * SmidrUI, which is a UI toolkit rather than a game framework and is here for that reason.
-	 */
+	/** SmidrUI, a UI toolkit rather than a game framework, and here for that reason. */
 	public static final SMIDR:Library = {
 		define: 'smidr',
 		title: 'SmidrUI',
@@ -391,54 +288,154 @@ class Presets {
 		abstractPackages: ['smidr.types'],
 		abstracts: [],
 		abstractExclude: [],
-		globals: [
-			'smidr.UIComponent',
-			'smidr.UIRoot',
-			'smidr.UITheme',
-			'smidr.UIColor',
-			'smidr.UITween',
-			'smidr.widgets.UILabel',
-			'smidr.widgets.UIPanel',
-			'smidr.widgets.UIButton',
-			'smidr.widgets.UICheckbox',
-			'smidr.widgets.UISlider',
-			'smidr.widgets.UIList',
-			'smidr.widgets.UITextInput',
-			'smidr.widgets.UITextArea',
-			'smidr.widgets.UIProgressBar',
-			'smidr.widgets.UIToolbar',
-			'smidr.widgets.UIStatusBar'
-		]
+		globals: []
+	};
+
+	/**
+	 * hxvlc, video playback through libVLC, so a script can run a cutscene without the host exposing a
+	 * video API of its own. `hxvlc.impl` is out of the roots because it is the libVLC extern layer,
+	 * written in `cpp.RawPointer` and `cpp.Callable`; the two public classes pull in what they need.
+	 */
+	public static final HXVLC:Library = {
+		define: 'hxvlc',
+		title: 'hxvlc',
+		roots: ['hxvlc.openfl', 'hxvlc.util', 'hxvlc.flixel'],
+		ignore: ['hxvlc.util.macros'],
+		types: [],
+		/**
+		 * `openfl.Video` deliberately not: it inherits most of the display list, and a script holds one
+		 * and adds it to the stage rather than being one. A flixel object is reached by being one.
+		 */
+		bases: ['hxvlc.flixel.FlxVideoSprite'],
+		abstractPackages: [],
+		/** `Location` is a typedef of this, and it is the argument type of every `load` call. */
+		abstracts: ['hxvlc.util.typeLimit.OneOfTwo'],
+		abstractExclude: [],
+		globals: []
+	};
+
+	/**
+	 * extension-androidtools: toasts, permissions, build info. Every module opens with
+	 * `#if (!android && !native) #error`, so requiring the platform as well as the library is what
+	 * keeps a desktop build that merely lists it compiling.
+	 */
+	public static final ANDROIDTOOLS:Library = {
+		define: 'extension-androidtools',
+		requires: 'extension-androidtools,android',
+		title: 'extension-androidtools',
+		roots: ['extension.androidtools'],
+		/** JNI plumbing rather than an API, and the callback bridge is called from native code. */
+		ignore: ['extension.androidtools.jni', 'extension.androidtools.callback'],
+		types: [],
+		bases: [],
+		abstractPackages: [],
+		abstracts: [],
+		abstractExclude: [],
+		globals: []
+	};
+
+	/**
+	 * extension-haptics, vibration on Android and iOS. Ungated because `Haptic` keeps every
+	 * platform-specific branch inside a conditional, so it compiles everywhere and does nothing where
+	 * there is no hardware. `HapticAndroid` and `HapticIOS` compile on one platform each, so naming
+	 * them would undo that.
+	 */
+	public static final HAPTICS:Library = {
+		define: 'extension-haptics',
+		title: 'extension-haptics',
+		roots: [],
+		ignore: [],
+		types: ['extension.haptics.Haptic'],
+		bases: [],
+		abstractPackages: [],
+		abstracts: [],
+		abstractExclude: [],
+		globals: []
+	};
+
+	/**
+	 * haxe.ui core: the components and the layout, abstract over what draws them. `haxe.ui.backend` is
+	 * left to the backend record, since core ships that package as the shape a backend must fill and
+	 * the backend library shadows it on the classpath.
+	 */
+	public static final HAXEUI_CORE:Library = {
+		define: 'haxeui-core',
+		title: 'haxe.ui core',
+		roots: ['haxe.ui'],
+		ignore: ['haxe.ui.macros', 'haxe.ui._module', 'haxe.ui.parsers', 'haxe.ui.backend'],
+		types: ['haxe.ui.Toolkit'],
+		/**
+		 * None, deliberately: a haxe.ui screen is composed rather than subclassed, and `Component` is
+		 * the root of everything here, so bridging it would be the most expensive base shipped.
+		 */
+		bases: [],
+		/**
+		 * The whole package: every constant is an enum abstract, `Variant` is what a component's value
+		 * is typed as, and `EventType` is how an event is named.
+		 */
+		abstractPackages: ['haxe.ui'],
+		abstracts: [],
+		abstractExclude: [],
+		globals: []
+	};
+
+	/**
+	 * The flixel backend for haxe.ui, its own haxelib and so its own record: a project picks one
+	 * backend, and naming flixel's here would be wrong for the openfl and heaps ones.
+	 */
+	public static final HAXEUI_FLIXEL:Library = {
+		define: 'haxeui-flixel',
+		title: 'haxe.ui flixel',
+		roots: ['haxe.ui.backend'],
+		ignore: [],
+		types: [],
+		/** The one place such a project subclasses: a screen is a `UIState`. A fragment is composed. */
+		bases: ['haxe.ui.backend.flixel.UIState', 'haxe.ui.backend.flixel.UISubState'],
+		abstractPackages: [],
+		abstracts: [],
+		abstractExclude: [],
+		globals: []
 	};
 
 	/** Every library shipped here, whether or not this build has it. */
-	public static final SHIPPED:Array<Library> = [CORE, LIME, OPENFL, FLIXEL, FLIXEL_ADDONS, FLIXEL_UI, HEAPS, HEAPS_3D, SMIDR];
+	public static final SHIPPED:Array<Library> = [
+		CORE,
+		LIME,
+		OPENFL,
+		FLIXEL,
+		FLIXEL_ADDONS,
+		FLIXEL_UI,
+		HXVLC,
+		ANDROIDTOOLS,
+		HAPTICS,
+		HAXEUI_CORE,
+		HAXEUI_FLIXEL,
+		HEAPS,
+		HEAPS_3D,
+		SMIDR
+	];
 
 	/**
 	 * The libraries this build actually has, with `custom` folded in.
 	 *
-	 * A record is turned on by `requires` where it has one and by its own `define` otherwise, and is
-	 * named to `hxscript_setup_skip` and `hxscript_setup_only` by its `define` either way. That is
-	 * the whole of what lets `-D hxscript_setup_skip=heaps3d` drop half of heaps: nothing defines
-	 * `heaps3d`, so it could not switch itself on, and it is the only name that addresses that half.
+	 * A record switches on by `requires` where it has one and by `define` otherwise, and is addressed
+	 * by `define` either way, which is what lets `-D hxscript_setup_skip=heaps3d` drop half of heaps.
 	 *
 	 * @return The active records, custom ones last.
 	 */
 	public static function active():Array<Library> {
 		var only:Array<String> = list('hxscript_setup_only');
+
 		var skip:Array<String> = list('hxscript_setup_skip');
-
 		var overridden:Array<String> = [for (lib in custom) lib.define];
-		var out:Array<Library> = [];
 
+		var out:Array<Library> = [];
 		for (lib in SHIPPED) {
 			if (overridden.indexOf(lib.define) < 0)
 				out.push(lib);
 		}
-
 		for (lib in custom)
 			out.push(lib);
-
 		return [
 			for (lib in out)
 				if (enabled(lib.requires ?? lib.define)
@@ -448,12 +445,26 @@ class Presets {
 	}
 
 	/**
+	 * Whether a record's switch is on, which is every define it names being set.
+	 *
+	 * @param define One define, or several separated by commas.
+	 * @return Whether the build defines all of them.
+	 */
+	public static function enabled(define:String):Bool {
+		for (one in define.split(','))
+			if (!defined(StringTools.trim(one)))
+				return false;
+
+		return true;
+	}
+
+	/**
 	 * Whether a define is set, asked in whichever of the two worlds this is running in.
 	 *
 	 * @param define The define to test.
 	 * @return Whether the build defines it.
 	 */
-	public static function enabled(define:String):Bool {
+	static function defined(define:String):Bool {
 		#if macro
 		return haxe.macro.Context.defined(define);
 		#else
@@ -473,10 +484,8 @@ class Presets {
 		#else
 		var raw:String = hxscript.setup.Defines.compilerDefines.get(define);
 		#end
-
 		if (raw == null || raw.length == 0 || raw == '1')
 			return [];
-
 		return [for (part in raw.split(',')) StringTools.trim(part)];
 	}
 }
