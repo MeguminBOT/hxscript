@@ -70,7 +70,15 @@ class Hint {
 			for (path in paths.slice(0, suggestions))
 				lines.push('    import $path;');
 
-			lines.push('or add it to the `globals` of a hxscript.setup.Library record so no script has to.');
+			/**
+			 * The full path rather than `name`, because that is what the call takes. No preset offers a
+			 * bare name, so there is no list to point a reader at: the host names the path or the script
+			 * writes the import, and the import above is the one to reach for first.
+			 */
+			lines.push('or, so no script has to, have the host call'
+				+ ' hxscript.setup.Boot.importGlobals([\''
+				+ paths[0]
+				+ '\']).');
 			return lines.join('\n');
 		}
 

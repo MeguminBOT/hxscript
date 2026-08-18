@@ -648,7 +648,7 @@ file, a macro and a startup function:
 | `roots` / `ignore` | the types are in the build | `Type not found` |
 | `bases` | a bridge exists per scriptable base | `Class <base> can't be extended for scripting` |
 | `abstractPackages` / `abstracts` | its abstracts are wrapped | `Unknown identifier: ADD` |
-| `globals` | names resolve without an import | `Unknown identifier: FlxG` |
+| `globals` | names offered without an import, empty in every shipped preset | `Unknown identifier: FlxG`, until `Boot.importGlobals` |
 
 The fifth thing, shimming members with no runtime form, is a real closure rather than a name, so
 it lives in [`Shims`](../src/hxscript/setup/Shims.hx) instead.
@@ -734,7 +734,11 @@ modules to skip and the bases to bridge, and nothing else.
 The abstract scan is worth it here. `FlxColor`, `FlxAxes`, `FlxTextAlign`, `FlxDirectionFlags`
 are exactly the values a script holds, and a hand-written list of them gets discovered the hard
 way, as a runtime `Unknown identifier` from somebody's script, then a rebuild to add one line.
-Forty-one come out of it, and `-D hxscript_verbose` lists them.
+Seventy-three come out of it against flixel 6.2.0, and `-D hxscript_verbose` lists them: nineteen
+under `flixel.input`, fourteen under `flixel.graphics`, eleven under `flixel.util`, nine under
+`flixel.system`, and the rest in ones and fours across `text`, `path`, `ui`, `tile`, `math` and
+`tweens`. That is the argument for scanning rather than naming them: a hand-written list of
+seventy-three is a list nobody maintains.
 
 **`flixel.ui.FlxButton` is not on the bridge list, and it was not left off by choice.** Nothing
 about it looks unbridgeable, since it is an `FlxSprite` with callbacks, and `FlxSprite` bridges.
@@ -1406,12 +1410,27 @@ ran. A build with `-D hxscript_no_autowire`, or one that puts `src` on the class
 going through the haxelib at all, which is what the test suites do, has no such class, and
 a direct reference would stop the library compiling in either case.
 
-### src/hxscript/setup/Boot.hx :: static function imports():Void
+### src/hxscript/setup/Boot.hx :: static function register(paths:Array&lt;String&gt;):Array&lt;String&gt;
 
 Guarded on the type actually resolving. A record may name something this build does not have, such as
 a class renamed between library versions, or a module an ignore list kept out. Registering a
 global import for a type that is not there turns a clear `Unknown identifier` into a resolution
 that silently yields null.
+
+**The guard used to be the whole story, and being silent about it was the bug.** `openfl.Lib` sat in
+the openfl preset's `globals` for as long as it did because of this: every root that record includes
+is a sub-package of `openfl`, `Lib` is at the package root, so the path resolved to nothing, was
+skipped, and a script writing `Lib` got `Unknown identifier` while the record plainly offered the
+name. Nothing anywhere said the offer had been dropped. Every miss is reported through
+[`Sink`](../src/hxscript/error/Sink.hx) now, once per call, naming all of them, and non-fatal because
+the rest of the list is still worth having.
+
+Split from `imports`, which used to do this to `globals` at startup. That is
+[`importGlobals`](../src/hxscript/setup/Boot.hx) now and a host calls it with the paths it wants,
+because a library's guess at what scripts want does not belong in every script's global scope by
+default. The shipped presets have since stopped guessing at all: every one offers an empty `globals`,
+so the list this walks is empty unless a host filled it through `Presets.custom`. What still happens
+automatically is the `@:scriptAmbient` list, since marking a class is the request.
 
 ### src/hxscript/setup/Boot.hx :: static function blacklist():Void
 

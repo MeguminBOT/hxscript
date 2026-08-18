@@ -93,7 +93,8 @@ class Banner {
 	 * @param bridges How many scriptable bases were bridged.
 	 * @param types How many modules were forced in so a script can name them.
 	 * @param abstracts How many abstracts were given a runtime form.
-	 * @param globals How many types a script reaches without importing them.
+	 * @param globals How many types a script reaches without importing them, which no shipped preset
+	 *        offers and so is normally zero.
 	 */
 	public static function wired(libraries:Array<String>, bridges:Int, types:Int, abstracts:Int, globals:Int):Void {
 		if (quiet())
@@ -110,8 +111,18 @@ class Banner {
 				detected.push(title);
 
 		line('wired', detected.length == 0 ? 'no game library detected, the interpreter alone' : detected.join(', '));
-		line('reach',
-			types + ' type(s), ' + abstracts + ' abstract(s), ' + globals + ' global(s), ' + bridges + ' bridge(s)');
+
+		var reach:String = '$types type(s), $abstracts abstract(s), $bridges bridge(s)';
+
+		/**
+		 * The offer is only worth a word when there is one. No shipped preset offers a name, so on
+		 * almost every build this would read `0 offered global(s)` and invite the reader to wonder what
+		 * they had turned off.
+		 */
+		if (globals > 0)
+			reach += ', $globals offered global(s)';
+
+		line('reach', reach);
 	}
 
 	/**

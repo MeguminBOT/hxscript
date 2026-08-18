@@ -42,7 +42,7 @@ The build says so, once, in one block:
                                       |_|
      hxscript 2.0.0   hashlink   HashLink bytecode compiler
      wired    heaps
-     reach    52 type(s), 4 abstract(s), 14 global(s), 3 bridge(s)
+     reach    57 type(s), 5 abstract(s), 10 bridge(s)
      native   built export/hlc/Sandbox.exe
 ```
 
@@ -135,6 +135,7 @@ Everything the library reads. Only the first group is likely to concern you.
 | `-D hxscript_verbose` | print every type, bridge and abstract the setup touched, under the block it already prints |
 | `-D hxscript_no_banner` | print nothing at all. `HXSCRIPT_NO_BANNER=1` does the same from the environment |
 | `-D hxscript_keep=<types>` | comma-separated standard-library types to keep beyond the default set. See [dead code elimination](#dead-code-elimination) |
+| `-D hxscript_globals` | take every bare name a `Library` record offers, at startup. No shipped preset offers any, so this does nothing until you add a record: see [types a script can name](#types-a-script-can-name) |
 | `-dce no` | keep the standard-library members scripts reach by reflection. See [dead code elimination](#dead-code-elimination) |
 
 ### Behaviour
@@ -226,7 +227,7 @@ project, and nothing to do for a 3D one, which is why it is off by default rathe
 | Field | Effect |
 | --- | --- |
 | `globalVariables` | bare names bound to values, for every script in the process |
-| `globalImports` | types that resolve without an `import`. See the warning below |
+| `globalImports` | types that resolve without an `import`. See the warning below. Nothing lands here on its own; `Boot.importGlobals` is what puts a path in it |
 | `globalStatics` | bare names answered by a host static, as `owner.path::field` |
 | `blacklist` | types scripts may not touch, by `ByType`, `ByModule` or `ByPackage` |
 | `strictAccess` | enforce `private` on script-declared members |
@@ -277,7 +278,47 @@ interp.execute(program);
 
 ### Types a script can name
 
-`@:scriptAmbient` covers your own packages. For anything else, register a global import:
+Two different things get called "what scripts can reach", and confusing them is the easiest mistake to
+make here, so they are worth separating before anything else:
+
+| | | who decides | default |
+| --- | --- | --- | --- |
+| **what a script is allowed to use** | it is in the build, so `import flixel.FlxSprite;` in the script works | nobody, `-lib flixel` does it | **on** |
+| **what is already imported into every script** | the bare name `FlxSprite` works with no `import` line | the **host** | **off** |
+
+**The first row is the whole of what a game library preset buys you, and it is automatic.** Adding
+`-lib flixel` force-compiles flixel's packages so its types exist to be found, and a script author
+then writes an ordinary `import` at the top of the file exactly as they would in Haxe. Nothing needs
+registering, nothing needs a host call, and this is how a script should normally reach a library.
+
+The second row is a shortcut on top: pre-importing a name into the global scope of every script in the
+process, so nobody has to write the `import`. That is off by default and there are three ways to turn
+it on, differing in who asked for it.
+
+`@:scriptAmbient` on your own class is you asking, so it is taken automatically.
+
+**No shipped preset puts a name in that scope.** A preset answers the first row and stops there: it
+says what a script *can* import, and every one of them offers zero bare names. Which names are already
+imported into every script is not a library's guess to make, because they occupy the global scope of
+every script in the process, they shadow anything you bind under the same name, and a script reading
+`FlxG` gives no clue where it came from. So you name what you want:
+
+```haxe
+import hxscript.setup.Boot;
+
+Boot.importGlobals(['flixel.FlxG', 'flixel.FlxSprite']);
+```
+
+`importGlobals` returns what it actually registered, which is not what you asked for when the build
+lacks one, and anything it could not resolve is reported through [`Sink`](#errors) rather than dropped
+in silence.
+
+The same thing one level down, if you would rather keep the list beside the rest of your wiring, is a
+`Library` record of your own. `globals` is a field on it, `Presets.custom` is where it goes, and then
+`Boot.importGlobals()` with no argument takes what the record offers. `-D hxscript_globals` takes it
+at startup instead. Both are empty gestures on a stock build, since there is nothing there to take.
+
+Registering the import directly is the third way, and the one the other two are built on:
 
 ```haxe
 import hxscript.syntax.Expr.ImportMode;
@@ -663,6 +704,7 @@ load failure as "recompile from source", which is cheap and always correct.
 | --- | --- | --- |
 | `Type not found: X` thrown out of `new Script(...)`, uncaught | a global import that cannot resolve | guard the registration; check the type is in the build and not blacklisted |
 | `Unknown identifier: X` | the type was never compiled in | name its package in `hxscript_host`, or force it in |
+| `Unknown identifier: FlxG`, and it IS in the build | nothing imports a bare name for you | `import flixel.FlxG;` in the script, or `Boot.importGlobals(['flixel.FlxG'])` in the host |
 | `Class X can't be extended for scripting` | no bridge | `@:scriptable` on it, or a hand-written bridge kept in the build |
 | `not bridged: X (final)` under `-D hxscript_verbose` | a scanned `@:scriptable` class is `final`, `extern`, an interface, or `private` | those four cannot be bases. Scripts still import and construct it, so reach it by holding one rather than by being one |
 | `bridge name ScriptedX already taken` | two bases share a simple name | nothing to do since 2.0.0; the second takes its path flattened. Older versions dropped it |

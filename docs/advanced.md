@@ -159,9 +159,15 @@ All four are data, and the record is
     abstractPackages: ['mylib'],  // step 3, by scanning
     abstracts: [],                // step 3, by name
     abstractExclude: [],
-    globals: ['mylib.Game']       // nameable from a script without an import
+    globals: ['mylib.Game']       // OFFERED as a bare name; Boot.importGlobals() takes it
 }
 ```
+
+Steps 1 to 3 are the whole of what a preset is for, and `globals` is not one of them: it is a name
+pre-imported into the global scope of every script in the process, which shadows anything the host
+binds under it. Every preset shipped here leaves it empty for that reason, and a script reaches those
+libraries by writing its own `import`, as in Haxe. Fill it in your own record only if you are both the
+library and the host and have decided the answer for yourself.
 
 Hand it to [`Presets.custom`](../src/hxscript/setup/Presets.hx) from an init macro, and the rest
 happens on its own:
@@ -282,7 +288,7 @@ many.
 changed. Its constructor does `new FlxButtonEvent(...)` against a class flixel declares `private`,
 which is exactly the shape that used to fail the build. It no longer does, so the omission is now a
 curated choice rather than a known impossibility: adding it is a build-and-see. Scripts construct
-`FlxButton` either way, since it is in `globals`.
+`FlxButton` either way, since it is in `globals` for any host that takes them.
 
 Everything left out is still importable and constructible from a script. Only `extends` is off the
 table, and the usual answer is a host class that *owns* one rather than *is* one.

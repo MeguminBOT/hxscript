@@ -14,8 +14,28 @@ class Boot {
 	/** The libraries wired into this build, by title. Empty when the build did no autowiring. */
 	public static var libraries(default, null):Array<String> = [];
 
-	/** Types scripts may name without importing, as wired. */
+	/**
+	 * Types a `Library` record OFFERS as bare names, which nothing has imported.
+	 *
+	 * Empty in any build using only the shipped presets, because none of them offer a name. A preset
+	 * says what a script *can* import; what is already imported into every script is the host's call
+	 * and nobody else's. Adding a record to `Presets.custom` with its own `globals` is how a host
+	 * fills this, and `importGlobals(['flixel.FlxG'])` skips the record and takes paths directly.
+	 *
+	 * This is a menu rather than a state either way: `importGlobals()` takes all of it,
+	 * `-D hxscript_globals` takes all of it at startup, and until one of those runs a script writes
+	 * its own `import` for anything in the build, as in Haxe.
+	 */
 	public static var globals(default, null):Array<String> = [];
+
+	/**
+	 * Types the host marked `@:scriptAmbient`, which ARE registered.
+	 *
+	 * Kept apart from `globals` because the two are different requests. A `globals` entry is an offer
+	 * waiting on an answer; a mark on your own class is the answer already given, and there would be
+	 * no point reading the mark and then asking again.
+	 */
+	public static var ambient(default, null):Array<String> = [];
 
 	/**
 	 * Puts the runtime half of the setup in place, once.
@@ -34,17 +54,35 @@ class Boot {
 
 		hxscript.macro.Expose.apply();
 
-		var exposed:Array<String> = hxscript.macro.Expose.ambient();
-		for (path in exposed)
-			if (globals.indexOf(path) < 0)
-				globals.push(path);
+		ambient = hxscript.macro.Expose.ambient();
+		register(ambient);
 
-		imports();
+		#if hxscript_globals
+		importGlobals();
+		#end
 
 		#if hxscript_no_shims
 		#else
 		Shims.register();
 		#end
+	}
+
+	/**
+	 * Makes types nameable without an import, which nothing does on its own.
+	 *
+	 * Naming the paths is the usual call, because no shipped preset offers any and passing nothing
+	 * then takes nothing:
+	 *
+	 * ```haxe
+	 * Boot.importGlobals(['flixel.FlxG', 'flixel.FlxSprite']);
+	 * ```
+	 *
+	 * @param only The paths to take, or null for every one a `Library` record offers.
+	 * @return The paths actually registered, which is not the same list when the build lacks one.
+	 */
+	public static function importGlobals(?only:Array<String>):Array<String> {
+		ensure();
+		return register(only == null ? globals : only);
 	}
 
 	/**
@@ -65,28 +103,58 @@ class Boot {
 	}
 
 	/**
-	 * Makes the wired types nameable without an import.
+	 * Registers a list of paths as importable without an import, and says what it could not.
+	 *
+	 * A path this build does not carry used to be skipped in silence, which is how `openfl.Lib` sat in
+	 * the openfl preset's globals for as long as it did: the record named it, no included root covered
+	 * the `openfl` package root, and a script writing `Lib` got `Unknown identifier` with nothing
+	 * anywhere saying the name had been dropped. Reported now, once, naming every one, and not fatal:
+	 * the rest of the list is still worth having.
+	 *
+	 * @param paths The paths to register.
+	 * @return Those that resolved, so a caller can diff it against what it asked for.
 	 */
-	static function imports():Void {
-		var ambient:Array<String> = [];
+	static function register(paths:Array<String>):Array<String> {
+		var taken:Array<String> = [];
+		var missing:Array<String> = [];
 
-		for (path in globals) {
-			if (TypeCollection.main.fromPath(path) == null)
+		for (path in paths) {
+			if (TypeCollection.main.fromPath(path) == null) {
+				missing.push(path);
 				continue;
+			}
 
 			Config.globalImports.set(path, INormal);
-			ambient.push(path);
+			taken.push(path);
 		}
 
+		if (missing.length > 0) {
+			hxscript.error.Sink.report({
+				phase: PSetup,
+				fatal: false,
+				message: missing.length + ' name(s) offered without an import are not in this build: ' +
+				missing.join(', '),
+				hint: 'Each is named by a preset or a @:scriptAmbient mark, and nothing compiled references it, so' +
+				' dead code elimination kept nothing. Force the package in, or stop offering the name.'
+			});
+		}
+
+		/**
+		 * cppia only, and deliberately. A HashLink module resolves a type-shaped name against the
+		 * world as it loads, so `hl.Backend.ambient` is declared for the shared configuration surface
+		 * and reads nothing; telling it would change no answer.
+		 */
 		#if hxscript_cppia
 		var known:Array<String> = hxscript.compile.Compiler.ambient.copy();
 
-		for (path in ambient)
+		for (path in taken)
 			if (known.indexOf(path) < 0)
 				known.push(path);
 
 		hxscript.compile.Compiler.ambient = known;
 		#end
+
+		return taken;
 	}
 
 	/**
@@ -129,7 +197,22 @@ class Boot {
 		var lines:Array<String> = [];
 
 		lines.push(libraries.length == 0 ? 'hxscript: nothing autowired' : 'hxscript: wired ' + libraries.join(', '));
-		lines.push('  ${globals.length} type(s) nameable without an import');
+
+		if (globals.length == 0) {
+			lines.push('  no type is offered without an import');
+		} else {
+			var taken:Int = 0;
+			for (path in globals)
+				if (Config.globalImports.exists(path))
+					taken++;
+
+			var offer:String = '  ${globals.length} type(s) offered without an import, $taken taken';
+			if (taken == 0)
+				offer += ' (Boot.importGlobals() takes them)';
+
+			lines.push(offer);
+		}
+		lines.push('  ${ambient.length} type(s) marked @:scriptAmbient, always taken');
 		lines.push('  ${Shims.registered.length} shim(s) registered');
 
 		var manifest:Class<Dynamic> = Type.resolveClass('hxscript.wired.Manifest');
