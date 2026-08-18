@@ -38,8 +38,26 @@ enum Outcome {
 	/** It was built. */
 	Built(path:String);
 
+	/**
+	 * It is there or was built, and it is the runtime and nothing else, because the carried loader
+	 * is x86-64 only.
+	 *
+	 * Nothing is wrong and nothing would fix it, so this is a note rather than a warning: the
+	 * program is the one it asked for, and every script in it is interpreted.
+	 */
+	Interprets(path:String, arch:String);
+
 	/** Nothing was done, and this says why and what would change that. */
 	Missing(reason:String, remedy:String);
+}
+
+/** What a build is for, as the compiler in front of it answers rather than as the machine looks. */
+typedef Arch = {
+	/** The architecture, as `hxs_arch.h` names it. */
+	var name:String;
+
+	/** Whether the carried loader can be compiled for it, which is x86-64 and nothing else. */
+	var jit:Bool;
 }
 
 /**
@@ -95,6 +113,9 @@ class Native {
 
 			case Built(path):
 				hxscript.macro.Banner.note('native', 'built ' + path);
+
+			case Interprets(path, arch):
+				hxscript.macro.Banner.note('native', 'built ' + path + ' for ' + arch + ', which has no loader, so every script will be interpreted');
 
 			case Missing(reason, remedy):
 				hxscript.macro.Banner.note('native', 'missing, so every script will be interpreted');
@@ -154,8 +175,10 @@ class Native {
 		if (cc == null)
 			return Missing('no C compiler was found', 'install one, or set CC to the one to use');
 
-		return Path.extension(out) == 'c' ? program(out, carried, hl, headers, cc,
-			version) : library(out, carried, hl, headers, cc, version);
+		var arch:Arch = architecture(cc, carried);
+
+		return Path.extension(out) == 'c' ? program(out, carried, hl, headers, cc, version,
+			arch) : library(out, carried, hl, headers, cc, version, arch);
 	}
 
 	/**
@@ -166,21 +189,21 @@ class Native {
 	 *
 	 * @return What happened.
 	 */
-	static function library(out:String, carried:String, hl:String, headers:String, cc:String, version:Int):Outcome {
+	static function library(out:String, carried:String, hl:String, headers:String, cc:String, version:Int, arch:Arch):Outcome {
 		var into:String = Path.directory(out);
 		if (into == '')
 			into = '.';
 
 		var target:String = Path.join([into, 'hxscript.hdll']);
 
-		if (current(target, carried, version))
-			return Ready(target);
+		if (current(target, carried, version, arch))
+			return arch.jit ? Ready(target) : Interprets(target, arch.name);
 
 		if (!FileSystem.exists(into))
 			FileSystem.createDirectory(into);
 
 		var args:Array<String> = ['-shared', '-fvisibility=hidden'];
-		for (a in shared(carried, headers))
+		for (a in shared(carried, headers, arch))
 			args.push(a);
 
 		args.push('-L');
@@ -201,9 +224,9 @@ class Native {
 
 		tidy(target);
 		FileSystem.rename(partial, target);
-		File.saveContent(target + '.built', Std.string(version));
+		File.saveContent(target + '.built', Std.string(version) + ' ' + arch.name);
 
-		return Built(target);
+		return arch.jit ? Built(target) : Interprets(target, arch.name);
 	}
 
 	/**
@@ -218,7 +241,7 @@ class Native {
 	 *
 	 * @return What happened.
 	 */
-	static function program(out:String, carried:String, hl:String, headers:String, cc:String, version:Int):Outcome {
+	static function program(out:String, carried:String, hl:String, headers:String, cc:String, version:Int, arch:Arch):Outcome {
 		var told:Null<String> = Context.definedValue('hxscript_native_out');
 		var target:String = told != null ? told : Path.withoutExtension(out) + (windows() ? '.exe' : '');
 
@@ -233,7 +256,7 @@ class Native {
 		if (windows())
 			args.push('-municode');
 
-		for (a in shared(carried, headers))
+		for (a in shared(carried, headers, arch))
 			args.push(a);
 
 		args.push('-I');
@@ -254,13 +277,13 @@ class Native {
 		tidy(target);
 		FileSystem.rename(partial, target);
 
-		return Built(target);
+		return arch.jit ? Built(target) : Interprets(target, arch.name);
 	}
 
 	/**
 	 * @return The arguments both outputs share: what to compile and what to compile it against.
 	 */
-	static function shared(carried:String, headers:String):Array<String> {
+	static function shared(carried:String, headers:String, arch:Arch):Array<String> {
 		var vendor:String = Path.join([carried, 'vendor']);
 		var loader:String = Path.join([vendor, 'hl116']);
 
@@ -280,11 +303,22 @@ class Native {
 		/**
 		 * Without the loader the module is the runtime and nothing else, which is what a host wants
 		 * when it means to measure the interpreter inside a build that is otherwise the same.
+		 *
+		 * The define says what was asked for rather than what was worked out, so a module built for
+		 * an architecture with no loader can still name that architecture when a host asks it why.
 		 */
 		if (Context.defined('hxscript_no_jit')) {
 			args.push('-DHXS_NO_JIT');
 			return args;
 		}
+
+		/**
+		 * jit.c guards itself with `__arm__`, which 64 bit ARM does not define, so compiling it here
+		 * anyway is not merely dead weight: on arm64 it emits x86, and on arm64 Windows it does not
+		 * compile at all and would fail a build that was going to work.
+		 */
+		if (!arch.jit)
+			return args;
 
 		for (name in ['code.c', 'module.c', 'jit.c'])
 			args.push(Path.join([loader, name]));
@@ -408,13 +442,17 @@ class Native {
 	 * The version is the part that matters. An upgraded VM leaves a module whose timestamp says it is
 	 * current and whose struct layouts no longer are, which is the mismatch all of this exists to
 	 * avoid, so what it was built for is written down beside it and compared rather than inferred.
+	 *
+	 * The architecture is written down for the same reason and reads the same way. A tree built for
+	 * one and then for another leaves a module that is neither newer nor wrong to look at, and that
+	 * cannot be loaded by what is about to run.
 	 */
-	static function current(target:String, carried:String, version:Int):Bool {
+	static function current(target:String, carried:String, version:Int, arch:Arch):Bool {
 		if (!FileSystem.exists(target))
 			return false;
 
 		var note:String = target + '.built';
-		if (!FileSystem.exists(note) || StringTools.trim(File.getContent(note)) != Std.string(version))
+		if (!FileSystem.exists(note) || StringTools.trim(File.getContent(note)) != Std.string(version) + ' ' + arch.name)
 			return false;
 
 		var glue:String = Path.join([carried, 'hxs.c']);
@@ -539,6 +577,49 @@ class Native {
 	}
 
 	/**
+	 * Asks the compiler which architecture it is about to build for.
+	 *
+	 * The compiler rather than the machine, because a cross build is for whatever it targets and a
+	 * machine that is compiling is not always the machine that will run it. The question is put by
+	 * preprocessing `hxs_arch_probe.c`, which includes the same `hxs_arch.h` that `hxs.c` includes,
+	 * so what is decided here and what the module compiles with are one chain read twice rather than
+	 * two lists that can drift apart.
+	 *
+	 * @param cc The compiler.
+	 * @param carried The directory holding the module's own sources.
+	 * @return What it is building for.
+	 *
+	 * A compiler that will not answer is taken to be building for x86-64, which is what this assumed
+	 * before it asked. Where there is a loader that keeps it, and where there is not the loader
+	 * fails to compile and says so, rather than quietly going missing on a machine that could have
+	 * had it.
+	 */
+	static function architecture(cc:String, carried:String):Arch {
+		var said:Null<String> = ask(cc, ['-E', Path.join([carried, 'hxs_arch_probe.c'])]);
+
+		if (said != null) {
+			for (line in said.split('\n')) {
+				var at:Int = line.indexOf('hxs_arch "');
+				if (at < 0)
+					continue;
+
+				var rest:String = line.substr(at + 10);
+				var end:Int = rest.indexOf('"');
+
+				if (end < 0)
+					continue;
+
+				return {
+					name: rest.substring(0, end),
+					jit: StringTools.trim(rest.substr(end + 1)) == '1'
+				};
+			}
+		}
+
+		return {name: 'x86-64', jit: true};
+	}
+
+	/**
 	 * @param name A program.
 	 * @return Whether it is here to be run, by path or by name.
 	 */
@@ -595,6 +676,27 @@ class Native {
 			return code == 0 ? null : StringTools.trim(said);
 		} catch (e:Dynamic) {
 			return cc + ' would not run: ' + Std.string(e);
+		}
+	}
+
+	/**
+	 * Runs the compiler and reads what it wrote, for the one thing that is asked of it rather than
+	 * compiled by it.
+	 *
+	 * @param cc The compiler.
+	 * @param args What to ask.
+	 * @return What it wrote, or null when it would not run or would not answer.
+	 */
+	static function ask(cc:String, args:Array<String>):Null<String> {
+		try {
+			var run:Process = new Process(cc, args);
+			var said:String = run.stdout.readAll().toString();
+			var code:Int = run.exitCode();
+			run.close();
+
+			return code == 0 ? said : null;
+		} catch (e:Dynamic) {
+			return null;
 		}
 	}
 

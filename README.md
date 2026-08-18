@@ -328,7 +328,9 @@ Nine targets, no CI, so every box below was ticked by hand.
 - [ ] **php**
 
 The bytecode compiler needs a target with bytecode of its own, so it is hxcpp and HashLink only, and
-passes in full on both. Everywhere else a script is interpreted.
+passes in full on both. Everywhere else a script is interpreted. On HashLink that also means x86-64:
+hashlink's own jit does not reach arm64, so an arm64 build interprets until this library carries a
+backend of its own for it.
 
 `sh test/all.sh` runs the whole matrix. Detail: [`test/known-failing.txt`](test/known-failing.txt) for
 the failures, [`docs/support-table.md`](docs/support-table.md) for what every mode answers per

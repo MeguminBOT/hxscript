@@ -76,6 +76,14 @@ same reason.
   the type as though it were the module. The flixel stack now generates 71 wrappers where it
   generated 31, and every abstract these presets ask for is usable from a script.
   `docs/verified-imports.md` lists what is still not.
+- **A HashLink build for arm64 compiled hashlink's x86 jit into it.** `hxs.c` decided whether to
+  *use* the carried loader from the architecture, and the build handed `code.c`, `module.c` and
+  `jit.c` to the compiler on every architecture regardless. jit.c guards itself with `__arm__`, which
+  64 bit ARM does not define, so on arm64 it compiled cleanly, emitted x86 into a binary that cannot
+  run it, and on arm64 Windows failed to compile at all and took an otherwise working build with it.
+  What to compile is now decided before anything is compiled, by asking the compiler in front of the
+  build what it is targeting rather than by looking at the machine, which is also the only answer
+  that is right for a cross build or for `clang -arch arm64` on macOS.
 
 ### Added
 
@@ -129,6 +137,21 @@ same reason.
   installation for `hl.h` and `libhl`, which `src/hxscript/hl/native/build.sh` finds under
   `/c/hashlink/*` or takes from `HLPATH`. A stack neither target can build is reported as *not
   verified*, with both build errors, rather than guessed at.
+
+- **The HashLink native module says which architecture it was built for**, so a host reporting why
+  its scripts are interpreted can name the reason rather than restate the question.
+  `hxscript.hl.Loader.architecture` is the new answer, `Loader.why()` uses it, and `build.sh` prints
+  it and reports it under `--flags`. It also separates the two ways to have no loader, which read
+  identically before: an architecture that has none, which nothing fixes, and a build that asked for
+  none with `-D hxscript_no_jit`, which building again without it does.
+
+  **Only 64 bit is named.** hashlink's jit reaches 32 bit x86 as well and this library does not go
+  there: nothing is built or tested for it, so a 32 bit build now reads as an architecture with no
+  loader and interprets, where before it would have jitted.
+
+  The one chain of architecture macros lives in `src/hxscript/hl/native/hxs_arch.h`, which `hxs.c`
+  includes and which the build preprocesses through `hxs_arch_probe.c` beside it. Asked twice,
+  written once, so what the build decides and what the module compiles with cannot drift apart.
 
 ## 2.0.0
 

@@ -20,14 +20,19 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-/**
-	Whether this build carries the loader. HashLink's jit is x86 and x86-64 only, and this is decided
-	before hl.h is included because hl.h defines the architecture macros back again.
+/*
+	Which architecture this is, and whether hashlink's jit can compile for it. Included before hl.h,
+	which defines the architecture macros back again, and shared with the build, which preprocesses
+	hxs_arch_probe.c beside it to decide what to compile.
 */
-#if !defined(HXS_NO_JIT)
-#	if defined(__x86_64__) || defined(__amd64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-#		define HXS_LOADER
-#	endif
+#include "hxs_arch.h"
+
+/**
+	Whether this build carries the loader. It is x86-64 only, so on arm64 this module is the runtime
+	and nothing else, and every script is interpreted.
+*/
+#if !defined(HXS_NO_JIT) && HXS_ARCH_HAS_JIT
+#	define HXS_LOADER
 #endif
 
 #define HL_NAME(n) hxscript_##n
@@ -1577,10 +1582,12 @@ HL_PRIM int HL_NAME(hooks)( void ) {
 }
 
 HL_PRIM vbyte *HL_NAME(last_error)( void ) {
-#ifdef HXS_WRONG_VERSION
+#if defined(HXS_WRONG_VERSION)
 	return (vbyte *)"the carried loader is for a different hashlink than this build's hl.h";
+#elif defined(HXS_NO_JIT)
+	return (vbyte *)"this module was built with the loader left out";
 #else
-	return (vbyte *)"this build carries no loader, because HashLink's jit is x86 and x86-64 only";
+	return (vbyte *)"this is " HXS_ARCH_NAME ", and the loader is x86-64 only";
 #endif
 }
 
@@ -1596,9 +1603,20 @@ HL_PRIM int HL_NAME(built_for)( void ) {
 	return HL_VERSION;
 }
 
+/**
+	@return Which architecture this was built for, as one of HXS_ARCH_*.
+
+	Asked apart from `state`, because the case worth reporting is a module that is here, agrees with
+	the VM and still loads nothing, and what decides that is always this.
+*/
+HL_PRIM int HL_NAME(arch)( void ) {
+	return HXS_ARCH;
+}
+
 DEFINE_PRIM(_BOOL, agrees, _NO_ARG);
 DEFINE_PRIM(_I32, state, _NO_ARG);
 DEFINE_PRIM(_I32, built_for, _NO_ARG);
+DEFINE_PRIM(_I32, arch, _NO_ARG);
 DEFINE_PRIM(_BYTES, last_error, _NO_ARG);
 DEFINE_PRIM(_I32, hooks, _NO_ARG);
 DEFINE_PRIM(_I32, site, _I32 _I32);

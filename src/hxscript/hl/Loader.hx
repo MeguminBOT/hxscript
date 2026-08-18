@@ -39,7 +39,13 @@ enum abstract Availability(Int) from Int to Int {
 	/** The loader is here and agrees with the libhl it is running against. */
 	var Usable = 0;
 
-	/** This build carries no loader, because HashLink's jit is x86 and x86-64 only. */
+	/**
+	 * The native module carries no loader.
+	 *
+	 * Either because the architecture has none, which `architecture` names and nothing here fixes,
+	 * or because the build asked for none with `-D hxscript_no_jit`, which building again without it
+	 * does.
+	 */
 	var NoLoader = 1;
 
 	/** The loader is here and was built against a different hashlink than the one running. */
@@ -52,6 +58,24 @@ enum abstract Availability(Int) from Int to Int {
 	 * `hxscript.hdll` is absent. An HL/C program links them or fails to link at all.
 	 */
 	var NotLinked = 3;
+}
+
+/**
+ * Which architecture the native module was built for, as `hxs_arch.h` decides it.
+ *
+ * Only 64 bit is named. hashlink's jit reaches 32 bit x86 as well and this library does not go
+ * there, so a 32 bit build reads as `Unrecognised` and interprets, which is what every architecture
+ * with no loader does.
+ */
+enum abstract Architecture(Int) from Int to Int {
+	/** Neither of the two below, which is every 32 bit architecture and everything unnamed. */
+	var Unrecognised = 0;
+
+	/** The one architecture the carried loader compiles for. */
+	var X86_64 = 1;
+
+	/** 64 bit ARM, which has no loader yet, so everything on it is interpreted. */
+	var Arm64 = 2;
 }
 
 /**
@@ -75,7 +99,20 @@ class Loader {
 	/** The same question asked so that a negative answer says which negative it is. */
 	public static var availability(get, never):Availability;
 
+	/**
+	 * Which architecture the module was built for, or null when there is no module or it predates
+	 * being asked.
+	 *
+	 * Reported rather than acted on, the way `builtFor` is. What it decides is already in
+	 * `availability`; this is for a host that wants to name the reason rather than restate it.
+	 */
+	public static var architecture(get, never):Null<Architecture>;
+
 	static var probed:Null<Availability> = null;
+
+	static var built:Null<Architecture> = null;
+
+	static var askedBuilt:Bool = false;
 
 	static function get_available():Bool {
 		return get_availability() == Usable;
@@ -88,6 +125,21 @@ class Loader {
 	 * thing to run into: it answers `agrees` and nothing else, and treating that as no module at all
 	 * would interpret everything on a machine that had gone to the trouble of building one.
 	 */
+	static function get_architecture():Null<Architecture> {
+		if (!askedBuilt) {
+			askedBuilt = true;
+
+			try {
+				if (hl.Api.isPrimLoaded(builtArch))
+					built = (builtArch() : Architecture);
+			} catch (e:Dynamic) {
+				built = null;
+			}
+		}
+
+		return built;
+	}
+
 	static function get_availability():Availability {
 		if (probed == null) {
 			try {
@@ -116,8 +168,20 @@ class Loader {
 				null;
 
 			case NoLoader:
-				'this build carries no loader, because HashLink\'s jit is x86 and x86-64 only; ' +
-				'scripts are interpreted on every other architecture';
+				switch (get_architecture()) {
+					case X86_64:
+						'the loader was left out of this build, which is what -D hxscript_no_jit asks for; '
+						+ 'build the module again without it';
+
+					case null:
+						'this build carries no loader, because the carried one is x86-64 only; '
+						+ 'every script is interpreted';
+
+					case on:
+						'this build carries no loader, because the carried one is x86-64 only and this is '
+						+ spell(on)
+						+ '; every script is interpreted';
+				}
 
 			case Disagrees:
 				'the native module was built against hashlink '
@@ -127,6 +191,18 @@ class Loader {
 
 			case NotLinked:
 				'there is no hxscript.hdll beside what is running; ' + 'build one with src/hxscript/hl/native/build.sh';
+		}
+	}
+
+	/**
+	 * @param on An architecture.
+	 * @return It as this library names them.
+	 */
+	static function spell(on:Architecture):String {
+		return switch (on) {
+			case X86_64: 'x86-64';
+			case Arm64: 'arm64';
+			case Unrecognised: 'neither x86-64 nor arm64';
 		}
 	}
 
@@ -412,6 +488,10 @@ class Loader {
 
 	@:hlNative("?hxscript", "built_for") static function builtVersion():Int {
 		return -1;
+	}
+
+	@:hlNative("?hxscript", "arch") static function builtArch():Int {
+		return Architecture.Unrecognised;
 	}
 
 	@:hlNative("?hxscript", "hooks") static function hookBits():Int {

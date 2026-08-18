@@ -52,6 +52,39 @@ case "$(uname -s 2>/dev/null || echo unknown)" in
 	*) WINDOWS=0; EXT=hdll ;;
 esac
 
+# --- the compiler, and which architecture it is building for --------------------------------------
+#
+# Both are needed before there is anything to decide, because the loader is x86-64 only and what to
+# compile follows from that. The compiler is asked rather than the machine: a cross build
+# is for whatever CC targets, which uname does not know, and CC may be carrying the flag that decides
+# it, as CC="clang -arch arm64" does on macOS.
+
+CC=${CC:-}
+if [ -z "$CC" ]; then
+	for c in clang gcc cc x86_64-w64-mingw32-gcc; do
+		if command -v "$c" >/dev/null 2>&1; then CC=$c; break; fi
+	done
+fi
+
+[ -n "$CC" ] || die "no C compiler found: set CC"
+
+# hxs_arch.h holds the one chain of architecture macros and hxs.c includes that same header, so what
+# is decided here and what the module compiles with cannot drift apart. A probe that says nothing is
+# read as an architecture with a jit, which is what this did before there was one: where there is a
+# jit that keeps it, and where there is not the loader fails to compile rather than quietly going
+# missing on a machine that could have had it.
+PROBED=$($CC -E "$HERE/hxs_arch_probe.c" 2>/dev/null | grep -a '^hxs_arch ' | tail -1)
+ARCH=$(printf '%s' "$PROBED" | awk -F'"' '{print $2}')
+ARCH_JIT=$(printf '%s' "$PROBED" | awk '{print $NF}')
+
+if [ -z "$ARCH" ]; then
+	ARCH="unknown"
+	ARCH_JIT=1
+fi
+
+note "compiler: $CC"
+note "architecture: $ARCH"
+
 # --- the HashLink to build against ----------------------------------------------------------------
 #
 # hl.h has to be the one the running libhl was built from, so it is taken from an installation rather
@@ -75,35 +108,50 @@ else
 fi
 
 # --- the loader sources ---------------------------------------------------------------------------
+#
+# Where there is no jit there is nothing to carry, so this is where an architecture without one and
+# --no-jit meet. jit.c guards itself with __arm__, which 64 bit ARM does not define, so it is not a
+# guard there: on arm64 it compiles, emits x86, and on Windows does not get that far.
+
+NOJIT=
+if [ "$ARCH_JIT" != "1" ]; then
+	NOJIT="the loader is x86-64 only and this is $ARCH"
+elif [ "$JIT" = "0" ]; then
+	NOJIT="it was left out"
+fi
 
 LOADER_INC="$VENDOR/hl116"
 ANY_VERSION=
+LOADER=
 
-if [ -n "$SRC" ]; then
+if [ -n "$NOJIT" ]; then
+	note "loader: none, $NOJIT, so every script will be interpreted"
+elif [ -n "$SRC" ]; then
 	[ -f "$SRC/src/jit.c" ] || die "no hashlink source tree at $SRC"
-	LOADER_DIR="$SRC/src"
 	LOADER_INC="$SRC/src"
+	LOADER="$SRC/src/code.c $SRC/src/module.c $SRC/src/jit.c"
 	# The headers and the loader come from one tree here, so the version pairing this checks is not
 	# a question that can go wrong.
 	ANY_VERSION="-DHXS_HL_ANY_VERSION"
 	note "loader: $SRC (given)"
 else
-	LOADER_DIR="$VENDOR/hl116"
+	LOADER="$VENDOR/hl116/code.c $VENDOR/hl116/module.c $VENDOR/hl116/jit.c"
 	note "loader: carried hashlink 1.16"
 fi
-
-LOADER="$LOADER_DIR/code.c $LOADER_DIR/module.c $LOADER_DIR/jit.c"
 
 # --- what to compile with -------------------------------------------------------------------------
 
 CFLAGS="-O3 -std=c11 -fvisibility=hidden -DHXS_NATIVE_TABLE $ANY_VERSION -include $VENDOR/hxs_vendor.h -I $INC -I $LOADER_INC"
 SOURCES="$HERE/hxs.c"
 
-if [ "$JIT" = "1" ]; then
-	SOURCES="$SOURCES $LOADER"
-else
+# -DHXS_NO_JIT is what was asked for rather than what was worked out, so a module built on an
+# architecture with no loader says which architecture that was when a host asks it why.
+if [ "$JIT" = "0" ]; then
 	CFLAGS="$CFLAGS -DHXS_NO_JIT"
-	note "loader: left out, every script will be interpreted"
+fi
+
+if [ -z "$NOJIT" ]; then
+	SOURCES="$SOURCES $LOADER"
 fi
 
 if [ "$WINDOWS" = "1" ]; then
@@ -113,6 +161,7 @@ else
 fi
 
 if [ "$FLAGS_ONLY" = "1" ]; then
+	printf 'architecture: %s\n' "$ARCH"
 	printf 'sources: %s\n' "$SOURCES"
 	printf 'cflags: %s\n' "$CFLAGS"
 	printf 'link: %s\n' "$LINK"
@@ -121,16 +170,6 @@ fi
 
 # --- build ----------------------------------------------------------------------------------------
 
-CC=${CC:-}
-if [ -z "$CC" ]; then
-	for c in clang gcc cc x86_64-w64-mingw32-gcc; do
-		if command -v "$c" >/dev/null 2>&1; then CC=$c; break; fi
-	done
-fi
-
-[ -n "$CC" ] || die "no C compiler found: set CC"
-
-note "compiler: $CC"
 note "hashlink: $HL"
 
 if [ -z "$HLC" ]; then

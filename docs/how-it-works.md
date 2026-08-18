@@ -615,8 +615,13 @@ layouts with libhl, so a copy built against one HashLink and run against another
 that have moved, silently and wrongly. The C pins the version it was built for and disables itself
 when `HL_VERSION` does not match, and the build records which HashLink it built against beside the
 module rather than guessing from timestamps, because an upgraded VM leaves exactly that mismatch.
-HashLink's jit is also x86 and x86-64 only, which has to be decided before `hl.h` is included, since
-`hl.h` defines the architecture macros back again.
+HashLink's jit is also x86-64 only here, which has to be decided before `hl.h` is included, since
+`hl.h` defines the architecture macros back again, and has to be decided a second time by the build,
+which cannot hand the compiler a loader the architecture has no use for. `hxs_arch.h` is that one
+decision: `hxs.c` includes it, and the build preprocesses `hxs_arch_probe.c` beside it with the
+compiler and flags it is about to use, so a cross build is answered for what it targets rather than
+for the machine doing the targeting. jit.c's own guard is not one, on arm64: it is `#ifdef __arm__`,
+which 64 bit ARM does not define, so left to itself it compiles and emits x86.
 
 None of it can fail a build. No HashLink, no C compiler, an architecture with no jit, or a version
 the carried loader does not match, and you get one warning naming what to install. The natives are
