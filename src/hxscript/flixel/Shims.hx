@@ -13,6 +13,13 @@ import flixel.sound.FlxSoundGroup;
  * `FlxCamera`, `FlxFrame` and `AtlasBase` declare more of these. Only the ones a script is likely to
  * reach are shimmed: each is a closure somebody has to keep correct across upgrades, and an unused
  * shim keeps compiling long after the signature it emulates has moved.
+ *
+ * Every one of these is written against 6.2.0 and registers only there, which is what
+ * `#if (flixel > "6.1.2")` says. Two of the three cannot be right before it. `clipToWorldRect` and
+ * the `clipToWorldBounds` it calls do not exist at all in 6.1.2, so the shim does not compile; and
+ * `playMusic` is an ordinary method there rather than an inline overload, so it already has a
+ * runtime form, and shimming it would replace a working member with one that reads its arguments in
+ * the order 6.2.0 introduced.
  */
 class Shims {
 	/**
@@ -27,7 +34,7 @@ class Shims {
 
 	/** Registers every flixel member whose runtime form the library does not carry. */
 	public static function register():Void {
-		#if (flixel >= "6.0.0")
+		#if (flixel > "6.1.2")
 		set('flixel.FlxG.switchState', function(o:Dynamic, args:Array<Dynamic>):Dynamic {
 			var next:Dynamic = args[0];
 			var current:Dynamic = FlxG.state;
