@@ -3222,8 +3222,13 @@ class Interp {
 					return (cast t : ScriptedAbstract).fromValue(e);
 
 				if (e != null && TypeTools.isClass(t)) {
-					if (Type.getSuperClass(t) == AbstractValue)
+					if (Type.getSuperClass(t) == AbstractValue) {
+						/** Already the wrapper being cast to, so it is its own answer rather than a second one. */
+						if (Std.isOfType(e, t))
+							return e;
+
 						return Type.createInstance(t, [e]);
+					}
 					if (e is AbstractValue) {
 						var r = e.resolveTo(Type.getClassName(t));
 						if (r == null)

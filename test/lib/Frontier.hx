@@ -214,10 +214,10 @@ public function read():Dynamic { return function() { return held; }; }');
 			`X`, which is `flixel.util.FlxAxes`'s shape and not a rare one.
 
 			Compiled code used to read the wrapper by reflection and get null, and now runs the accessor
-			where it lives. What is left is the other side: the eval and HashLink interpreters throw here
-			rather than answering, since `Std.string` is handed the wrapper and neither can open one that
-			declares no route to a `String`. hxcpp answers on both paths. It is here to be read rather
-			than to pass, and what it now reads is a gap in the interpreter rather than in the compilers.
+			where it lives. The interpreters used to throw on the line before it, since the annotation
+			casts the value against the type it already is and that wrapped it a second time. Both are
+			answered, and the shape is asserted in the corpus now; this stays as the reading that found
+			them.
 		*/
 		probe('an enum abstract accessor on a value', 'var a:HostAxes = HostAxes.XY; return Std.string(a.x);', null, 'import HostAxes;');
 

@@ -167,6 +167,12 @@ class Corpus {
 		check('a static of a host abstract that is not a constant', 'var z:Int = OpVec.ZERO; return Std.string(z);', '0', '',
 			'import OpVec;');
 
+		/** A value annotated with the abstract it already is, which the cast used to wrap a second time. */
+		check('an enum abstract annotated with its own type', 'var a:HostAxes = HostAxes.XY; return Std.string(a.x);', 'true',
+			'', 'import HostAxes;');
+		check('an enum abstract annotated, an accessor that is false', 'var a:HostAxes = HostAxes.X; return Std.string(a.y);',
+			'false', '', 'import HostAxes;');
+
 		at('modules');
 		check('interval as a value', 'var it = 0...3; var t = 0; while (it.hasNext()) t += it.next(); return t;', '3');
 		check('interval bound to a local then looped', 'var it = 1...4; var t = 0; for (v in it) t += v; return t;', '6');

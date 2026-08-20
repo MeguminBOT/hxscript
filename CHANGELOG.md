@@ -32,6 +32,16 @@
   of the same type were different things and a member call on one of them fed a wrapper to a static
   that had declared the underlying type. Compiled code holds what the host's own compiled code holds.
 
+- **Annotating a local with the abstract it already is ended the script on eval and HashLink.**
+  `var a:HostAxes = HostAxes.XY` casts a value against its own declared type, and the interpreter
+  performed that by building the wrapper a second time around one it already had. Every route through
+  `resolveFrom` is written for the value underneath, and the enum one showed it by asking `_enumMap`
+  for a key that was a wrapper rather than a name: a `StringMap` refuses that on eval and HashLink
+  where hxcpp answers false, so two targets out of three died on a lookup that could only have missed.
+  A value that is already the wrapper now hands its contents over ahead of every other route, the name
+  lookup runs only when a name arrived, and the cast returns what it was given rather than allocating a
+  second wrapper per annotated declaration.
+
 - **A constant whose name collided with an accessor was refused even on an enum abstract.** A wrapper
   normally offers each constant behind a lazy `get_NAME`, but when the abstract declares an accessor
   of that name already it holds the constant as a plain static instead, and only the getter was read.

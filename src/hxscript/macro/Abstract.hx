@@ -267,7 +267,6 @@ class Abstract {
 		var fromExpr = [macro return null];
 		var toExpr = [macro return null];
 
-		fromExpr.unshift(macro if (Type.getClass(v) == $p{[cls.name]}) return v.__a);
 		toExpr.unshift(macro if (t == $v{fullPath.join('.')}) return __a);
 
 		if (isEnum) {
@@ -290,7 +289,12 @@ class Abstract {
 
 				if (_enumValues.contains(v))
 					return v;
-				else if (_enumMap.exists(v))
+
+				/**
+				 * The name only when a name arrived. A `StringMap` asked for a key that is not a string
+				 * throws on eval and HashLink where hxcpp answers false, for a lookup bound to miss.
+				 */
+				if ((v is String) && _enumMap.exists(v))
 					return _enumValues[_enumMap.get(v)];
 			});
 		} else {
@@ -307,6 +311,12 @@ class Abstract {
 				toExpr.unshift(macro if (t == $st) return __a);
 			}
 		}
+
+		/**
+		 * A value that is already this wrapper hands its contents over, ahead of every other route,
+		 * since all of them are written for the value underneath. Unshifted last so it sits first.
+		 */
+		fromExpr.unshift(macro if (Type.getClass(v) == $p{[cls.name]}) return v.__a);
 
 		var props = [];
 		/**
