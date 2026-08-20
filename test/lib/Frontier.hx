@@ -160,14 +160,15 @@ class Frontier {
 
 			All of these pass interpreted, on all three interpreters. The constructor assigns to
 			`this`, so it has nowhere to live as a method and Haxe emits it as a static `_new` on the
-			implementation class, which is what the wrapper now names and `AbstractTools` now calls.
+			implementation class, which is what the wrapper names and `AbstractTools` calls.
 
-			Both compilers decline a module that constructs one, so these read as refusals rather than
-			as answers. Construction is not what is missing: a bare `@:forward` generates no member per
-			forwarded field, so `v.x` is a question asked at access time, and compiled code resolves an
-			offset and finds nothing there. Reaching a forwarded member from compiled code is what
-			would let these compile, and until then declining is what keeps them from answering 0 where
-			the interpreter answers 7.
+			Both compilers used to decline a module that constructs one, and no longer do. What was
+			missing was never the construction: an abstract keeps everything it declares on that same
+			implementation class, taking the value that would be `this` as a first argument, and asking
+			the value itself for a member of that name finds nothing because the value is only whatever
+			the abstract wraps. Both backends reach the implementation now, so a member declared on the
+			abstract is a call to it and a member merely forwarded is left to the dispatch that already
+			reached the boxed value.
 		*/
 		probe('a host abstract constructed', 'var v = new HostVec(3, 4); return Std.string(v);', null, 'import HostVec;');
 		probe('a host abstract property', 'var v = new HostVec(3, 4); return Std.string(v.length);', null, 'import HostVec;');
@@ -210,9 +211,13 @@ public function read():Dynamic { return function() { return held; }; }');
 		*/
 		/*
 			An enum abstract's own accessor, read off a value. `HostAxes` declares `x` beside the constant
-			`X`, which is `flixel.util.FlxAxes`'s shape and not a rare one. The interpreter runs the
-			accessor; compiled code reads the wrapper by reflection and gets null, so this is a real
-			difference rather than a refusal, and it is here to be read rather than to pass.
+			`X`, which is `flixel.util.FlxAxes`'s shape and not a rare one.
+
+			Compiled code used to read the wrapper by reflection and get null, and now runs the accessor
+			where it lives. What is left is the other side: the eval and HashLink interpreters throw here
+			rather than answering, since `Std.string` is handed the wrapper and neither can open one that
+			declares no route to a `String`. hxcpp answers on both paths. It is here to be read rather
+			than to pass, and what it now reads is a gap in the interpreter rather than in the compilers.
 		*/
 		probe('an enum abstract accessor on a value', 'var a:HostAxes = HostAxes.XY; return Std.string(a.x);', null, 'import HostAxes;');
 

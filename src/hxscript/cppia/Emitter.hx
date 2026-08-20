@@ -1277,7 +1277,7 @@ class Emitter {
 				 * constructor the batch emitted for it.
 				 */
 				if (hxscript.types.AbstractTools.resolve(cl) != null) {
-					emitConstruct(nativePath(typePaths.exists(cl) ? typePaths.get(cl) : cl), params, e.pos);
+					emitConstruct(nativePath(typePaths.exists(cl) ? typePaths.get(cl) : cl), params, e.pos, true);
 					return;
 				}
 
@@ -1591,9 +1591,16 @@ class Emitter {
 			}
 
 			/**
-			 * A member call rather than a static one: a host abstract's operator is a method of the
-			 * wrapper the host's build generated, which is the value in hand.
+			 * Through the implementation class, where an `@:op` method really lives and where it takes
+			 * the value that would be `this` as its first argument. The value in hand is that underlying
+			 * value, so there is no wrapper here to call a member on.
 			 */
+			var opImpl:Null<String> = implMember(hostAbstractOf(hosted.receiver), hosted.name);
+			if (opImpl != null) {
+				emitImplCall(opImpl, hosted.name, hosted.receiver, [hosted.other], line);
+				return;
+			}
+
 			w.pos(line);
 			w.token('CALLMEMBER');
 			w.type('');
@@ -1746,9 +1753,15 @@ class Emitter {
 						return;
 					}
 
-					if (nativeAbstract(asType) != null)
-						throw new Unsupported('$asType.$name, which is a method of an abstract and has no class to be called on',
-							pos);
+					if (nativeAbstract(asType) != null) {
+						var onImpl:Null<String> = implMember(asType, name);
+						if (onImpl == null)
+							throw new Unsupported('$asType.$name, which is a method of an abstract with no runtime form',
+								pos);
+
+						emitImplCall(onImpl, name, null, params, line);
+						return;
+					}
 
 					if (!moduleClasses.exists(asType)) {
 						w.pos(line);
@@ -1784,6 +1797,22 @@ class Emitter {
 					expr(obj);
 					emitArgs(params, wantedBoxed, 1, line);
 					return;
+				}
+
+				/**
+				 * A method the host's own abstract declares, which is a static taking the value first.
+				 *
+				 * Only one the implementation really carries. A `@:forward` abstract answers for its
+				 * underlying type's members without declaring any of them, and those belong to the boxed
+				 * value, so they fall past this to the dispatch by name below that already reaches them.
+				 */
+				var onHost:Null<String> = hostAbstractOf(obj);
+				if (onHost != null) {
+					var hostImpl:Null<String> = implMember(onHost, name);
+					if (hostImpl != null) {
+						emitImplCall(hostImpl, name, obj, params, line);
+						return;
+					}
 				}
 
 				switch (obj.e) {
@@ -2150,6 +2179,25 @@ class Emitter {
 			return;
 		}
 
+		/**
+		 * An accessor the host's own abstract declares, which is a static taking the value first.
+		 *
+		 * Reading one had no spelling at all and fell to `Reflect.getProperty` below, which is handed
+		 * the UNDERLYING value: `colour.red` asked an `Int` for a field of that name and answered null,
+		 * silently and with nothing refused. Reading only, since an abstract's setter assigns to `this`
+		 * and only the host's own inlining makes that reach the variable holding the value.
+		 */
+		if (!writing) {
+			var onHost:Null<String> = hostAbstractOf(obj);
+			if (onHost != null) {
+				var hostImpl:Null<String> = implMember(onHost, 'get_' + name);
+				if (hostImpl != null) {
+					emitImplCall(hostImpl, 'get_' + name, obj, [], line);
+					return;
+				}
+			}
+		}
+
 		w.pos(line);
 		w.token('CALL');
 		w.int(2);
@@ -2199,10 +2247,25 @@ class Emitter {
 		var wrapper:Null<Class<Dynamic>> = nativeAbstract(asType);
 		if (wrapper != null) {
 			var constant:Null<Dynamic> = hxscript.types.AbstractTools.constantOf(wrapper, name);
-			if (constant == null)
-				throw new Unsupported('$asType.$name, which is a field of an abstract that is not a constant', pos);
+			if (constant != null) {
+				emitConstant(constant, line);
+				return;
+			}
 
-			emitConstant(constant, line);
+			/**
+			 * Not a constant, so it is an ordinary static and has to be READ rather than written down.
+			 * It lives on the implementation class, which is also where the host's own code reads it, so
+			 * this and the host see the same variable. The wrapper holds a copy of the initialiser and
+			 * would not.
+			 */
+			var onImpl:Null<String> = implMember(asType, name);
+			if (onImpl == null)
+				throw new Unsupported('$asType.$name, which is a field of an abstract with no runtime form', pos);
+
+			w.pos(line);
+			w.token('FSTATIC');
+			w.type(onImpl);
+			w.str(name);
 			return;
 		}
 
@@ -3392,14 +3455,16 @@ class Emitter {
 	 * @param path The type's compile path.
 	 * @param params The arguments as the call wrote them.
 	 * @param pos Where it appears.
+	 * @param opened Whether to take the value a compiled call site holds, which for a host abstract is
+	 *        its underlying value rather than the wrapper an interpreter wants.
 	 */
-	function emitConstruct(path:String, params:Array<Expr>, pos:Position):Void {
+	function emitConstruct(path:String, params:Array<Expr>, pos:Position, opened:Bool = false):Void {
 		var line:Int = pos == null ? 0 : pos.line;
 
 		w.pos(line);
 		w.token('CALLSTATIC');
 		w.type('hxscript.runtime.Construct');
-		w.str('make');
+		w.str(opened ? 'value' : 'make');
 		w.int(2);
 
 		w.pos(line);
@@ -3990,6 +4055,54 @@ class Emitter {
 		var wrapper:Class<Dynamic> = cast hxscript.types.AbstractTools.resolve(path);
 		wrappers.set(path, wrapper);
 		return wrapper;
+	}
+
+	/**
+	 * The implementation class of a host abstract, when it carries the member being reached for.
+	 *
+	 * A wrapper of the batch's own is not one of these: a script's abstract is emitted as a class of
+	 * this module and its members are reached through that, so `nativeAbstract` deciding what counts
+	 * as a host abstract is what keeps the two apart.
+	 *
+	 * @param path The abstract's path, or null when the expression's type is not one.
+	 * @param name The member being reached for.
+	 * @return The implementation class's path, or null when nothing there answers to that name.
+	 */
+	function implMember(path:Null<String>, name:String):Null<String> {
+		if (path == null)
+			return null;
+
+		return hxscript.types.AbstractTools.implMember(nativeAbstract(path), name);
+	}
+
+	/**
+	 * Writes a call to a member that lives on an abstract's implementation class.
+	 *
+	 * Through `CALL` on a static rather than `CALLSTATIC`, because the arity a host class declares is
+	 * not this emitter's to know: optional arguments and a `@:op` method reached by name both arrive
+	 * with a count the slot would have to match exactly. Dispatching the static as a value places the
+	 * arguments the way every other host call in here places them.
+	 *
+	 * @param impl The implementation class's path.
+	 * @param name The member.
+	 * @param receiver The value standing in for `this`, or null for a static.
+	 * @param params The arguments as written.
+	 * @param line The source line to attribute it to.
+	 */
+	function emitImplCall(impl:String, name:String, receiver:Null<Expr>, params:Array<Expr>, line:Int):Void {
+		w.pos(line);
+		w.token('CALL');
+		w.int(params.length + (receiver == null ? 0 : 1));
+		w.pos(line);
+		w.token('FSTATIC');
+		w.type(impl);
+		w.str(name);
+
+		if (receiver != null)
+			expr(receiver);
+
+		for (p in params)
+			expr(p);
 	}
 
 	/**

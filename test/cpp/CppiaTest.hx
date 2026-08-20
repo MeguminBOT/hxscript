@@ -38,11 +38,22 @@ class CppiaTest {
 	/** The abstract with an assignable static, which is the one shape that cannot be folded. */
 	@:keep static var vector:OpVec = OpVec.ZERO;
 
+	/** The abstract over a class, which is the shape every geometry type in a framework has. */
+	@:keep static var vec:HostVec = null;
+
 	public static function run():Void {
-		// Always on, because it is a different code path: an expression the JIT has no generator for
-		// emits nothing at all rather than falling back, so a construct can pass every test here and
-		// still do nothing in a host that turned the JIT on.
-		cpp.cppia.Host.enableJit(true);
+		/**
+		 * On by default, because it is a different code path: an expression the JIT has no generator
+		 * for emits nothing at all rather than falling back, so a construct can pass every test here
+		 * and still do nothing in a host that turned the JIT on.
+		 *
+		 * `HXSCRIPT_NO_JIT=1` runs the same cases through the interpreting loader instead, which is
+		 * what a host that called `Backend.jit = false` or was dropped to it by `retryWithoutJit` runs.
+		 * Both are shipped configurations, so both are worth a pass.
+		 */
+		var jit:Bool = Sys.getEnv('HXSCRIPT_NO_JIT') != '1';
+		cpp.cppia.Host.enableJit(jit);
+		TestCase.log('  cppia jit: ' + jit);
 
 		Corpus.run(check);
 
@@ -57,7 +68,14 @@ class CppiaTest {
 		check('enum abstract constant folds', 'return Std.string(OpBlend.ADD);', 'add', '', blend);
 		check('enum abstract constant compares', 'return OpBlend.ADD == "add" ? "eq" : "ne";', 'eq', '', blend);
 		check('enum abstract constant in a call', 'return Std.string(OpBlend.NORMAL).toUpperCase();', 'NORMAL', '', blend);
-		refuses('a method on an abstract is refused, not mis-linked', 'return OpBlend.additive("add") ? "y" : "n";', 'abstract', blend);
+		/**
+		 * The other half of a host abstract: everything it declares that is not a constant. An abstract
+		 * has no runtime form, so Haxe moves its members onto a companion class and passes the value
+		 * that would be `this` first. Compiled script code takes the same route, which is what makes
+		 * `FlxColor.fromRGB(...)` and `colour.getDarkened(0.5)` mean anything once compiled.
+		 */
+		check('a static method of an abstract', 'return OpBlend.additive("add") ? "y" : "n";', 'y', '', blend);
+		check('a static method of an abstract, false', 'return OpBlend.additive("no") ? "y" : "n";', 'n', '', blend);
 
 		/**
 		 * The same thing for a PLAIN abstract, which is what flixel's FlxColor is. Being an enum
@@ -77,10 +95,31 @@ class CppiaTest {
 
 		/**
 		 * The other half of the same decision: an ordinary `static var` is assignable, so its value is
-		 * not the emitter's to write down. Refusing costs the module its bytecode and stays right.
+		 * not the emitter's to write down. It is READ instead, from the implementation class, which is
+		 * where the host's own code reads it and so is the same variable rather than the wrapper's copy.
 		 */
-		refuses('an assignable static of an abstract is refused', 'return Std.string(OpVec.ZERO);', 'constant',
-			'import OpVec;');
+		var vector:String = 'import OpVec;';
+		check('a static of an abstract that is not a constant', 'var z:Int = OpVec.ZERO; return Std.string(z);', '0', '',
+			vector);
+
+		/**
+		 * A member reached on the value, which is the shape most of a colour or a vector's surface has.
+		 * `red` is an accessor and `toHexString` a method, and both are statics of the implementation
+		 * taking the value first. Read wrongly rather than refused before this: the accessor fell to
+		 * `Reflect.getProperty` on the underlying `Int` and answered null.
+		 */
+		check('an accessor on a host abstract value', 'var c:OpColor = OpColor.RED; return Std.string(c.red);', '255', '',
+			colour);
+		check('a read-only accessor on a host abstract value', 'var c:OpColor = OpColor.BLUE; return Std.string(c.alpha);',
+			'255', '', colour);
+		check('a method on a host abstract value', 'var c:OpColor = OpColor.RED; return c.toHexString();', 'FFFF0000', '',
+			colour);
+		check('a method on a host abstract, chained', 'var c:OpColor = OpColor.RED; return Std.string(c.red + c.alpha);', '510',
+			'', colour);
+		check('a host abstract over a class, its accessor', 'var v = new HostVec(3, 4); return Std.string(v.length);', '5', '',
+			'import HostVec;');
+		check('a host abstract over a class, its method',
+			'var v = new HostVec(1, 2); return Std.string(v.plus(new HostVec(3, 4)));', '4:6', '', 'import HostVec;');
 
 		check('new through a host typedef', 'var v = new AliasFixture(); return v.n;', '7',
 			'', 'import AliasTarget.AliasFixture;');

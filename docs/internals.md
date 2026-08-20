@@ -1558,6 +1558,24 @@ getter therefore answered null for `FlxColor.RED`, which collides with `get_red`
 `FlxAxes.X`, which collides with `get_x`: the two shapes are common precisely because a constant
 and an accessor for the same concept are natural to write together.
 
+### src/hxscript/types/AbstractTools.hx :: public static function implOf(wrapper:Dynamic):Null<String>
+
+An abstract has no runtime form, so Haxe moves everything it declares onto a companion class and
+passes the value that would be `this` as a first argument: `FlxColor.fromRGB(r, g, b)` is
+`FlxColor_Impl_.fromRGB(r, g, b)` and `colour.getDarkened(f)` is
+`FlxColor_Impl_.getDarkened(colour, f)`. That class is real, it is `@:keep`, and `inline` members
+survive on it, which is what lets compiled script code reach every one of them by the route the
+host's own code took. Both backends ask here, which is why it is not in either of them.
+
+Resolving the name rather than trusting it is what makes emitting a reference safe. cppia links
+host classes by name at load time and rejects the WHOLE module for one it cannot find, so a name
+that does not resolve has to be refused now rather than written down.
+
+`implMember` beside it exists for `@:forward`. Such an abstract answers for its underlying type's
+members without declaring any of them, so `point.set(x, y)` belongs to the boxed value's class and
+to nothing on the implementation. Asking first is what lets those fall through to the dispatch that
+already reaches them.
+
 ### src/hxscript/types/IScriptedInstance.hx :: private function __scriptConstruct(base:ScriptedClass, arguments:Array<Dynamic>):Void;
 
 **Not `__construct`**, which is the name hxcpp generates for a class's own constructor. A bridge

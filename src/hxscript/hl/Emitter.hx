@@ -3013,6 +3013,17 @@ class Emitter {
 				emitDynCall(inner, params, slot, pos);
 
 			case EField(obj, name, maybe):
+				/**
+				 * A method a host abstract declares, which lives on its implementation class and takes
+				 * the value that would be `this` first, the same way its accessors do. Asking the value
+				 * for the method finds nothing on it, since the value is whatever the abstract wraps.
+				 */
+				var onImpl:Null<String> = maybe == true ? null : implMember(ownerNamed(obj) ?? heldAs(obj) ?? worldly(obj), name);
+				if (onImpl != null) {
+					callSupport('abstractCall', [named(onImpl), named(name), dynOf(obj), gathered(params)], slot);
+					return;
+				}
+
 				var target:Int = dynOf(obj);
 
 				if (maybe == true) {
@@ -3293,6 +3304,21 @@ class Emitter {
 		var cls:Null<String> = ownerNamed(obj) ?? heldAs(obj);
 
 		/**
+		 * An accessor a host abstract declares, which lives on its implementation class and takes the
+		 * value that would be `this` first. Nothing on the value answers to the name, so without this
+		 * `colour.red` asked the underlying `Int` for a field and read null, silently.
+		 *
+		 * First, because everything below it is written for a class of the batch and an abstract of the
+		 * host is not one: a property it declares is the world's to describe, and describing it here
+		 * routes the read back through the value it was already not on.
+		 */
+		var onImpl:Null<String> = implMember(cls ?? worldly(obj), 'get_' + name);
+		if (onImpl != null) {
+			callSupport('abstractGet', [named(onImpl), named('get_' + name), dynOf(obj)], slot);
+			return;
+		}
+
+		/**
 		 * A member written `var x(null, ...)` is unreadable, and the interpreter says so by looking
 		 * for an accessor named `null` and not finding one. Compiled code raises the same thing
 		 * rather than reading the storage, which is what cppia does with the same declaration.
@@ -3333,6 +3359,24 @@ class Emitter {
 		}
 
 		readNamed(dynOf(obj), name, slot);
+	}
+
+	/**
+	 * The implementation class of a host abstract, when it carries the member being reached for.
+	 *
+	 * An abstract of the batch is not one of these: the interpreter builds it when the module starts
+	 * and compiled code reaches it the way it reaches any type the world holds, so `declared` telling
+	 * the two apart is what keeps a script's own abstract off this path.
+	 *
+	 * @param path The type name in hand, or null when the expression's type has no name.
+	 * @param name The member being reached for.
+	 * @return The implementation class's path, or null when nothing there answers to that name.
+	 */
+	function implMember(path:Null<String>, name:String):Null<String> {
+		if (path == null || declared.exists(path) || classes.exists(path))
+			return null;
+
+		return hxscript.types.AbstractTools.implMember(hxscript.types.AbstractTools.resolve(path), name);
 	}
 
 	/**
@@ -3874,6 +3918,8 @@ class Emitter {
 		'set' => 'dddv',
 		'raise' => 'dd',
 		'invoke' => 'dddd',
+		'abstractGet' => 'dddd',
+		'abstractCall' => 'ddddd',
 		'send' => 'ddddd',
 		'make' => 'ddd',
 		'anyMap' => 'd',

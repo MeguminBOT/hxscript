@@ -15,6 +15,23 @@
   is the set Haxe folds itself, and both backends fold exactly those. An ordinary `static var` is
   still refused, because a script may assign to it.
 
+- **Nothing else a host abstract declares had a compiled form either, so `FlxColor` was unusable
+  past its constants.** An abstract has no runtime form: Haxe moves everything it declares onto a
+  companion class and passes the value that would be `this` as a first argument, so
+  `FlxColor.fromRGB(r, g, b)` is `FlxColor_Impl_.fromRGB(r, g, b)` and `colour.getDarkened(f)` is
+  `FlxColor_Impl_.getDarkened(colour, f)`. Asking the value itself for a member of that name finds
+  nothing, because the value is only the `Int` the abstract wraps. A static method was refused, and
+  an accessor was worse than refused: `colour.red` read `null` through `Reflect.getProperty` with
+  nothing said about it. Both backends reach the implementation class now, so static methods,
+  ordinary statics, accessors, methods on a value and `@:op` operators all work, while a member that
+  is only forwarded is left to the dispatch that already reached it. The set is gated on the class
+  really carrying the member, since cppia rejects a whole module for one name it cannot link.
+
+- **cppia held a constructed host abstract as a wrapper where the host holds the value.** A constant
+  folded to the underlying value while `new HostVec(3, 4)` handed back the box, so the two spellings
+  of the same type were different things and a member call on one of them fed a wrapper to a static
+  that had declared the underlying type. Compiled code holds what the host's own compiled code holds.
+
 - **A constant whose name collided with an accessor was refused even on an enum abstract.** A wrapper
   normally offers each constant behind a lazy `get_NAME`, but when the abstract declares an accessor
   of that name already it holds the constant as a plain static instead, and only the getter was read.

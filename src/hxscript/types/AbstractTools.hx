@@ -6,6 +6,9 @@ using hxscript.types.TypeCollection;
 
 /** Helpers for resolving and constructing the runtime representation of abstracts and enum abstracts. */
 class AbstractTools {
+	/** The members of each implementation class, misses written as null, so a repeat costs a map read. */
+	static var impls:Map<String, Null<Array<String>>> = new Map();
+
 	/**
 	 * Resolves an abstract by path to its generated `AbstractValue_*` implementation class.
 	 *
@@ -310,6 +313,59 @@ class AbstractTools {
 			case TClass(cls) if (cls == String): value;
 			case _: null;
 		}
+	}
+
+	/**
+	 * The class a host abstract's members really live on.
+	 *
+	 * An abstract has no runtime form, so Haxe moves everything it declares onto a companion class:
+	 * `FlxColor.fromRGB(r, g, b)` compiles to `FlxColor_Impl_.fromRGB(r, g, b)` and `colour.getDarkened(f)`
+	 * to `FlxColor_Impl_.getDarkened(colour, f)`, with the value that would be `this` passed first. That
+	 * class is real, it is `@:keep`, and `inline` members survive on it, so compiled script code can
+	 * reach every one of them by the route the host's own code took.
+	 *
+	 * The wrapper knows its name, since it is generated beside the abstract and records it. Resolving
+	 * that name is not a formality: it is what makes emitting a reference to it safe. cppia links host
+	 * classes by name at load time and rejects the WHOLE module for one it cannot find.
+	 *
+	 * @param wrapper The abstract's generated wrapper class.
+	 * @return The implementation class's path, or null when the build has no such class.
+	 */
+	public static function implOf(wrapper:Dynamic):Null<String> {
+		if (wrapper == null)
+			return null;
+
+		var named:Null<String> = Reflect.field(wrapper, 'implClass');
+		if (named == null)
+			return null;
+
+		if (impls.exists(named))
+			return impls.get(named) == null ? null : named;
+
+		var cls:Null<Class<Dynamic>> = Type.resolveClass(named);
+		impls.set(named, cls == null ? null : Type.getClassFields(cls));
+		return cls == null ? null : named;
+	}
+
+	/**
+	 * The same class, but only when it really carries the member being asked for.
+	 *
+	 * A `@:forward` abstract answers for its underlying type's members without declaring them, so
+	 * `point.set(x, y)` is a member of the boxed value's class and of nothing on the implementation.
+	 * Asking first is what lets those fall through to the ordinary dispatch that already reaches them,
+	 * instead of linking against a static that is not there.
+	 *
+	 * @param wrapper The abstract's generated wrapper class.
+	 * @param name The member being reached for.
+	 * @return The implementation class's path, or null when it does not carry that member.
+	 */
+	public static function implMember(wrapper:Dynamic, name:String):Null<String> {
+		var impl:Null<String> = implOf(wrapper);
+		if (impl == null)
+			return null;
+
+		var members:Null<Array<String>> = impls.get(impl);
+		return (members != null && members.indexOf(name) >= 0) ? impl : null;
 	}
 
 	/**

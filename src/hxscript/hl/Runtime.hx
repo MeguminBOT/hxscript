@@ -402,6 +402,7 @@ class Runtime {
 	 * one question with a right answer either way.
 	 */
 	public static function get(o:Dynamic, name:Dynamic):Dynamic {
+
 		if (o is ScriptedAbstractValue) {
 			var boxed:ScriptedAbstractValue = cast o;
 			if (boxed.owner != null)
@@ -467,6 +468,65 @@ class Runtime {
 
 		var own:Dynamic = get(o, name);
 		return own == null ? null : Reflect.callMethod(o, own, args);
+	}
+
+	/**
+	 * Reads an accessor a host abstract declares, which is a static of its implementation class.
+	 *
+	 * An abstract has no runtime form, so `colour.red` is `FlxColor_Impl_.get_red(colour)` once
+	 * compiled, with the value that would be `this` passed first. Nothing on the value itself answers
+	 * to `red`, which is how these read as null: the underlying `Int` was asked for a field of that
+	 * name and had none.
+	 *
+	 * The receiver is opened first, so this answers the same whether what is in hand is the underlying
+	 * value or a wrapper around it. Both reach a call site: a constant folds to the value, while
+	 * `new` and the wrapper's own statics hand back the box.
+	 *
+	 * @param impl The implementation class's path, decided when the module was written.
+	 * @param name The accessor's name.
+	 * @param value The abstract's value, boxed or not.
+	 * @return What the accessor answered, or null when the class no longer carries it.
+	 */
+	public static function abstractGet(impl:Dynamic, name:Dynamic, value:Dynamic):Dynamic {
+		var fn:Dynamic = implFunction(impl, name);
+		return fn == null ? null : Reflect.callMethod(null, fn, [AbstractTools.underlying(value)]);
+	}
+
+	/**
+	 * Calls a method a host abstract declares, by the same rule and for the same reason.
+	 *
+	 * The arguments are opened as well as the receiver, since a method taking its own abstract is
+	 * declared against the underlying type and a wrapper handed to it is not one.
+	 *
+	 * @param impl The implementation class's path.
+	 * @param name The method's name.
+	 * @param value The abstract's value, boxed or not.
+	 * @param args Its arguments.
+	 * @return What it answered, or null when the class no longer carries it.
+	 */
+	public static function abstractCall(impl:Dynamic, name:Dynamic, value:Dynamic, args:Dynamic):Dynamic {
+		var fn:Dynamic = implFunction(impl, name);
+		if (fn == null)
+			return null;
+
+		var given:Array<Dynamic> = (args : Array<Dynamic>);
+		var all:Array<Dynamic> = [AbstractTools.underlying(value)];
+
+		if (given != null)
+			for (arg in given)
+				all.push(AbstractTools.underlying(arg));
+
+		return Reflect.callMethod(null, fn, all);
+	}
+
+	/**
+	 * @param impl An implementation class's path.
+	 * @param name A member of it.
+	 * @return The function to call, or null when nothing there answers to that name.
+	 */
+	static function implFunction(impl:Dynamic, name:Dynamic):Dynamic {
+		var cls:Null<Class<Dynamic>> = Type.resolveClass(impl);
+		return cls == null ? null : Reflect.field(cls, name);
 	}
 
 	/**

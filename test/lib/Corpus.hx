@@ -148,6 +148,25 @@ class Corpus {
 			}
 		', metres);
 
+		/**
+		 * A host abstract's surface beyond its constants. An abstract has no runtime form, so every
+		 * one of these is a static of a companion class taking the value that would be `this` first,
+		 * and reaching them that way is what makes `flixel.util.FlxColor` usable from compiled code
+		 * rather than only from the interpreter.
+		 */
+		at('host');
+		var colour:String = 'import OpColor;';
+		check('a host abstract constant', 'var c:OpColor = OpColor.RED; return Std.string(c.red);', '255', '', colour);
+		check('a host abstract constant, read-only accessor', 'var c:OpColor = OpColor.BLUE; return Std.string(c.alpha);',
+			'255', '', colour);
+		check('a host abstract method on a value', 'var c:OpColor = OpColor.RED; return c.toHexString();', 'FFFF0000', '',
+			colour);
+		check('a host abstract constant compared', 'var c:OpColor = OpColor.RED; return c == OpColor.RED ? "eq" : "ne";', 'eq',
+			'', colour);
+		check('a static method of a host abstract', 'return OpBlend.additive("add") ? "y" : "n";', 'y', '', 'import OpBlend;');
+		check('a static of a host abstract that is not a constant', 'var z:Int = OpVec.ZERO; return Std.string(z);', '0', '',
+			'import OpVec;');
+
 		at('modules');
 		check('interval as a value', 'var it = 0...3; var t = 0; while (it.hasNext()) t += it.next(); return t;', '3');
 		check('interval bound to a local then looped', 'var it = 1...4; var t = 0; for (v in it) t += v; return t;', '6');

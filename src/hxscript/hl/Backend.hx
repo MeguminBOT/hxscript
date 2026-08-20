@@ -596,6 +596,23 @@ class Backend {
 			return folded;
 
 		/**
+		 * Not a constant, so it is an ordinary static or a method of the abstract, and both live on the
+		 * implementation class. That is where the host's own code reaches them, so what comes back takes
+		 * and answers with underlying values rather than with wrappers around them. The wrapper offers
+		 * the same names and would answer with a copy of the initialiser and a boxed result, which is
+		 * right for an interpreter and not for a call site that has to hand its answer to a host API:
+		 * `var z:Int = OpVec.ZERO` read a wrapper and could not be cast.
+		 */
+		var onImpl:Null<String> = hxscript.types.AbstractTools.implMember(holder, field);
+		if (onImpl != null) {
+			var cls:Null<Class<Dynamic>> = Type.resolveClass(onImpl);
+			var direct:Dynamic = cls == null ? null : Reflect.field(cls, field);
+
+			if (direct != null)
+				return direct;
+		}
+
+		/**
 		 * The property first, then the plain field. `Math.PI` is the case that needs it: it has no
 		 * runtime field of that name on every target, and asking only for the field bound null into
 		 * the global, so `Math.PI > 3` compiled to a comparison against nothing and answered false.

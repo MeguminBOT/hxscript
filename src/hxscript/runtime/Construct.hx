@@ -63,6 +63,27 @@ class Construct {
 	}
 
 	/**
+	 * The same construction, opened to the value a compiled call site really holds.
+	 *
+	 * **Compiled code holds a host abstract as its underlying value**, because that is what the host's
+	 * own compiled code holds and the two have to be the same thing: a constant already folds to it, an
+	 * `@:op` method and an accessor are statics taking it as their first argument, and a host API handed
+	 * anything else gets a wrapper where it declared an `Int`. `make` boxes, which is right for an
+	 * interpreter, so a compiled `new` asks for this instead and the box comes straight back off.
+	 *
+	 * Anything that is not a host abstract is constructed and returned unchanged, so a call site short
+	 * of a middle optional can come through here as well without having to know which it is.
+	 *
+	 * @param path The type's compile path, as the emitter resolved it.
+	 * @param args The arguments as the call wrote them.
+	 * @return The constructed value, a host abstract's underlying value rather than its wrapper.
+	 * @throws String If nothing at runtime answers to that path.
+	 */
+	public static function value(path:String, args:Array<Dynamic>):Dynamic {
+		return AbstractTools.underlying(make(path, args));
+	}
+
+	/**
 	 * @param path A type's compile path.
 	 * @return The class to construct, an abstract's wrapper included, or null when there is none.
 	 */
