@@ -256,6 +256,63 @@ class AbstractTools {
 	}
 
 	/**
+	 * Folds a native abstract's constant into the value it really is.
+	 *
+	 * A constant of an abstract IS its underlying value once the host is compiled: `FlxColor.RED` is
+	 * an `Int` at every call site and a field of nothing anywhere, which is the whole reason a wrapper
+	 * exists to give the interpreter something to read it from. A backend that COMPILES a script has
+	 * to write that value into the bytecode itself, so it asks here.
+	 *
+	 * Only a static the abstract declared `inline` or `final` is answered for. Those are the two
+	 * spellings Haxe folds itself, so what is written matches what the host's own compiler wrote for
+	 * the same field, and an ordinary `static var`, which a script may assign to, is left to be read at
+	 * run time. `_constants` is the wrapper's record of which its statics those are; a wrapper without
+	 * that table falls back to the older test, which was to accept every field of an enum abstract.
+	 *
+	 * A wrapper offers a constant in one of two shapes: a lazy `get_NAME`, or, when the name collides
+	 * with an accessor of the abstract, a plain static already holding the boxed value. Reading only
+	 * the getter answered null for exactly the abstracts scripts name most, since `FlxColor.RED`
+	 * collides with `get_red` and `FlxAxes.X` with `get_x`.
+	 *
+	 * @param wrapper The abstract's generated wrapper class.
+	 * @param name The field's name.
+	 * @return Its underlying value, or null when the field is not a foldable constant.
+	 */
+	public static function constantOf(wrapper:Dynamic, name:String):Null<Dynamic> {
+		if (wrapper == null)
+			return null;
+
+		var listed:Array<String> = Reflect.field(wrapper, '_constants');
+
+		if (listed != null) {
+			if (listed.indexOf(name) < 0)
+				return null;
+		} else if (Reflect.field(wrapper, 'isEnum') != true) {
+			return null;
+		}
+
+		var boxed:Dynamic = null;
+
+		try {
+			var getter:Dynamic = Reflect.field(wrapper, 'get_' + name);
+			boxed = Reflect.isFunction(getter) ? Reflect.callMethod(wrapper, getter, []) : Reflect.field(wrapper, name);
+		} catch (e:haxe.Exception) {
+			return null;
+		}
+
+		if (boxed == null)
+			return null;
+
+		var value:Dynamic = (boxed is AbstractValue) ? boxed.__a : boxed;
+
+		return switch (Type.typeof(value)) {
+			case TInt | TFloat | TBool: value;
+			case TClass(cls) if (cls == String): value;
+			case _: null;
+		}
+	}
+
+	/**
 	 * Unwraps a wrapped abstract to the value it boxes; anything else passes through.
 	 *
 	 * @param v The value.

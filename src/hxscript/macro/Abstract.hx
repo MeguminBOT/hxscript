@@ -309,6 +309,19 @@ class Abstract {
 		}
 
 		var props = [];
+		/**
+		 * The statics whose value is fixed, which a compiling backend is allowed to fold.
+		 *
+		 * A wrapper exposes every public static the same way, so nothing about the generated class
+		 * says which of them can never change. `flixel.util.FlxColor` is the case that matters: it is a
+		 * PLAIN abstract, so the enum-abstract test that used to stand in for this answered no, and
+		 * `FlxColor.RED` had no bytecode spelling. One such constant left the whole module interpreted,
+		 * which is most flixel scripts.
+		 *
+		 * `inline` and `final` are the two spellings Haxe itself treats as fixed, so folding exactly
+		 * those matches what the host's own compiler did with the same field.
+		 */
+		var constants:Array<String> = [];
 		var implPath = ab.impl.get().pack.copy();
 		implPath.push(ab.impl.get().name);
 		var implStr = macro $v{implPath.join('.')};
@@ -493,6 +506,9 @@ class Abstract {
 					case FVar(t, e):
 						if (field.access.contains(APrivate) || !field.access.contains(APublic))
 							continue;
+
+						if (field.access.contains(AInline) || field.access.contains(AFinal))
+							constants.push(name);
 
 						var typeIsMe:Bool = matchAbstract(t);
 						/**
@@ -682,6 +698,7 @@ class Abstract {
 							enumConstructors.push(name);
 							enumMap.set(name, enumI++);
 							enumIndex.push(e);
+							constants.push(name);
 
 							if (methodNames.exists('GET_' + name.toUpperCase())) {
 								cls.fields.push({
@@ -894,6 +911,12 @@ class Abstract {
 				pos: pos,
 				expr: EArrayDecl(opEntries)
 			})
+		});
+		cls.fields.push({
+			name: '_constants',
+			pos: pos,
+			access: [APublic, AStatic],
+			kind: FProp('default', 'never', macro :Array<String>, macro $v{constants})
 		});
 		cls.fields.push({
 			name: '_enumMap',

@@ -969,14 +969,6 @@ whether a path is an abstract at all.
 Cached including the misses: nearly every path asked about is an ordinary class, and the answer
 is a type resolution.
 
-### src/hxscript/cppia/Emitter.hx :: function abstractConstant(wrapper:Class<Dynamic>, name:String):Null<Dynamic>
-
-This is not an optimisation, it is the only honest spelling. An enum abstract's constants are
-compile-time values, and compiled Haxe writes the underlying `1` or `"add"` at the call site, so
-there is nothing at runtime for `BlendMode.ADD` to be. The wrapper holds each constant behind a
-getter returning a boxed value, which is right for the interpreter and wrong for anything handing
-it to a host API, so the box is opened here and the contents emitted.
-
 ### src/hxscript/cppia/Emitter.hx :: function declaredClass(path:String):Null<String>
 
 Worth resolving because the alternative is `Dynamic`, and `Dynamic` decides how every later
@@ -1539,6 +1531,32 @@ A `@:structInit` class rather than an anonymous structure, for the same reason a
 `StackFrame`: anonymous structures resolve their fields by name at runtime on static targets, and
 a recursive-descent parser pushes a token back on every lookahead that does not match, which is
 most of them. Keeps the `{t: ..., min: ..., max: ...}` construction syntax.
+
+### src/hxscript/types/AbstractTools.hx :: public static function constantOf(wrapper:Dynamic, name:String):Null<Dynamic>
+
+This is not an optimisation, it is the only honest spelling. An abstract's constants are
+compile-time values, and compiled Haxe writes the underlying `1` or `"add"` at the call site, so
+there is nothing at runtime for `BlendMode.ADD` to be. The wrapper holds each constant behind a
+getter returning a boxed value, which is right for the interpreter and wrong for anything handing
+it to a host API, so the box is opened here and the contents handed to whichever backend asked.
+
+Both backends ask, which is why it is here rather than in either of them. cppia writes the value
+into the bytecode; HashLink binds it into the global the name resolved to, once, when the module
+loads.
+
+**Which fields qualify is the whole difficulty.** Being an enum abstract used to stand in for being
+a constant, and that is wrong in both directions. `flixel.util.FlxColor` is a PLAIN abstract whose
+fifteen colours are all `static inline`, so every `FlxColor.RED` in a script was refused and took
+its module's bytecode with it. Meanwhile an ordinary `static var` on an enum abstract is assignable
+and was folded anyway. The wrapper now records the `inline` and `final` statics as `_constants`,
+which is exactly the set Haxe folds itself.
+
+A wrapper offers a constant in one of two shapes and both have to be read. Normally it is a lazy
+`get_NAME`; when the name collides with an accessor of the abstract it is a plain static already
+holding the boxed value, because the eager form is what the collision forces. Reading only the
+getter therefore answered null for `FlxColor.RED`, which collides with `get_red`, and for
+`FlxAxes.X`, which collides with `get_x`: the two shapes are common precisely because a constant
+and an accessor for the same concept are natural to write together.
 
 ### src/hxscript/types/IScriptedInstance.hx :: private function __scriptConstruct(base:ScriptedClass, arguments:Array<Dynamic>):Void;
 

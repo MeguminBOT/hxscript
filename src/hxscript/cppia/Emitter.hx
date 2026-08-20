@@ -2198,7 +2198,7 @@ class Emitter {
 
 		var wrapper:Null<Class<Dynamic>> = nativeAbstract(asType);
 		if (wrapper != null) {
-			var constant:Null<Dynamic> = abstractConstant(wrapper, name);
+			var constant:Null<Dynamic> = hxscript.types.AbstractTools.constantOf(wrapper, name);
 			if (constant == null)
 				throw new Unsupported('$asType.$name, which is a field of an abstract that is not a constant', pos);
 
@@ -3990,41 +3990,6 @@ class Emitter {
 		var wrapper:Class<Dynamic> = cast hxscript.types.AbstractTools.resolve(path);
 		wrappers.set(path, wrapper);
 		return wrapper;
-	}
-
-	/**
-	 * Folds a constant of a native `enum abstract` into the value it really is.
-	 *
-	 * @param wrapper The abstract's wrapper class.
-	 * @param name The constant.
-	 * @return Its underlying value, or null when the field is not a foldable constant.
-	 */
-	function abstractConstant(wrapper:Class<Dynamic>, name:String):Null<Dynamic> {
-		if (Reflect.field(wrapper, 'isEnum') != true)
-			return null;
-
-		var getter:Dynamic = Reflect.field(wrapper, 'get_' + name);
-		if (!Reflect.isFunction(getter))
-			return null;
-
-		var boxed:Dynamic = null;
-
-		try {
-			boxed = Reflect.callMethod(wrapper, getter, []);
-		} catch (e:haxe.Exception) {
-			return null;
-		}
-
-		if (boxed == null)
-			return null;
-
-		var value:Dynamic = hxscript.types.AbstractTools.isAbstract(boxed) ? boxed.__a : boxed;
-
-		return switch (Type.typeof(value)) {
-			case TInt | TFloat | TBool: value;
-			case TClass(cls) if (cls == String): value;
-			case _: null;
-		}
 	}
 
 	/**

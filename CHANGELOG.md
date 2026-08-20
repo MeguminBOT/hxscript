@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.0.3
+
+### Fixed
+
+- **A constant of a plain abstract had no bytecode spelling, so `FlxColor.RED` left its whole module
+  interpreted.** An abstract's constant is its underlying value once compiled, which is why a backend
+  has to write the value rather than a field access, and the test for which fields those are was
+  whether the abstract was an `enum abstract`. `flixel.util.FlxColor` is not one: it is a plain
+  `abstract FlxColor(Int)` whose fifteen colours are `static inline`, so all fifteen were refused, and
+  one of them anywhere in a script cost every class in that module its bytecode. A script doing
+  nothing more unusual than filling a rectangle red compiled zero classes and reported one
+  interpreted. The wrapper now records which of an abstract's statics are `inline` or `final`, which
+  is the set Haxe folds itself, and both backends fold exactly those. An ordinary `static var` is
+  still refused, because a script may assign to it.
+
+- **A constant whose name collided with an accessor was refused even on an enum abstract.** A wrapper
+  normally offers each constant behind a lazy `get_NAME`, but when the abstract declares an accessor
+  of that name already it holds the constant as a plain static instead, and only the getter was read.
+  `flixel.util.FlxAxes` is that shape, so `X` and `Y` were refused where `XY` and `NONE` compiled,
+  which is a difference nothing in a script accounts for. Both shapes are read now.
+
 ## 2.0.2
 
 ### Fixed

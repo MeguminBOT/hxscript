@@ -579,7 +579,19 @@ class Backend {
 		if (field == '')
 			return holder;
 
-		var folded:Null<Dynamic> = constantOf(holder, field);
+		/**
+		 * A constant of an abstract first, and folded rather than read.
+		 *
+		 * **An abstract's constant IS its underlying value once compiled**, so `OpBlend.ADD` is a
+		 * `String` at every call site and a field of nothing anywhere. The wrapper exists to give the
+		 * interpreter something to read them from, and what it hands back is the BOXED value, which is
+		 * not what a compiled module's call sites expect.
+		 *
+		 * Read once, into the global the name is bound to, which is the same thing the cppia backend
+		 * achieves by folding the value into its bytecode: a constant does not change, so resolving it
+		 * when the module loads costs nothing afterwards.
+		 */
+		var folded:Null<Dynamic> = hxscript.types.AbstractTools.constantOf(holder, field);
 		if (folded != null)
 			return folded;
 
@@ -680,50 +692,6 @@ class Backend {
 		return Reflect.makeVarArgs(function(args:Array<Dynamic>):Dynamic {
 			return shim(holder, args);
 		});
-	}
-
-	/**
-	 * Reads a constant of a native `enum abstract`.
-	 *
-	 * **An enum abstract IS its underlying value once compiled**, so `OpBlend.ADD` is a `String` at
-	 * every call site and a field of nothing anywhere. Asking the wrapper for a field of that name
-	 * therefore answers with nothing, which is how these read as null. The wrapper exists to give the
-	 * interpreter something to read them from, and it offers a getter per constant.
-	 *
-	 * Read once, into the global the name is bound to, which is the same thing the cppia backend
-	 * achieves by folding the value into its bytecode: a constant does not change, so resolving it
-	 * when the module loads costs nothing afterwards.
-	 *
-	 * @param holder The type the script named.
-	 * @param field The constant's name.
-	 * @return Its underlying value, or null when this is not a foldable constant.
-	 */
-	static function constantOf(holder:Dynamic, field:String):Null<Dynamic> {
-		if (Reflect.field(holder, 'isEnum') != true)
-			return null;
-
-		var getter:Dynamic = Reflect.field(holder, 'get_' + field);
-		if (!Reflect.isFunction(getter))
-			return null;
-
-		var boxed:Dynamic = null;
-
-		try {
-			boxed = Reflect.callMethod(holder, getter, []);
-		} catch (e:haxe.Exception) {
-			return null;
-		}
-
-		if (boxed == null)
-			return null;
-
-		var value:Dynamic = hxscript.types.AbstractTools.isAbstract(boxed) ? boxed.__a : boxed;
-
-		return switch (Type.typeof(value)) {
-			case TInt | TFloat | TBool: value;
-			case TClass(cls) if (cls == String): value;
-			case _: null;
-		}
 	}
 
 	/** @return The path a class in a module is resolved by. */

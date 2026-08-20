@@ -29,6 +29,15 @@ class CppiaTest {
 	/** Keeps the typedef fixture's target in the build, for the same reason. */
 	@:keep static var aliased:AliasTarget = null;
 
+	/** The plain abstract with `inline` constants, which is the shape `flixel.util.FlxColor` has. */
+	@:keep static var colour:OpColor = OpColor.RED;
+
+	/** The enum abstract whose constants collide with its own accessors, as `flixel.util.FlxAxes` does. */
+	@:keep static var axes:HostAxes = HostAxes.X;
+
+	/** The abstract with an assignable static, which is the one shape that cannot be folded. */
+	@:keep static var vector:OpVec = OpVec.ZERO;
+
 	public static function run():Void {
 		// Always on, because it is a different code path: an expression the JIT has no generator for
 		// emits nothing at all rather than falling back, so a construct can pass every test here and
@@ -49,6 +58,29 @@ class CppiaTest {
 		check('enum abstract constant compares', 'return OpBlend.ADD == "add" ? "eq" : "ne";', 'eq', '', blend);
 		check('enum abstract constant in a call', 'return Std.string(OpBlend.NORMAL).toUpperCase();', 'NORMAL', '', blend);
 		refuses('a method on an abstract is refused, not mis-linked', 'return OpBlend.additive("add") ? "y" : "n";', 'abstract', blend);
+
+		/**
+		 * The same thing for a PLAIN abstract, which is what flixel's FlxColor is. Being an enum
+		 * abstract used to stand in for being a constant, so `FlxColor.RED` had no bytecode spelling and
+		 * one of them anywhere in a script left the whole module interpreted, which is most flixel
+		 * scripts. `RED` also collides with the `get_red` accessor, so the wrapper holds it as a plain
+		 * static rather than behind a lazy getter, and reading only the getter found nothing.
+		 */
+		var colour:String = 'import OpColor;';
+		check('plain abstract constant folds', 'return Std.string(OpColor.BLUE);', Std.string(OpColor.BLUE), '', colour);
+		check('constant colliding with an accessor folds', 'return Std.string(OpColor.RED);', Std.string(OpColor.RED), '',
+			colour);
+		check('plain abstract constant compares', 'return OpColor.RED == ' + Std.string(OpColor.RED) + ' ? "eq" : "ne";', 'eq',
+			'', colour);
+		check('enum abstract constant colliding with an accessor folds', 'return Std.string(HostAxes.X);',
+			Std.string(HostAxes.X), '', 'import HostAxes;');
+
+		/**
+		 * The other half of the same decision: an ordinary `static var` is assignable, so its value is
+		 * not the emitter's to write down. Refusing costs the module its bytecode and stays right.
+		 */
+		refuses('an assignable static of an abstract is refused', 'return Std.string(OpVec.ZERO);', 'constant',
+			'import OpVec;');
 
 		check('new through a host typedef', 'var v = new AliasFixture(); return v.n;', '7',
 			'', 'import AliasTarget.AliasFixture;');
