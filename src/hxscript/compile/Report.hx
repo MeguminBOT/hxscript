@@ -27,6 +27,15 @@ class Report {
 	/** Whether the world now reaches its scripted classes through their compiled form. */
 	public var substituting:Bool;
 
+	/**
+	 * Host-bound names the compiled modules reached, and how each was spelled.
+	 *
+	 * A module naming one used to be refused outright, so this is what that refusal became. Worth
+	 * reading for the entries spelled `Dynamic`: those are the ones a `@:scriptStatic` or a
+	 * `Compiler.globalNames` pin would turn into something faster.
+	 */
+	public var globals:Array<GlobalUse>;
+
 	/** @return A report of nothing having happened, which is where every run starts. */
 	public static function empty():Report {
 		return {
@@ -35,7 +44,8 @@ class Report {
 			failed: [],
 			ms: 0,
 			bytes: 0,
-			substituting: false
+			substituting: false,
+			globals: []
 		};
 	}
 }

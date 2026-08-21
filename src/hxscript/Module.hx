@@ -57,10 +57,10 @@ class Module {
 	public var started:Bool = false;
 
 	/** The interpreter's variable table (module-level values). */
-	public var variables(get, never):Map<String, Dynamic>;
+	public var variables(get, never):hxscript.runtime.Bindings;
 
 	/** @return The interpreter's variable table. */
-	inline function get_variables():Map<String, Dynamic> {
+	inline function get_variables():hxscript.runtime.Bindings {
 		return interp.variables;
 	}
 

@@ -100,6 +100,52 @@ class Compiler {
 	}
 
 	/**
+	 * Whether a bare name the world holds compiles to a lookup rather than refusing its module.
+	 *
+	 * On. A host binds values into scripts through `Environment.variables`, `Module.variables`,
+	 * `Config.globalVariables`, `Config.globalStatics`, or an `Interp` of its own overriding
+	 * `resolve`; all five reach compiled code, and the fastest spelling each one can have is the one
+	 * it gets. Nothing has to be registered twice for that to happen.
+	 *
+	 * Turn it off to have such a name reported as an unresolved identifier and its module left
+	 * interpreted, which is what happened before and what a host tuning for speed may prefer to be
+	 * told about.
+	 */
+	public static var globals(get, set):Bool;
+
+	static function get_globals():Bool {
+		return Backend.globals;
+	}
+
+	static function set_globals(v:Bool):Bool {
+		return Backend.globals = v;
+	}
+
+	#if hxscript_cppia
+	/**
+	 * Bare names the host binds, each written `name` or `name:Type`.
+	 *
+	 * A name bound before the compile needs no entry: what it holds then is what decides how it is
+	 * read. This is for the three cases that cannot decide themselves: a name bound afterwards, one
+	 * holding null, and one whose type the host means to change. It is also how `name:Dynamic` keeps a
+	 * name untyped on purpose. A pin here beats whatever the value says.
+	 *
+	 * hxcpp only for now. HashLink reads a bound name as the value it held when the module loaded,
+	 * which is decided by the value rather than by a type, so there is nothing here for it to honour
+	 * until it resolves them the same way.
+	 */
+	public static var globalNames(get, set):Array<String>;
+
+	static function get_globalNames():Array<String> {
+		return Backend.globalNames;
+	}
+
+	static function set_globalNames(v:Array<String>):Array<String> {
+		return Backend.globalNames = v;
+	}
+	#end
+
+	/**
 	 * Whether to turn the target's JIT on before the first module loads.
 	 *
 	 * HashLink jits everything it loads, so this reads true there and setting it changes nothing.

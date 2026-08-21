@@ -13,4 +13,7 @@ class Result {
 
 	/** Modules that did not, each with the reason and where it was. These must keep being interpreted. */
 	public var skipped:Array<Skip>;
+
+	/** Host-bound names the compiled modules reached, and how each was spelled. */
+	public var globals:Array<GlobalUse> = [];
 }

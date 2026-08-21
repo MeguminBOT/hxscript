@@ -471,6 +471,12 @@ of "the script cannot see it".
 set it to. If you bind a name like `File` to a guarded replacement, keep the real type out of the
 global imports or the import wins and the guard is bypassed.
 
+**All five reach compiled code**, and so do the `resolve`/`setVar` overrides above, since a compiled
+module resolves a bare name through the interpreter that module already has. Nothing has to be
+registered a second way for a script to keep its bytecode. What each one compiles to, and the two
+knobs for the cases a bound value cannot decide, are in
+[embedding.md](embedding.md).
+
 **A global import that cannot resolve throws out of the `Script` constructor, uncaught.** Global
 imports are applied on every interpreter reset, before your handlers exist. Guard the registration:
 

@@ -57,8 +57,23 @@ class Interp {
 	/** Imported names -> the type, value, or `Reference` they resolve to. */
 	public var imports:Map<String, Dynamic>;
 
-	/** Top-level (module/script) variables. */
-	public var variables:Map<String, Dynamic>;
+	/**
+	 * Top-level (module/script) variables.
+	 *
+	 * A `Bindings` rather than a bare `Map` so that a write to one is seen: compiled code keeps a
+	 * host-bound name in a real typed static, which is only sound while every write reaches the copy,
+	 * and writing this table directly is an ordinary thing for a host to do. Reads, writes,
+	 * `exists`, `remove`, `clear` and iteration all behave as a map's do.
+	 */
+	public var variables:Bindings;
+
+	/**
+	 * The module path compiled code reaches this interpreter's names under, or null.
+	 *
+	 * Set when a compiled module binds against it. A write arrives holding the table rather than the
+	 * module it belongs to, so the table's owner is where the module has to be recorded.
+	 */
+	public var globalsKey:Null<String> = null;
 
 	/** The owning object (script, module, or instance) bound as context. */
 	public var parent(default, set):Dynamic;
@@ -257,7 +272,7 @@ class Interp {
 		imports = new Map();
 		usings = new Array();
 		captures = new Map();
-		variables = new Map();
+		variables = new Bindings();
 		declaredNames = new Array();
 		declaredOld = new Array();
 

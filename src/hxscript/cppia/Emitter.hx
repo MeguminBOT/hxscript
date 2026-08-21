@@ -222,6 +222,59 @@ class Emitter {
 	/** Its superclass's path, or the empty string when it has none. */
 	var currentSuper:String;
 
+	/** The module being written, as `emit` was told to call it. */
+	var currentModule:String = '';
+
+	/** What the emitting module resolves a host-bound name through, keyed by module name. */
+	var scopeKeys:StringMap<String> = new StringMap();
+
+	/**
+	 * How each host-bound name was classified, keyed `module name`.
+	 *
+	 * A miss is written as the empty string, so a name the world does not hold is asked about once
+	 * per module rather than once per use. A hit holds the type to read it as, which is what
+	 * `inferType` answers with and what picks the accessor.
+	 */
+	var globalTypes:StringMap<String> = new StringMap();
+
+	/** Bare names the host pinned a type for, from `Compiler.globalNames`. */
+	var globalPins:StringMap<String> = new StringMap();
+
+	/** Whether a name the world holds may compile to a lookup rather than refusing its module. */
+	public var globals:Bool = true;
+
+	/** Each host-bound name this batch reached, in the order they were first seen. */
+	public var globalUses:Array<hxscript.compile.GlobalUse> = [];
+
+	/**
+	 * What a bare name the emitting module never declared refers to, or null when nothing does.
+	 *
+	 * Set by the backend, which is the only part that has the world. Keyed by module because one
+	 * emitter writes a whole batch, and two modules of it may bind the same name differently.
+	 *
+	 * @param module The module being emitted, as `emit` was told to call it.
+	 * @param name The name as the script wrote it.
+	 * @return What it refers to, or null.
+	 */
+	public dynamic function world(module:String, name:String):Dynamic {
+		return null;
+	}
+
+	/**
+	 * Whether the world holds a bare name at all, asked apart from what it holds.
+	 *
+	 * A global may legitimately hold null, and a value alone cannot tell that apart from a name
+	 * nothing answers to. Getting it wrong either refuses a module over a name that is really there,
+	 * or compiles a typo into a lookup that throws where it used to be reported.
+	 *
+	 * @param module The module being emitted.
+	 * @param name The name as the script wrote it.
+	 * @return Whether the world would resolve it.
+	 */
+	public dynamic function holds(module:String, name:String):Bool {
+		return false;
+	}
+
 	/** The method being emitted, so a property accessor can reach its own field directly. */
 	var currentMethod:String = '';
 
@@ -239,6 +292,16 @@ class Emitter {
 
 	/** Whether the member initialisers are being emitted, which assign the field rather than call the setter. */
 	var emittingInits:Bool = false;
+
+	/**
+	 * Whether what is being written runs while the module boots.
+	 *
+	 * A static's initialiser does, and slots are filled after the boot that runs it, so one reading a
+	 * host-bound name has to ask the interpreter instead of reading a copy that is still empty.
+	 * `emittingInits` is a different question: that one is about member initialisers reaching a field
+	 * rather than its accessor, and it is not set while a static's initialiser is written.
+	 */
+	var booting:Bool = false;
 
 	/** Whether the method being emitted was declared to return `Bool`, which cppia cannot carry as one. */
 	var returnsBool:Bool = false;
@@ -337,6 +400,15 @@ class Emitter {
 	 * reach of a script, which cannot write it.
 	 */
 	static inline var ENUMS:String = '@enums';
+
+	/** The helper a host-bound name is read and written through. */
+	static inline var GLOBALS:String = 'hxscript.runtime.Globals';
+
+	/** Where the typed copies of host-bound names live. */
+	static inline var SLOTS:String = 'hxscript.runtime.GlobalSlots';
+
+	/** The types with a slot pool, in the order the pools are declared. */
+	static var POOLS:Array<String> = [for (pool in hxscript.macro.Slots.POOLS) pool.type];
 
 	/**
 	 * Registers types the host makes available to every script without an import.
@@ -516,6 +588,8 @@ class Emitter {
 	 * @throws Unsupported If any declaration has no cppia spelling.
 	 */
 	public function emit(decls:Array<ModuleDecl>, moduleName:String = null):Void {
+		currentModule = moduleName == null ? '' : moduleName;
+
 		ownView(decls);
 
 		emitModuleFields(decls, moduleName);
@@ -894,11 +968,13 @@ class Emitter {
 					w.int(1);
 					pushScope();
 
+					booting = true;
 					expectedArray = elementArray(v.type == null ? null : typeName(v.type));
 					expectedElem = arrayElemOf(v.type);
 					expr(v.expr);
 					expectedArray = null;
 					expectedElem = null;
+					booting = false;
 
 					popScope();
 				}
@@ -1497,6 +1573,18 @@ class Emitter {
 		var line:Int = pos == null ? 0 : pos.line;
 
 		if (op == '=') {
+			/**
+			 * A host-bound name first, because it is written by calling rather than by storing and
+			 * `SET` wants somewhere to store. Ahead of everything else only in that it has to be asked
+			 * before the target is emitted; `globalTarget` answers null for every name the module
+			 * declares itself, so nothing below is shadowed by it.
+			 */
+			var global:Null<String> = globalTarget(e1);
+			if (global != null) {
+				emitGlobalWrite(identOf(e1), global, e2, pos);
+				return;
+			}
+
 			var member:Null<Expr> = memberSetterCall(e1, e2, pos);
 			if (member != null) {
 				expr(member);
@@ -2412,11 +2500,21 @@ class Emitter {
 		 * A type the world carries under this name, which the module never imported. Last of all, so
 		 * every name a module binds itself has already answered.
 		 */
-		var world:Null<String> = worldType(v);
-		if (world != null) {
+		var carried:Null<String> = worldType(v);
+		if (carried != null) {
 			w.pos(line);
 			w.token('CLASSOF');
-			w.type(world);
+			w.type(carried);
+			return;
+		}
+
+		/**
+		 * A name the host bound into this module rather than the script declaring it, which is the
+		 * last thing it can be and the only one that is not answered from the module's own text.
+		 */
+		var global:Null<String> = globalOf(v);
+		if (global != null) {
+			emitGlobalRead(v, global, pos);
 			return;
 		}
 
@@ -4283,6 +4381,281 @@ class Emitter {
 	}
 
 	/**
+	 * Records which interpreter a module's host-bound names resolve through.
+	 *
+	 * Without one, a name the module never declared is refused the way it always was: a host driving
+	 * the backend by hand has no world to ask, and guessing on its behalf would bind names it never
+	 * offered.
+	 *
+	 * @param module The module, as `emit` will be told to call it.
+	 * @param key What to name its interpreter in the emitted call, which is the module's path.
+	 */
+	public function globalScope(module:String, key:String):Void {
+		if (module != null && key != null)
+			scopeKeys.set(module, key);
+	}
+
+	/**
+	 * Registers types the host pinned for names it binds.
+	 *
+	 * The way out of every case reading a value cannot decide: a name bound only after the compile,
+	 * one holding null, and one whose type the host means to change. `name:Dynamic` is how a name is
+	 * kept untyped on purpose.
+	 *
+	 * @param entries Each written `name` or `name:Type`. A bare name declares that the host binds it
+	 *        without saying what it holds, which is the same as pinning it `Dynamic`.
+	 */
+	public function globalPin(entries:Array<String>):Void {
+		for (entry in entries) {
+			var colon:Int = entry.indexOf(':');
+
+			if (colon < 0) {
+				globalPins.set(entry, 'Dynamic');
+				continue;
+			}
+
+			var pinned:String = entry.substr(colon + 1);
+			globalPins.set(entry.substr(0, colon), pinned.length == 0 ? 'Dynamic' : pinned);
+		}
+	}
+
+	/**
+	 * The type of the host-bound name an expression names, when it names one at all.
+	 *
+	 * Every name the module answers for itself is asked about first, in the order `emitIdent` asks,
+	 * because a local, a field or an import of the same name shadows the host's binding and writing
+	 * to the host's would be writing to the wrong thing entirely.
+	 *
+	 * @param e The expression being assigned to, or read as a repeatable target.
+	 * @return Its type as a global, or null when it is anything else.
+	 */
+	/**
+	 * @param e An expression `globalTarget` answered for.
+	 * @return The bare name inside it, past any parentheses.
+	 */
+	static function identOf(e:Expr):String {
+		return switch (e.e) {
+			case EParent(inner): identOf(inner);
+			case EIdent(name): name;
+			case _: '';
+		}
+	}
+
+	function globalTarget(e:Expr):Null<String> {
+		return switch (e.e) {
+			case EParent(inner): globalTarget(inner);
+
+			case EIdent(name):
+				if (lookupVar(name) != null || members.exists(name) || statics.exists(name)
+					|| moduleFields.exists(name) || typePaths.exists(name) || ambientMembers.exists(name)
+					|| importedFields.exists(name) || enumOwning(name) != null || inheritedMember(name)
+					|| worldType(name) != null) null; else globalOf(name);
+
+			case _: null;
+		}
+	}
+
+	/**
+	 * The type to read a host-bound name as, or null when it is not one.
+	 *
+	 * Asked once per name per module and remembered, misses included, because the answer costs a
+	 * reach into the world and a name in a loop asks as often as it appears.
+	 *
+	 * @param name The name as the script wrote it.
+	 * @return Its type, `Dynamic` when nothing narrower is known, or null when the world does not
+	 *         hold it and it is therefore still an unresolved identifier.
+	 */
+	function globalOf(name:String):Null<String> {
+		if (!globals || currentModule.length == 0 || !scopeKeys.exists(currentModule))
+			return null;
+
+		var at:String = currentModule + ' ' + name;
+		var known:Null<String> = globalTypes.get(at);
+
+		if (known == null) {
+			known = classifyGlobal(name);
+			globalTypes.set(at, known);
+		}
+
+		return known.length == 0 ? null : known;
+	}
+
+	/**
+	 * Works out what a host-bound name holds, from the value bound while this compiles.
+	 *
+	 * **A pin wins.** A value says what it is right now and the host says what it will be, and only
+	 * one of those two survives the host reassigning the name.
+	 *
+	 * @param name The name.
+	 * @return Its type, or the empty string when the world does not hold it.
+	 */
+	function classifyGlobal(name:String):String {
+		var pinned:Null<String> = globalPins.get(name);
+		if (pinned != null)
+			return pinned;
+
+		if (!holds(currentModule, name))
+			return '';
+
+		/**
+		 * A name holding null says nothing about what it will hold, so it is read untyped rather than
+		 * guessed at. Pinning it is what narrows it.
+		 */
+		var held:Dynamic = world(currentModule, name);
+		if (held == null)
+			return 'Dynamic';
+
+		return switch (Type.typeof(held)) {
+			case TInt: 'Int';
+			case TFloat: 'Float';
+			case TBool: 'Bool';
+
+			case TClass(c):
+				var path:Null<String> = try Type.getClassName(c) catch (e:Dynamic) null;
+
+				if (path == 'String') 'String'; else if (path != null && resolvable(path)) path; else 'Dynamic';
+
+			case _: 'Dynamic';
+		}
+	}
+
+	/**
+	 * Writes a read of a host-bound name.
+	 *
+	 * @param name The name.
+	 * @param type What it was classified as.
+	 * @param pos Where it appears.
+	 */
+	function emitGlobalRead(name:String, type:String, pos:Position):Void {
+		var line:Int = pos == null ? 0 : pos.line;
+
+		/**
+		 * A real typed static when the name's type has a pool, which is forty times cheaper than
+		 * asking the interpreter: 2.3ns against 92ns over two million reads. What makes it sound is
+		 * that every write to the table reaches the copy, which is what `Bindings` is for.
+		 *
+		 * Not while an initialiser is being written. Slots are filled after the module has booted, and
+		 * booting is when a static's initialiser runs, so anything running then has to ask.
+		 */
+		var pool:Int = (emittingInits || booting) ? -1 : POOLS.indexOf(type);
+
+		if (pool >= 0) {
+			var slot:Null<String> = hxscript.runtime.Globals.claim(siteFor(name), pool);
+
+			if (slot != null) {
+				w.pos(line);
+				w.token('FSTATIC');
+				w.type(SLOTS);
+				w.str(slot);
+
+				recordGlobal(name, type);
+				return;
+			}
+		}
+
+		emitGlobalCall('get', name, type, 1, line);
+
+		recordGlobal(name, type);
+	}
+
+	/**
+	 * The site index standing for a name in the class being written, reserved on first use.
+	 *
+	 * **Keyed by class and not by module.** A scripted class runs on an interpreter of its own, seeded
+	 * with a copy of its module's names rather than sharing them, so `damage` inside one class and
+	 * `damage` inside its neighbour are two bindings that a write to either does not join. Compiled
+	 * code has to resolve where its interpreted form would, or a name written interpreted and read
+	 * compiled answers what it held before the write.
+	 *
+	 * @param name The name.
+	 * @return The site index.
+	 */
+	function siteFor(name:String):Int {
+		return hxscript.runtime.Globals.reserve(currentClass, name);
+	}
+
+	/**
+	 * Writes a write to a host-bound name.
+	 *
+	 * A call and not a `SET`, which wants somewhere to store rather than something to call, so the
+	 * assignment path has to know about this before it reaches for one.
+	 *
+	 * @param name The name.
+	 * @param type What it was classified as.
+	 * @param value What is being assigned.
+	 * @param pos Where the assignment appears.
+	 */
+	function emitGlobalWrite(name:String, type:String, value:Expr, pos:Position):Void {
+		var line:Int = pos == null ? 0 : pos.line;
+
+		emitGlobalCall('set', name, type, 2, line);
+
+		if (type == 'Bool')
+			boolean(value, line);
+		else
+			expr(value);
+
+		recordGlobal(name, type);
+	}
+
+	/**
+	 * Writes the accessor call every read and write is, and the site it stands for.
+	 *
+	 * **Two spellings of a host static call are not the same price.** `CALLSTATIC` naming the helper
+	 * costs a third more than reading the same static as a closure and calling that, measured at 131ms
+	 * against 97ms over two million reads, so the closure is what gets written.
+	 *
+	 * The site is one interned integer rather than the module and the name it stands for, which is
+	 * another quarter: pushing two string constants as arguments costs more than the work the callee
+	 * then does.
+	 *
+	 * @param verb `get` or `set`.
+	 * @param name The name.
+	 * @param type What it was classified as.
+	 * @param args How many operands the call takes: the site alone for a read, the site and the value
+	 *        for a write.
+	 * @param line The source line to attribute it to.
+	 */
+	function emitGlobalCall(verb:String, name:String, type:String, args:Int, line:Int):Void {
+		w.pos(line);
+		w.token('CALLSTATIC');
+		w.type(GLOBALS);
+		w.str(accessorFor(verb, type));
+		w.int(args);
+		w.pos(line);
+		w.token('i');
+		w.int(siteFor(name));
+	}
+
+	/**
+	 * @param verb `get` or `set`.
+	 * @param type The classified type.
+	 * @return The accessor to call, which is the typed one only for a type a register can hold as
+	 *         itself. Everything else goes through the boxed pair.
+	 */
+	static function accessorFor(verb:String, type:String):String {
+		return switch (type) {
+			case 'Int' | 'Float' | 'Bool' | 'String': verb + type;
+			case _: verb;
+		}
+	}
+
+	/**
+	 * Records that this batch reached a host-bound name, once per name per module.
+	 *
+	 * @param name The name.
+	 * @param type What it was classified as.
+	 */
+	function recordGlobal(name:String, type:String):Void {
+		for (seen in globalUses) {
+			if (seen.module == currentModule && seen.name == name)
+				return;
+		}
+
+		globalUses.push({module: currentModule, name: name, spelling: type});
+	}
+
+	/**
 	 * Records what an `import` puts in scope, which is a type or a static of one.
 	 *
 	 * `import pack.Type.field` binds a name that is a field of something rather than a type. Read as
@@ -4488,7 +4861,12 @@ class Emitter {
 				if (lookupVar(name) != null)
 					return false;
 
-				return members.exists(name) || statics.exists(name);
+				/**
+				 * A host-bound name is repeatable, which is what routes `+=` and `++` through the
+				 * rewrite into a plain assignment. Written straight they would be a `+=` token over a
+				 * call, which is not something the loader will assign to.
+				 */
+				return members.exists(name) || statics.exists(name) || globalTarget(e) != null;
 
 			case _:
 				return false;
@@ -4878,7 +5256,15 @@ class Emitter {
 					return memberTypes.get(v);
 				if (statics.exists(v))
 					return staticTypes.get(v);
-				return null;
+
+				/**
+				 * A host-bound name, which is worth answering for even where the value arrives boxed.
+				 * The type decides an operator overload, a map index against an array one, how an
+				 * optional is padded and how a `Bool` is joined to a `String`, and none of those are
+				 * about the register the value lands in.
+				 */
+				var global:Null<String> = globalTarget(e);
+				return (global == null || global == 'Dynamic') ? null : global;
 
 			case EArrayDecl(items) if (items.length > 0 && items[0].e.match(EBinop('=>', _, _))):
 				return mapClassOf(items);

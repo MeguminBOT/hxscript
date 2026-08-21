@@ -95,6 +95,7 @@ compilations across the matrix, most of it the library recompiled, against 10 th
 | `cpp/PropTest` | host properties reached from compiled code through their accessors |
 | `cpp/CatchNative` | catching a native exception in compiled script code |
 | `cpp/DceProbe` | which standard-library members a script can still reach after DCE |
+| `cpp/GlobalsTest` | names the host bound rather than the script, reached from compiled code |
 
 Map key order is unspecified in Haxe, so an ordering difference in `GapProbe` is not a defect.
 
@@ -104,7 +105,7 @@ In `cpp/`, not in the suite, because none of them asserts anything a runner coul
 
 | file | is |
 | --- | --- |
-| `CppiaBench`, `CppiaHostBench`, `SwitchProbe` | timings |
+| `CppiaBench`, `CppiaHostBench`, `CppiaGlobalsBench`, `SwitchProbe` | timings |
 | `CppiaDump`, `CppiaOne` | print bytecode for a human to read |
 | `FieldFormProbe` | walks a directory named on the command line and counts the field forms emitted |
 

@@ -49,6 +49,9 @@ class Backend {
 	/** Names the constructor helper for the same reason. */
 	@:keep static var construction:Class<Dynamic> = hxscript.runtime.Construct;
 
+	/** Names the host-bound name reader for the same reason. */
+	@:keep static var globalReader:Class<Dynamic> = hxscript.runtime.Globals;
+
 	/** Whether this build can compile at all. */
 	public static var available(get, never):Bool;
 
@@ -238,15 +241,7 @@ class Backend {
 		var uses:Map<String, Array<String>> = new Map();
 
 		for (input in inputs) {
-			var trial:Emitter = new Emitter();
-			if (ambient != null)
-				trial.ambient(ambient);
-			if (external != null)
-				trial.externals(external);
-			if (statics != null)
-				trial.ambientStatics(statics);
-			for (other in inputs)
-				trial.declare(other.decls, other.name);
+			var trial:Emitter = prepare(inputs, ambient, external, statics);
 
 			try {
 				trial.emit(input.decls, input.name);
@@ -268,16 +263,7 @@ class Backend {
 		if (accepted.length == 0)
 			return {bytes: null, compiled: [], skipped: skipped};
 
-		var emitter:Emitter = new Emitter();
-		if (ambient != null)
-			emitter.ambient(ambient);
-		if (external != null)
-			emitter.externals(external);
-		if (statics != null)
-			emitter.ambientStatics(statics);
-		for (input in inputs)
-			emitter.declare(input.decls, input.name);
-
+		var emitter:Emitter = prepare(inputs, ambient, external, statics);
 		emitter.echoTarget = echoTarget;
 
 		var compiled:Array<String> = [];
@@ -289,7 +275,12 @@ class Backend {
 		if (emitter.echoed != null)
 			echoed = emitter.echoed;
 
-		return {bytes: emitter.finish(), compiled: compiled, skipped: skipped};
+		return {
+			bytes: emitter.finish(),
+			compiled: compiled,
+			skipped: skipped,
+			globals: emitter.globalUses
+		};
 		#else
 		var skipped:Array<Skip> = [];
 		for (input in inputs)
@@ -297,6 +288,72 @@ class Backend {
 		return {bytes: null, compiled: [], skipped: skipped};
 		#end
 	}
+
+	#if hxscript_cppia
+	/**
+	 * Builds an emitter that knows everything about a batch except which of it to write.
+	 *
+	 * The trial pass and the real one have to be set up identically or the trial proves nothing about
+	 * the module the real pass then writes, and they drifted once already.
+	 *
+	 * @param inputs Every module of the batch, all of which are declared.
+	 * @param ambient Types usable without an import.
+	 * @param external Scripted classes elsewhere.
+	 * @param statics Bare names the host answers with a static of its own.
+	 * @return The prepared emitter.
+	 */
+	static function prepare(inputs:Array<Unit>, ?ambient:Array<String>, ?external:Array<String>,
+			?statics:Array<String>):Emitter {
+		var emitter:Emitter = new Emitter();
+
+		if (ambient != null)
+			emitter.ambient(ambient);
+		if (external != null)
+			emitter.externals(external);
+
+		/**
+		 * `Config.globalStatics` is merged in rather than left to the host, because it is the
+		 * interpreter's own list of bare names standing for host statics and the two sides disagreeing
+		 * about it is exactly the failure this is here to end: a name set there alone resolved
+		 * interpreted and refused its module compiled, with nothing saying why.
+		 */
+		var bound:Array<String> = statics == null ? [] : statics.copy();
+
+		for (name => binding in hxscript.Config.globalStatics) {
+			if (binding != null && binding.indexOf('::') >= 0)
+				bound.push(name + '=' + binding);
+		}
+
+		emitter.ambientStatics(bound);
+
+		emitter.globals = globals;
+		emitter.globalPin(globalNames);
+
+		var scopes:Map<String, hxscript.runtime.Interp> = new Map();
+
+		for (input in inputs) {
+			emitter.declare(input.decls, input.name);
+
+			if (input.scope == null || input.key == null)
+				continue;
+
+			scopes.set(input.name, input.scope);
+			emitter.globalScope(input.name, input.key);
+		}
+
+		emitter.world = function(module:String, name:String):Dynamic {
+			var scope:Null<hxscript.runtime.Interp> = scopes.get(module);
+			return scope == null ? null : (try scope.resolve(name) catch (e:Dynamic) null);
+		};
+
+		emitter.holds = function(module:String, name:String):Bool {
+			var scope:Null<hxscript.runtime.Interp> = scopes.get(module);
+			return scope == null ? false : scope.isResolvable(name);
+		};
+
+		return emitter;
+	}
+	#end
 
 	/**
 	 * Whether to turn hxcpp's JIT on before the first module loads.
@@ -313,6 +370,25 @@ class Backend {
 
 	/** Types a script may name without importing them, as full paths. */
 	public static var ambient:Array<String> = [];
+
+	/**
+	 * Whether a bare name the world holds compiles to a lookup rather than refusing its module.
+	 *
+	 * On, because a host that binds a name the documented way should not have to bind it a second way
+	 * to keep its module compiled. Off restores the older behaviour, where such a name is reported as
+	 * an unresolved identifier and the module is left interpreted, for a host that would rather be
+	 * told than quietly take the slower spelling.
+	 */
+	public static var globals:Bool = true;
+
+	/**
+	 * Bare names the host binds, each `name` or `name:Type`.
+	 *
+	 * Only needed where reading the bound value cannot answer: a name bound after this compile, one
+	 * holding null, and one whose type the host means to change. `name:Dynamic` keeps a name untyped
+	 * on purpose.
+	 */
+	public static var globalNames:Array<String> = [];
 
 	/**
 	 * Bare names the host answers with a static of its own, each written `name=owner.path::field`.
@@ -401,8 +477,17 @@ class Backend {
 		if (group.length == 0)
 			return;
 
-		var inputs:Array<Unit> = [for (module in group) {name: module.name, decls: module.decls}];
-		var result:Result = compile(inputs, ambient, outside(group, env), statics);
+		var inputs:Array<Unit> = [
+			for (module in group)
+				{
+					name: module.name,
+					decls: module.decls,
+					scope: module.interp,
+					key: module.path
+				}
+		];
+
+		var result:Result = compile(inputs, ambient.concat(aliases(group)), outside(group, env), statics);
 
 		if (result.bytes == null) {
 			collect(result, report);
@@ -490,6 +575,23 @@ class Backend {
 
 		try {
 			loaded = cpp.cppia.Module.fromData(result.bytes.getData());
+		} catch (e:haxe.Exception) {
+			return e.message;
+		} catch (e:Dynamic) {
+			return Std.string(e);
+		}
+
+		/**
+		 * Before the boot, not after. Booting is what runs a static's initialiser, and one reading a
+		 * host-bound name asks for it right then: bound afterwards, that read went to whichever world
+		 * held the module last, which for a reloaded module is the previous one.
+		 */
+		for (module in offered) {
+			if (result.compiled.indexOf(module.name) >= 0)
+				bindGlobals(module, env);
+		}
+
+		try {
 			loaded.boot();
 		} catch (e:haxe.Exception) {
 			return e.message;
@@ -565,6 +667,74 @@ class Backend {
 				fatal: false
 			});
 		}
+
+		for (use in result.globals) {
+			report.globals.push(use);
+
+			#if hxscript_verbose
+			if (use.spelling != 'Dynamic')
+				continue;
+
+			Sink.report({phase: PEmit,
+				message: use.module + ' reads ' + use.name + ' as Dynamic, because nothing said what it holds',
+				hint: 'The name compiles and answers what an interpreted read answers; this is only about\n'
+				+ 'speed. A value with a real home is read from it instead: mark the static @:scriptStatic\n'
+				+ 'and call Expose.apply(), or add it to Compiler.statics. Where it has no home, naming its\n'
+				+ 'type in Compiler.globalNames as `'
+				+ use.name
+				+ ':Type` reads it into a register of that type.',
+				fatal: false
+			});
+			#end
+		}
+	}
+
+	/**
+	 * Names a batch's hosts bound to a type, as ambient entries pointing at where that type lives.
+	 *
+	 * **A type is worth separating from every other bound value.** Read through a lookup it would be
+	 * a boxed `Class`, which is not something `new`, a static read or a static call can be written
+	 * against; registered as a path it is the same thing an `import` of it would have been, and costs
+	 * nothing at all at runtime. `Bucket` bound to `game.Sink` is the case: the class compiled fine
+	 * under its own name and was refused under the host's alias for it.
+	 *
+	 * Eager rather than asked for on demand, because a type has to be in place before anything is
+	 * emitted: `Bucket.ping()` is resolved as a static call on a path long before the name would ever
+	 * be read as a value.
+	 *
+	 * @param group The modules being offered.
+	 * @return Entries written `Name=full.path`, one per bound type, first binding of a name winning.
+	 */
+	static function aliases(group:Array<Module>):Array<String> {
+		if (!globals)
+			return [];
+
+		var out:Array<String> = [];
+		var taken:Map<String, Bool> = new Map();
+
+		for (module in group) {
+			if (module.interp == null)
+				continue;
+
+			for (name => held in module.interp.variables) {
+				if (taken.exists(name) || held == null || held is hxscript.types.IScriptedType)
+					continue;
+
+				/**
+				 * Asked of the class and not of the value: `Type.getClassName` of an instance answers
+				 * with its class, which would bind the name to the type of the thing rather than to a
+				 * type. Only a value that IS a class is one.
+				 */
+				var path:Null<String> = try Type.getClassName(cast held) catch (e:Dynamic) null;
+				if (path == null || path.length == 0)
+					continue;
+
+				taken.set(name, true);
+				out.push(name + '=' + path);
+			}
+		}
+
+		return out;
 	}
 
 	/**
@@ -617,7 +787,35 @@ class Backend {
 		for (path in paths)
 			env.compiled.set(path, built.get(path));
 
+		/**
+		 * Pointed at THIS world's interpreters, not the ones it was compiled for. A compiled class
+		 * lives as long as the process and is handed to every world that asks for it, so the globals
+		 * it reads have to follow the world now holding it rather than the one that built it.
+		 */
+		bindGlobals(module, env);
+
 		return true;
+	}
+
+	/**
+	 * Points a module's compiled classes at the interpreters their host-bound names live in.
+	 *
+	 * One per class rather than one per module, because a scripted class runs on an interpreter of its
+	 * own: it is seeded with a copy of the module's names rather than sharing them, so resolving a
+	 * compiled class's globals against the module would answer with a value that a write through the
+	 * class never reached.
+	 *
+	 * @param module The module.
+	 * @param env The world holding its types.
+	 */
+	static function bindGlobals(module:Module, env:Environment):Void {
+		for (path in declaredPaths(module.decls)) {
+			var declared:hxscript.types.IScriptedType = env.resolve(path);
+
+			if (declared is hxscript.types.ScriptedClass)
+				hxscript.runtime.Globals.bind(path, @:privateAccess cast(declared, hxscript.types.ScriptedClass)
+					.interp);
+		}
 	}
 
 	/**

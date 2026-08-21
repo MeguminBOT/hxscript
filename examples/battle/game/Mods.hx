@@ -106,10 +106,18 @@ class Mods {
 		// emits, and fails to load.
 		hxscript.compile.Compiler.ambient = GLOBALS;
 
+		// `round` and `log` are the battle's, reached through `ModInterp` rather than out of any table,
+		// and a battle only exists once one starts. Nothing is bound to read a type off while this
+		// compiles, so they are named here instead: `round` is an `Int` and reads as one, `log` is a
+		// method and stays untyped, which is what a bare name with no type named for it gets anyway.
+		// Without this line `Bandit` is the one script left interpreted.
+		hxscript.compile.Compiler.globalNames = ['round:Int', 'log'];
+
 		var report = hxscript.compile.Compiler.compile(world);
 
-		var parts:Array<String> = ['compiled ${report.compiled.length} classes in '
-			+ Math.round(report.ms * 10) / 10 + 'ms'];
+		var parts:Array<String> = [
+			'compiled ${report.compiled.length} classes in ' + Math.round(report.ms * 10) / 10 + 'ms'
+		];
 
 		for (skip in report.skipped)
 			parts.push('interpreting ${skip.name}: ${skip.reason}');

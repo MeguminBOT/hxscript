@@ -24,6 +24,7 @@ class AllCpp {
 		{name: 'CompilerTest', run: CompilerTest.run},
 		{name: 'ExposeTest', run: ExposeTest.run},
 		{name: 'PropTest', run: PropTest.run},
+		{name: 'GlobalsTest', run: GlobalsTest.run},
 		{name: 'CatchNative', run: CatchNative.run},
 		{name: 'DceProbe', run: DceProbe.run}
 	];

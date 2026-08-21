@@ -1,5 +1,92 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **A name the host bound reaches compiled code on hxcpp, and costs what a local costs.** A host
+  binds values into scripts five documented ways, and compiled code reached exactly one of them:
+  `Compiler.statics`, which needs the value to already live as a host static. Every other one refused
+  its module as `unresolved identifier`, and skips cascade, so a module that named a global cost its
+  bytecode to everything naming that module. `world.variables` is the surface `docs/embedding.md`
+  calls "the usual choice", so this was most projects. All five reach compiled code now, along with
+  an `Interp` subclass overriding `resolve` or `setVar`, which no surface covered at all: reads and
+  writes go through the interpreter the class already has, so a compiled module and an interpreted
+  one cannot disagree about what a name holds.
+
+  What a name compiles to is decided by what it held while the module compiled, cheapest first. A
+  type becomes the type's own path, so a host alias for a class is now the class: `new Bucket()` and
+  `Bucket.ping()` work where only `Sink` did, and it costs nothing at runtime. A host static is read
+  where it lives. An `Int`, `Float`, `Bool` or `String` is read out of a real typed static holding a
+  copy, which measures 2.3ns against the 92ns of asking the interpreter and against 2.3ns for a
+  local. Anything else is a call, and its class is still what the emitter reasons with, so an operator
+  overload, a map index against an array one, and how an optional is padded are all decided from it.
+
+  **The type is the whole of why the fast path is fast.** A `Dynamic` static reads ten times slower
+  than a typed one, so a global holding an object or a function stays on the call path deliberately:
+  measured, a boxed slot buys it nothing.
+
+  Nothing has to be registered twice for any of that. `Config.globalStatics` is merged into the
+  emitter's own list rather than left to the host to mirror, which was a real gap: a name set there
+  alone resolved interpreted and refused its module compiled, with nothing saying why.
+
+- **`hxscript.runtime.Bindings`, which is what makes the copy safe.** `Interp.variables` is one of
+  these rather than a bare `Map`, so a write to a name reaches the copy before anything can read a
+  stale one. It matters because a host writes that table directly, and the alternative was a `rebind`
+  call for hosts to remember, which fails the moment somebody forgets. `set`, `get`, `exists`,
+  `remove`, `clear` and iteration all read as a map's do.
+
+- **`Compiler.globalNames`, for the three cases a bound value cannot decide.** A name bound after the
+  compile, one holding null, and one whose type the host means to change. Written `name` or
+  `name:Type`, and a pin beats what the value says. `name:Dynamic` keeps one untyped on purpose.
+  `examples/battle` shows the case: `round` and `log` reach scripts through a context that only
+  exists once a fight starts, and naming them is the difference between eleven of its twelve scripts
+  compiling and all twelve.
+
+- **`Compiler.globals`, which turns the whole thing off.** On by default. Off restores the older
+  behaviour, where such a name is reported as an unresolved identifier and its module left
+  interpreted, for a host that would rather be told than served quietly. It reads on HashLink too,
+  where it gates the bound-name lookup that backend already had.
+
+- **`Report.globals`**, listing every bound name a compile reached and how each was spelled, so the
+  ones still read through a call can be found and given a real home. `-D hxscript_verbose` names them
+  as they happen.
+
+### Changed
+
+- **A compiled class resolves its bound names against its own interpreter, not its module's.** A
+  scripted class runs on an interpreter seeded with a copy of the module's names rather than sharing
+  them, so `damage` inside one class and `damage` inside its neighbour are two bindings. Reaching the
+  module's meant a name written by an interpreted method and read by a compiled one answered what it
+  held before the write.
+
+- **A rebound global is reported at the write instead of the read.** A compiled read of a typed name
+  is a static field access with no room for a check, so the write is both the only place that can
+  notice and the better one: it names the line that broke the contract rather than a read far away.
+  A refused write leaves the name as it was. Dropping such a name is not reported, because a slot has
+  no value that means "gone"; a compiled read keeps answering the last value until something writes
+  it again.
+
+### Measured, and not done
+
+Three things that looked worth doing and are not, each ruled out by building them:
+
+- **Calling the helper as a closure rather than `CALLSTATIC`.** 25% cheaper in isolation and 60%
+  worse in place: reading a static method as a closure allocates per read and loses the callee's
+  declared return type, so the value comes back boxed.
+- **Typing an object slot by its class.** 160ns against 163ns for a boxed one, because cppia
+  dispatches member access by name whatever the receiver's type says (HXCPP-ISSUES.md, 4).
+- **Reaching a `Variable` cell from bytecode.** Worse than the call it would replace, since reading
+  the cell is itself a by-name member call.
+
+### Still open
+
+- **HashLink resolves a bound name to the value it held when the module loaded, and refuses writes.**
+  It reached `Environment.variables` before this and still does, by folding a snapshot into a global
+  rather than resolving through the interpreter, so a host writing the name afterwards is not seen and
+  a script assigning to one leaves its module interpreted. Moving it onto the same hook is the
+  follow-up; `Compiler.globalNames` is hxcpp-only until then.
+
 ## 2.0.3
 
 ### Fixed

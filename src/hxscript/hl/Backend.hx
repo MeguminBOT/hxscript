@@ -133,6 +133,15 @@ class Backend {
 		return report.compiled.length > 0;
 	}
 
+	/**
+	 * Whether a bare name the world holds compiles at all rather than refusing its module.
+	 *
+	 * On, and it means less here than on hxcpp: HashLink binds such a name to the value it held when
+	 * the module loaded, so a read compiles and a write does not. Off refuses the module for either,
+	 * which is what a host wanting to be told about them rather than served quietly would set.
+	 */
+	public static var globals:Bool = true;
+
 	/** HashLink jits everything it loads, so this reads true and setting it changes nothing. */
 	public static var jit(get, set):Bool;
 
@@ -529,7 +538,7 @@ class Backend {
 				return imported;
 		}
 
-		if (env.variables.exists(owner)) {
+		if (globals && env.variables.exists(owner)) {
 			var held:Dynamic = env.variables.get(owner);
 			if (held != null)
 				return held;

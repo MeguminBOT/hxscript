@@ -656,6 +656,63 @@ why the flag goes on as soon as one class is compiled.
 `result.compiled` holds the *module* names you passed in rather than class paths, and one module can
 declare several classes, which is what `declaredPaths` is for.
 
+### The names you bound
+
+Everything in the binding table above reaches compiled code, and none of it needs registering twice.
+A script naming one used to refuse its whole module, and everything naming that module with it.
+
+What a name compiles to is decided by what it holds when the compile runs, cheapest spelling first:
+
+| the name holds | it compiles to | ns per read |
+| --- | --- | --- |
+| a type | the type's own path | 0; `new`, statics and `is` all work through it |
+| a host static, via `Config.globalStatics` or `Compiler.statics` | a static field read | 2.3 |
+| an `Int`, `Float`, `Bool` or `String` | a read of a real typed static holding a copy | 2.3 |
+| anything else | a call into the interpreter, boxed | ~110 |
+| nothing | still refused, as an unresolved identifier | it is a typo, and saying so is the point |
+
+Measured over two million reads with the JIT on; a local costs 2.3ns in the same loop and
+interpreting the same line costs about 970. **The first three rows are free and the fourth is not**,
+which is the whole of what is worth knowing here: a name holding a number, a string or a boolean is
+already as fast as it can be, and one holding an object or a function is a call.
+
+`-D hxscript_verbose` names the ones on the slow row as they happen, and `Report.globals` lists every
+bound name a compile reached with how each was spelled, so it can be read without the build flag.
+
+Reads and writes both go through the module's own interpreter, which is what makes an
+interpreted module and a compiled one agree about what a name holds. That includes an `Interp`
+subclass overriding `resolve` or `setVar`: the context pattern in
+[advanced.md](advanced.md) compiles with nothing added.
+
+**Two knobs, and neither is needed for the common case.**
+
+```haxe
+// A name bound after this compile, or holding null, or whose type you mean to change.
+// `name:Dynamic` keeps one untyped on purpose; a pin beats whatever the value says.
+Compiler.globalNames = ['later:Int', 'battle:game.Battle', 'freeform:Dynamic'];
+
+// Refuse such a name instead, which is what a bound name used to do.
+Compiler.globals = false;
+```
+
+> A compiled class lives as long as the process and is handed to whichever world asks for it, so its
+> globals resolve against the world that most recently bound it. This is the same sharing that makes
+> a compiled class's statics shared, and `Compiler.reset()` is what a host re-reading its scripts
+> calls either way.
+
+**A typed name is checked where it is written**, not where it is read: a read is a static field
+access with no room for a check in it. Rebind `damage` from an `Int` to a `String` after its module
+compiled and the write says so, naming both types, and leaves the name as it was. That is also the
+better place for it, since it names the line that broke the contract rather than a read that merely
+suffered from it. Removing such a name is not reported: a slot holds an `Int`, and there is no `Int`
+that means "gone", so a compiled read keeps answering the last value until something writes it again.
+
+> **Write where the class reads.** A scripted class runs on an interpreter of its own, seeded with a
+> copy of its module's names at `init` rather than sharing them. That is the interpreter's own
+> behaviour and compiled code follows it exactly, so `module.variables.set(...)` after `start()`
+> reaches neither form. Put values in `world.variables` before `start()`, which is where they belong,
+> or reach the class's own table if you must change one later.
+
 ### Several modules at once
 
 Pass them in one call. Every module is declared before any is emitted, so they may refer to each other
@@ -713,7 +770,8 @@ load failure as "recompile from source", which is cheap and always correct.
 | A native abstract's members do nothing | no runtime form | `@:build(hxscript.macro.Abstract.build())` on it |
 | Parse handler never fires | parsing happens in the constructor | construct empty, then `parse()` |
 | Compiles "successfully", still interpreted | the classes were never registered against the world | `env.compiled.set(...)` and `env.substituting = true` |
-| A bare name compiles interpreted but not compiled | `Compiler.ambient` / `statics` were never set | set both from `Expose` |
+| A bare name compiles interpreted but not compiled | it names something the world does not hold either | check the spelling, or declare it in `Compiler.globalNames` if you bind it later |
+| A bare name reads as `Dynamic` under `-D hxscript_verbose` | nothing said what it holds | not a failure: it runs. `@:scriptStatic` or `Compiler.statics` gives it a real home, `Compiler.globalNames` a type |
 | Every module reports skipped | built without the define | `-D hxscript_cppia` |
 | A field errors as already inherited | the script redeclares a base field | rename it, or `override` |
 | The setup did not do what you expected | | `-D hxscript_verbose` prints what it wired |

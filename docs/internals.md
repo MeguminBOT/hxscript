@@ -308,10 +308,15 @@ reloads scripts often enough to care.
 ### class Expose
 
 The interpreter needs none of this: it resolves a name against the global `TypeCollection`, which
-`Index` fills with everything in the build, and it reads whatever `Config` injected
-into it. Compiled code has neither. It has no interpreter to be injected into, and it links
-against real classes and real statics, so every bare name a script may use has to be written down
-as a full path before a module is emitted.
+`Index` fills with everything in the build, and it reads whatever `Config` injected into it.
+Compiled code links against real classes and real statics, so a bare name is worth writing down as a
+full path before a module is emitted: that is what turns it into a static field read rather than a
+lookup.
+
+It is an optimisation rather than a requirement. A name nothing here mentions is resolved
+through the module's own interpreter by `hxscript.runtime.Globals`, so it compiles and answers what
+an interpreted read answers. What this buys is the difference between a call and a field access, on
+every use, which is worth having for a name a script reads in a loop.
 
 Written down by hand that is two lists to maintain, one of which, the `name=owner::field` form
 for host statics, is easy to get subtly wrong and fails at compile time with a message about an
