@@ -543,6 +543,33 @@ Interpreter-wide that is 16 to 23%. The instantiation rows are the closures no l
 that half of the gain is paid to every scripted class and every scripted instance, whether or not it
 ever evaluates an operator.
 
+### A scripted instance stands on its class's names instead of copying them
+
+Constructing one used to copy the class's whole variable table into the new instance's interpreter,
+so a host's script API cost something per object spawned and the cost grew with the API. Measured by
+binding values into a world and timing construction:
+
+| bound values | before | after |
+| --- | --- | --- |
+| 8 | 5.74us | 4.57us |
+| 18 | 6.60us | 3.95us |
+| 33 | 9.06us | 3.95us |
+| 58 | 12.85us | 3.95us |
+
+About 0.14us per bound value per object, without limit. A host with a hundred names in scope paid
+for all hundred every time a script made an object, which is the wrong way round: the more useful the
+script API, the slower the game.
+
+`Bindings` carries a fallback now and an instance points at its class's table rather than copying it.
+**Reads fall through and writes never do**, so an instance assigning to one of those names gets an
+entry of its own from that moment, which is exactly what the copy gave it. `test/common/InstanceScopeTest.hx`
+pins that, since it is the whole reason the change is safe.
+
+`newInstBare` 121 to 98, `newInstFields` 211 to 192, `newInstGuard` 170 to 148 on the micro-benchmark,
+where only eight values are bound. The flat column above is the part that matters for a real host.
+
+Its `imports` table is still copied per instance and has the same shape, and is the obvious next one.
+
 ## Where the time goes now
 
 A script call is roughly 1.1us, against about 0.6us for an empty loop iteration, so call overhead is

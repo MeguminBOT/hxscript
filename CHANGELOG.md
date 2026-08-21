@@ -75,6 +75,17 @@
 
 ### Changed
 
+- **A scripted instance stands on its class's names instead of copying them, so constructing one no
+  longer costs more as the host's script API grows.** Every instance was handed a copy of the class's
+  whole variable table, about 0.14us per bound value: 5.7us to construct at eight bound values,
+  9.1us at thirty-three, 12.9us at fifty-eight, without limit. A host with a hundred names in scope
+  paid for all hundred every time a script made an object.
+
+  It is flat now, 3.95us whatever the host binds, and lower than it was even at eight. Reads fall
+  through to the class and writes never do, so an instance assigning to one of those names gets an
+  entry of its own from that moment, which is exactly what the copy gave it. `newInstBare` 121 to 98,
+  `newInstGuard` 170 to 148. The `imports` table is still copied and has the same shape.
+
 - **Operator dispatch is a jump table instead of a table of closures, worth 16 to 23% across the
   interpreter.** `binops` was a `Map<String, Expr->Expr->Dynamic>` built per interpreter, so every
   operator cost a string hash, a null test and a call through a closure field, and every interpreter

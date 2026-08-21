@@ -1272,9 +1272,15 @@ class Scripted {
 				__interp.usings.push(u);
 			for (k => i in base.interp.imports)
 				__interp.imports.set(k, i);
-			for (k => v in base.interp.variables)
-				if (!__interp.variables.exists(k))
-					__interp.variables.set(k, v);
+
+			/**
+			 * Stood on rather than copied. Copying the class's table into every instance made a host's
+			 * script API cost something per object spawned: 5.7us to construct at eight bound values
+			 * and 12.9us at fifty-eight, growing with the API forever. A read falls through and a write
+			 * does not, so an instance assigning to one of these still gets its own entry from that
+			 * moment, which is what the copy gave it.
+			 */
+			__interp.variables.fallback = base.interp.variables;
 
 			for (k => v in base.__vars)
 				if (!__interp.locals.exists(k))
