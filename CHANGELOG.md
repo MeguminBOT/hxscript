@@ -83,8 +83,13 @@
 
   It is flat now, 3.95us whatever the host binds, and lower than it was even at eight. Reads fall
   through to the class and writes never do, so an instance assigning to one of those names gets an
-  entry of its own from that moment, which is exactly what the copy gave it. `newInstBare` 121 to 98,
-  `newInstGuard` 170 to 148. The `imports` table is still copied and has the same shape.
+  entry of its own from that moment, which is exactly what the copy gave it.
+
+  Its `imports` table is stood on the same way, worth another 40%, and that one had to be measured
+  rather than assumed: `imports.get` is the first thing `resolve` does for every bare identifier, so
+  a fallback there lands on the hottest path there is. It costs nothing measurable. Together,
+  `newInstBare` 145 to 56, `newInstFields` 237 to 149, `newInstGuard` 197 to 104, with `arith`,
+  `locals`, `field`, `call` and `instCall` unmoved.
 
 - **Operator dispatch is a jump table instead of a table of closures, worth 16 to 23% across the
   interpreter.** `binops` was a `Map<String, Expr->Expr->Dynamic>` built per interpreter, so every

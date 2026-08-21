@@ -1270,8 +1270,7 @@ class Scripted {
 
 			for (u in base.interp.usings)
 				__interp.usings.push(u);
-			for (k => i in base.interp.imports)
-				__interp.imports.set(k, i);
+			__interp.imports.fallback = base.interp.imports;
 
 			/**
 			 * Stood on rather than copied. Copying the class's table into every instance made a host's

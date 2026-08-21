@@ -54,8 +54,13 @@ class Interp {
 	/** Active `using` extension classes, searched for extension methods on field access. */
 	public var usings:Array<Dynamic>;
 
-	/** Imported names -> the type, value, or `Reference` they resolve to. */
-	public var imports:Map<String, Dynamic>;
+	/**
+	 * Imported names to the type, value, or `Reference` they resolve to.
+	 *
+	 * A `Bindings` for the same reason `variables` is one: an instance stands on its class's table
+	 * rather than being handed a copy of it.
+	 */
+	public var imports:Bindings;
 
 	/**
 	 * Top-level (module/script) variables.
@@ -267,7 +272,7 @@ class Interp {
 
 		stack = new ScriptStack();
 
-		imports = new Map();
+		imports = new Bindings();
 		usings = new Array();
 		captures = new Map();
 		variables = new Bindings();

@@ -17,8 +17,16 @@ import TestCase;
  * it, and the only reason the change is safe.
  */
 class InstanceScopeTest {
-	static var SRC:String = 'class Counter {
+	static var SRC:String = 'import haxe.ds.StringMap;
+
+class Counter {
 	public function new() {}
+
+	public function imported():String {
+		var m = new StringMap();
+		m.set("k", 3);
+		return Std.string(m.get("k"));
+	}
 
 	public function read():Int {
 		return shared;
@@ -77,6 +85,15 @@ class InstanceScopeTest {
 		module(later).variables.set('shared', 70);
 
 		TestCase.eq('the class keeps what it was given', call(untouched, 'read'), 40);
+
+		/**
+		 * Imports are stood on the same way, so a type the module imported has to still resolve from
+		 * inside an instance method, and from a second instance after the first has resolved it.
+		 */
+		TestCase.section('an instance resolves the imports of its class');
+
+		TestCase.eq('an imported type resolves in an instance method', call(a, 'imported'), '3');
+		TestCase.eq('and again in a sibling', call(b, 'imported'), '3');
 	}
 
 	/** @return A world binding one value, with the counter module in it. */

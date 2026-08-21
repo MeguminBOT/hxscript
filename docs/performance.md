@@ -568,7 +568,20 @@ pins that, since it is the whole reason the change is safe.
 `newInstBare` 121 to 98, `newInstFields` 211 to 192, `newInstGuard` 170 to 148 on the micro-benchmark,
 where only eight values are bound. The flat column above is the part that matters for a real host.
 
-Its `imports` table is still copied per instance and has the same shape, and is the obvious next one.
+Its `imports` table is stood on the same way, and that one had to be measured rather than assumed:
+`imports.get` is the first thing `resolve` does for every bare identifier, so a fallback there lands
+on the hottest path in the interpreter. It does not cost anything measurable, and it takes another
+40% off constructing an instance.
+
+| case | copying both | standing on both |
+| --- | --- | --- |
+| `newInstBare` | 98 | 56 |
+| `newInstFields` | 192 | 149 |
+| `newInstGuard` | 148 | 104 |
+| `arith` / `locals` / `field` / `instCall` | 170 / 131 / 112 / 142 | 171 / 131 / 111 / 143 |
+
+Against the numbers this page recorded before any of it, `newInstBare` is 145 to 56 and
+`newInstGuard` 197 to 104.
 
 ## Where the time goes now
 
