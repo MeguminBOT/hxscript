@@ -130,45 +130,45 @@ constructs a hot script actually uses, not from the language's edges.
 
 | case | kind | interpreted | cppia | cppia + JIT |
 | --- | --- | --- | --- | --- |
-| `noCall` | op | 1.115 | 0.015 | 0.004 |
-| `loopPlain` | op | 0.746 | 0.011 | 0.006 |
-| `postIncr` | op | 0.614 | 0.009 | 0.002 |
-| `arith` | op | 1.416 | 0.020 | 0.005 |
-| `locals` | op | 2.008 | 0.028 | 0.004 |
-| `blocks` | op | 1.653 | 0.027 | 0.004 |
-| `not` | op | 1.192 | 0.017 | 0.005 |
-| `neg` | op | 1.173 | 0.016 | 0.005 |
-| `index` | op | 1.475 | 0.049 | 0.005 |
-| `indexSet` | op | 1.033 | 0.040 | 0.005 |
-| `field` | op | 2.684 | 0.028 | 0.005 |
-| `fieldSet` | op | 1.709 | 0.023 | 0.005 |
-| `method` | op | 3.624 | 0.124 | 0.085 |
-| `ternary` | op | 1.457 | 0.028 | 0.008 |
-| `switch` | op | 1.695 | 0.031 | 0.009 |
-| `strConcat` | op | 1.791 | 0.141 | 0.112 |
-| `strInterp` | op | 2.111 | 0.151 | 0.117 |
-| `arrayDecl` | op | 2.474 | 0.073 | 0.032 |
-| `mapLiteral` | op | 3.432 | 0.212 | 0.167 |
-| `forRange` | op | 0.504 | 0.082 | 0.066 |
-| `forArray` | op | 0.526 | 0.098 | 0.082 |
-| `anonField` | op | 1.953 | 0.186 | 0.144 |
-| `hostMethod` | op | 2.231 | 0.098 | 0.079 |
-| `hostStatic` | op | 3.983 | 0.199 | 0.180 |
-| `arrayPush` | op | 2.015 | 0.105 | 0.081 |
-| `boolLogic` | op | 1.565 | 0.026 | 0.005 |
-| `modArith` | op | 1.539 | 0.028 | 0.014 |
-| `stringSwitch` | op | 1.680 | 0.039 | 0.011 |
-| `nullCoal` | op | 1.192 | 0.028 | 0.004 |
-| `call0` | call | 1.793 | 0.039 | 0.008 |
-| `call1` | call | 2.546 | 0.043 | 0.008 |
-| `call3` | call | 3.910 | 0.054 | 0.009 |
-| `callCap20` | call | 2.560 | 0.042 | 0.008 |
-| `closureCall` | call | 2.563 | 0.062 | 0.037 |
-| `classCall` | call | 3.927 | 0.139 | 0.096 |
-| `loopCont` | unwind | 0.962 | 0.019 | 0.004 |
-| `tryCatch` | unwind | 5.428 | 2.615 | 0.022 |
-| `classNew` | compound | 19.898 | 0.085 | 0.027 |
-| `arrayCompr` | compound | 0.327 | 0.147 | 0.130 |
+| `noCall` | op | 0.958 | 0.018 | 0.004 |
+| `loopPlain` | op | 0.647 | 0.010 | 0.004 |
+| `postIncr` | op | 0.535 | 0.008 | 0.002 |
+| `arith` | op | 1.208 | 0.020 | 0.005 |
+| `locals` | op | 1.813 | 0.027 | 0.004 |
+| `blocks` | op | 1.437 | 0.026 | 0.004 |
+| `not` | op | 1.040 | 0.018 | 0.004 |
+| `neg` | op | 1.022 | 0.016 | 0.004 |
+| `index` | op | 1.337 | 0.049 | 0.005 |
+| `indexSet` | op | 0.868 | 0.040 | 0.005 |
+| `field` | op | 2.397 | 0.025 | 0.005 |
+| `fieldSet` | op | 1.516 | 0.018 | 0.004 |
+| `method` | op | 3.313 | 0.119 | 0.081 |
+| `ternary` | op | 1.269 | 0.028 | 0.008 |
+| `switch` | op | 1.545 | 0.030 | 0.009 |
+| `strConcat` | op | 1.617 | 0.146 | 0.125 |
+| `strInterp` | op | 1.898 | 0.148 | 0.128 |
+| `arrayDecl` | op | 2.254 | 0.066 | 0.031 |
+| `mapLiteral` | op | 3.132 | 0.199 | 0.166 |
+| `forRange` | op | 0.545 | 0.080 | 0.066 |
+| `forArray` | op | 0.478 | 0.095 | 0.091 |
+| `anonField` | op | 1.766 | 0.168 | 0.137 |
+| `hostMethod` | op | 2.080 | 0.098 | 0.081 |
+| `hostStatic` | op | 3.566 | 0.192 | 0.169 |
+| `arrayPush` | op | 2.042 | 0.090 | 0.076 |
+| `boolLogic` | op | 1.315 | 0.024 | 0.005 |
+| `modArith` | op | 1.341 | 0.026 | 0.014 |
+| `stringSwitch` | op | 1.506 | 0.038 | 0.012 |
+| `nullCoal` | op | 1.043 | 0.025 | 0.004 |
+| `call0` | call | 1.592 | 0.038 | 0.008 |
+| `call1` | call | 2.326 | 0.040 | 0.008 |
+| `call3` | call | 3.732 | 0.051 | 0.009 |
+| `callCap20` | call | 2.321 | 0.040 | 0.008 |
+| `closureCall` | call | 2.406 | 0.058 | 0.039 |
+| `classCall` | call | 3.636 | 0.124 | 0.091 |
+| `loopCont` | unwind | 0.913 | 0.019 | 0.004 |
+| `tryCatch` | unwind | 5.036 | 2.545 | 0.023 |
+| `classNew` | compound | 12.736 | 0.085 | 0.028 |
+| `arrayCompr` | compound | 0.377 | 0.152 | 0.129 |
 
 </details>
 
@@ -176,30 +176,30 @@ constructs a hot script actually uses, not from the language's edges.
 
 | | interpreted | cppia | cppia + JIT |
 | --- | --- | --- | --- |
-| us per operation (29 cases) | 1.744 | 0.067 | 0.043 |
-| us per call (6 cases) | 2.883 | 0.063 | 0.028 |
-| operation, vs interpreted | 1.0x | 26.2x | 40.4x |
-| call, vs interpreted | 1.0x | 45.7x | 104.4x |
-| corpus total, ms | 9450 | 517 | 160 |
+| us per operation (29 cases) | 1.569 | 0.064 | 0.043 |
+| us per call (6 cases) | 2.669 | 0.059 | 0.027 |
+| operation, vs interpreted | 1.0x | 24.6x | 36.3x |
+| call, vs interpreted | 1.0x | 45.5x | 98.5x |
+| corpus total, ms | 8056 | 500 | 160 |
 
 The total row is a sum over cases of very different cost, so it is not a speedup and should
-not be quoted as one. The single largest case in each column takes 21% (`classNew`) of interpreted, 51% (`tryCatch`) of cppia, 11% (`hostStatic`) of cppia + JIT. The two
+not be quoted as one. The single largest case in each column takes 16% (`classNew`) of interpreted, 51% (`tryCatch`) of cppia, 11% (`hostStatic`) of cppia + JIT. The two
 ratio rows above are the comparable figures.
 
 ```mermaid
 xychart-beta
     title "Cost of one operation at 100,000 iterations"
     x-axis ["cppia + JIT", "cppia", "interpreted"]
-    y-axis "microseconds" 0 --> 2.006
-    bar [0.043, 0.067, 1.744]
+    y-axis "microseconds" 0 --> 1.804
+    bar [0.043, 0.064, 1.569]
 ```
 
 ```mermaid
 xychart-beta
     title "Cost of one call at 100,000 iterations"
     x-axis ["cppia + JIT", "cppia", "interpreted"]
-    y-axis "microseconds" 0 --> 3.316
-    bar [0.028, 0.063, 2.883]
+    y-axis "microseconds" 0 --> 3.069
+    bar [0.027, 0.059, 2.669]
 ```
 
 ### What getting ready costs, and when it is repaid
@@ -214,8 +214,8 @@ a module, interpreting finishes first.
 
 | | interpreted | cppia | cppia + JIT |
 | --- | --- | --- | --- |
-| prepare, ms | 1.305 | 10.588 | 11.142 |
-| break-even, operations | n/a | 5,532 | 5,782 |
+| prepare, ms | 1.196 | 9.862 | 10.598 |
+| break-even, operations | n/a | 5,758 | 6,164 |
 
 <!-- END GENERATED -->
 
