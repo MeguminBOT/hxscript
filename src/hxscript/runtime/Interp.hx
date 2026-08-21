@@ -142,7 +142,6 @@ class Interp {
 	/** The current frame's local variables. */
 	var locals(get, never):Map<String, Variable>;
 
-	/** Binary-operator implementations, keyed by operator token. */
 	/** Maximum interpreter call depth before a stack-overflow guard trips. */
 	public var callStackDepth:Int = 200;
 
