@@ -77,6 +77,21 @@ class Variable {
 	/** The declared type, when the binding was annotated, so writes can be checked against it. */
 	public var t:CType = null;
 
+	/**
+	 * How a write to this slot enforces its declared type, worked out once, and when.
+	 *
+	 * Resolving a type annotation means asking `imports` whether anything shadows the name, which is
+	 * a map miss on every store, and a store is what a typed variable is for. `Interp` remembers the
+	 * answer rather than working it out again, and remembers with it which state of the import table
+	 * it was true of, so a table that moves throws the answer away.
+	 *
+	 * **One field, packed, because a `Variable` is allocated per local per frame.** Three fields
+	 * measured as a 2 to 5% loss across the whole interpreter, on cases that never write a typed
+	 * variable at all, which is the shape of an object that grew past what it was fitting in. The low
+	 * three bits are the plan and the rest is the stamp; -1 is "never worked out".
+	 */
+	public var castState:Int = -1;
+
 	/** Whether the binding is `final`. */
 	public var isFinal:Bool = false;
 

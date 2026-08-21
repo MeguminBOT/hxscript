@@ -1180,7 +1180,7 @@ class Interp {
 	 */
 	inline function store(l:Variable, v:Dynamic):Dynamic {
 		if (l.t != null)
-			v = tryCast(v, l.t);
+			v = enforce(l, v);
 
 		if (l.a != null)
 			return storeBoxed(l, v);
@@ -3374,6 +3374,138 @@ class Interp {
 	 * @param type The declared type, or null to accept anything.
 	 * @return The value, boxed or widened where the type requires it.
 	 */
+	/** The declared type needs the full walk, which is everything `castPlan` does not shortcut. */
+	static inline var CAST_SLOW:Int = 0;
+
+	/** It names something that takes any value as it is. */
+	static inline var CAST_PASS:Int = 1;
+
+	/** It names `Int`. */
+	static inline var CAST_INT:Int = 2;
+
+	/** It names `Float`, which an `Int` widens into. */
+	static inline var CAST_FLOAT:Int = 3;
+
+	/** It names `Bool`. */
+	static inline var CAST_BOOL:Int = 4;
+
+	/** It names `String`. */
+	static inline var CAST_STRING:Int = 5;
+
+	/** It names `Map` or `IMap`. */
+	static inline var CAST_MAP:Int = 6;
+
+	/**
+	 * Enforces a slot's declared type on a value, remembering how rather than working it out again.
+	 *
+	 * **A typed write was paying a map miss for its own annotation.** `tryCast` resolves the written
+	 * name against `imports` on every store, to see whether an import shadows it, and for `Int` or
+	 * `String` that is a miss every time. Skipping the whole of `tryCast` measured `varTyped` at 106ms
+	 * against 64, and `varTypedObj` at 117 against 61, so it is the entire cost of annotating a
+	 * variable.
+	 *
+	 * What makes remembering sound is that the answer only depends on the annotation, which cannot
+	 * change, and on the import table, which can. `Bindings.stamp` moves whenever that table or
+	 * anything it falls back to does, so a plan is used only while it is still true and worked out
+	 * again when it is not.
+	 *
+	 * The plan is an integer rather than the written name, so the test a core type really is costs an
+	 * integer switch instead of a chain of string comparisons.
+	 *
+	 * @param l The slot being written.
+	 * @param v The value.
+	 * @return The value as its declared type takes it.
+	 */
+	function enforce(l:Variable, v:Dynamic):Dynamic {
+		var now:Int = imports.stamp();
+
+		if ((l.castState >>> 3) != now || l.castState < 0)
+			l.castState = (now << 3) | planCast(l);
+
+		var plan:Int = l.castState & 7;
+
+		/**
+		 * A boxed abstract takes neither shortcut, because `tryCast` reaches for its underlying value
+		 * before doing anything else with it and that is not a decision the annotation can carry.
+		 */
+		if (!(v is AbstractValue)) {
+			if (plan == CAST_PASS)
+				return v;
+
+			if (plan != CAST_SLOW) {
+				if (!Config.typedMode || v == null)
+					return v;
+
+				/**
+				 * The test a core type really is, and no string anywhere. `castCoreType` decides which
+				 * type it was asked about by comparing the name, which is a chain of string compares on
+				 * hxcpp and was most of what a typed write cost. It is still what builds the complaint,
+				 * since that path is not the hot one.
+				 */
+				switch (plan) {
+					case CAST_INT:
+						if (v is Int)
+							return v;
+					case CAST_FLOAT:
+						if (v is Int)
+							return (v : Int) + 0.0;
+						if (v is Float)
+							return v;
+					case CAST_BOOL:
+						if (v is Bool)
+							return v;
+					case CAST_STRING:
+						if (v is String)
+							return v;
+					case _:
+						if (v is IMap)
+							return v;
+				}
+
+				return castCoreType(v, CORE_NAMES[plan]);
+			}
+		}
+
+		return tryCast(v, l.t);
+	}
+
+	/**
+	 * Works out how a slot's declared type enforces itself, against the import table as it stands.
+	 *
+	 * Only a plain one-segment name is shortcut, which is what `var x:Int` and `var s:String` are.
+	 * Anything wrapped, parameterised or dotted keeps the full walk, so the shortcut can only ever be
+	 * taken for the shapes it was checked against.
+	 *
+	 * @param l The slot.
+	 * @return Its plan.
+	 */
+	function planCast(l:Variable):Int {
+		switch (l.t) {
+			case CTPath(p, _) if (p.length == 1):
+				var path:String = p[0];
+
+				/** Something imported under that name is what `tryCast` prefers, so leave it to it. */
+				if (imports.get(path) != null)
+					return CAST_SLOW;
+
+				return switch (path) {
+					case 'Dynamic' | 'Any' | 'Void' | 'Class' | 'Enum': CAST_PASS;
+					case 'Int': CAST_INT;
+					case 'Float': CAST_FLOAT;
+					case 'Bool': CAST_BOOL;
+					case 'String': CAST_STRING;
+					case 'Map' | 'IMap': CAST_MAP;
+					default: CAST_SLOW;
+				}
+
+			case _:
+				return CAST_SLOW;
+		}
+	}
+
+	/** The name each core-type plan stands for, for the complaint when a value is not one. */
+	static var CORE_NAMES:Array<String> = ['', '', 'Int', 'Float', 'Bool', 'String', 'Map'];
+
 	function tryCast(e:Dynamic, ?type):Dynamic {
 		switch (type) {
 			case null:

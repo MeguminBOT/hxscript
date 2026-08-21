@@ -583,6 +583,37 @@ on the hottest path in the interpreter. It does not cost anything measurable, an
 Against the numbers this page recorded before any of it, `newInstBare` is 145 to 56 and
 `newInstGuard` 197 to 104.
 
+### A typed write remembers how its annotation is enforced
+
+`tryCast` resolved the written type name against `imports` on every store, to see whether an import
+shadows it, and for `Int` or `String` that is a map miss every time. Then `castCoreType` decided which
+type it had been asked about by comparing the name, which hxcpp lays out as a chain of string
+compares. Both happen per write, and a store is what a typed variable is for.
+
+The answer only depends on the annotation, which cannot change, and on the import table, which can.
+`Bindings.stamp` moves whenever that table or the one it falls back to does, so the slot remembers
+the plan and the stamp it was true of, and works it out again when it is not. The plan is an integer,
+so the test a core type really is costs an integer switch and no string at all. `varTyped` 109 to 74.
+
+**Three fields on `Variable` cost more than the whole thing gained.** The first version kept the plan,
+the stamp and the type's name as separate fields, and measured a 2 to 5% loss spread across cases
+that never write a typed variable: `blocks`, `neg`, `indexSet`, `call_cap20`, `newInstGuard`. A
+`Variable` is allocated per local per frame, so anything it carries is paid for by every script
+whether or not it uses the feature. Packed into one `Int`, low three bits the plan and the rest the
+stamp, with the name derived from the plan for the complaint:
+
+| | three fields | one packed field |
+| --- | --- | --- |
+| `varTyped` | 79 | 74 |
+| `varTypedObj` | 133 | 124 |
+| `blocks` | 118 | 111 |
+| `neg` | 84 | 78 |
+| whole benchmark | +1% | -2% |
+
+Both against the same rebuilt control. The lesson is about the object rather than the feature: adding
+to `Variable` is not free, and a change that looks contained to one path can be paid for on all of
+them.
+
 ## Where the time goes now
 
 A script call is roughly 1.1us, against about 0.6us for an empty loop iteration, so call overhead is
@@ -631,12 +662,6 @@ Remaining known costs, none currently urgent:
 - Every generated bridge override tests `__interp.locals.exists(name)` and then reads it, so a native
   method the engine calls per frame pays two map hashes whether or not the script overrides it. The
   method set is known at macro time and could be a per-instance slot.
-- A typed write still costs a full `tryCast`, which is a `StringMap` miss on `imports` plus string
-  work on every store. Measured by skipping it: `varTyped` 106 to 64 and `varTypedObj` 117 to 61,
-  which is the whole of what annotating a variable costs, about 200 to 280ns a write. Caching the
-  resolved plan on the slot removes it, and the open question is when to resolve: at declaration,
-  which is Haxe's own rule and needs no invalidation, or on first write with the `imports` table
-  watched for changes the way `variables` now is.
 - A native method call into a scripted subclass costs 11.3ns where the same call on a plain host
   object costs 1.3, because the generated override tests `__interp.locals.exists(name)` before
   finding out the script did not override it. Paid per bridged method per instance per frame. The

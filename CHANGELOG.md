@@ -91,6 +91,19 @@
   `newInstBare` 145 to 56, `newInstFields` 237 to 149, `newInstGuard` 197 to 104, with `arith`,
   `locals`, `field`, `call` and `instCall` unmoved.
 
+- **A typed write remembers how its annotation is enforced instead of resolving it every time,
+  worth 32% on writing an annotated variable.** `tryCast` asked `imports` whether anything shadowed
+  the written type name on every store, a map miss for `Int` or `String`, and then `castCoreType`
+  worked out which type it had been asked about by comparing the name. The answer depends only on the
+  annotation, which cannot change, and on the import table, which can, so `Bindings` carries a version
+  and the slot remembers the plan against it. `varTyped` 109 to 74.
+
+  Worth recording how it was got wrong first: keeping the plan, the stamp and the name as three
+  fields on `Variable` measured a net 1% LOSS across the benchmark, spread over cases that never
+  write a typed variable at all. A `Variable` is allocated per local per frame, so anything it
+  carries is paid for by every script whether or not it uses the feature. Packed into one `Int` it is
+  a net 2% gain instead, on the same control.
+
 - **Operator dispatch is a jump table instead of a table of closures, worth 16 to 23% across the
   interpreter.** `binops` was a `Map<String, Expr->Expr->Dynamic>` built per interpreter, so every
   operator cost a string hash, a null test and a call through a closure field, and every interpreter

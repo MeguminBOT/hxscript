@@ -46,6 +46,25 @@ class Bindings {
 	public var fallback:Null<Bindings> = null;
 
 	/**
+	 * How many times this table has changed.
+	 *
+	 * For a caller that has worked something out from what the table said and wants to know whether
+	 * it is still true. `Interp` resolves a declared type against `imports` on every typed write, and
+	 * remembering the answer is only sound while the table it was read from has not moved.
+	 */
+	public var version(default, null):Int = 0;
+
+	/**
+	 * One level deep, which is every chain there is: an instance falls back to its class, and a class
+	 * carries its own table rather than falling back to its module.
+	 *
+	 * @return A number that changes whenever this table or the one it falls back to does.
+	 */
+	public inline function stamp():Int {
+		return fallback == null ? version : version + fallback.version;
+	}
+
+	/**
 	 * @param from Existing names to start from, or null for an empty table.
 	 */
 	public function new(?from:Map<String, Dynamic>) {
@@ -74,6 +93,7 @@ class Bindings {
 		if (watcher != null)
 			Globals.wrote(watcher, name, value);
 
+		version++;
 		held.set(name, value);
 	}
 
@@ -103,11 +123,13 @@ class Bindings {
 	 * @return Whether it was there.
 	 */
 	public function remove(name:String):Bool {
+		version++;
 		return held.remove(name);
 	}
 
 	/** Drops every name. */
 	public function clear():Void {
+		version++;
 		held.clear();
 	}
 
