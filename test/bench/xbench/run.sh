@@ -46,6 +46,11 @@ build insanity "$LIBS/insanity" RunInsanity >/dev/null
 build hscript "$LIBS/hscript" RunHscript >/dev/null
 build improved "$LIBS/improved" RunHscript >/dev/null
 build iris "$LIBS/iris" RunIris >/dev/null
+# Its classpath is the `src` inside the checkout rather than the checkout itself, and it declares
+# its own `hscript` package, so it could not share a binary with hscript or hscript-improved even
+# if the layout allowed it. It always tracks positions, so like hxScript and insanity it is built
+# once rather than both ways.
+build sscript    "$LIBS/sscript/src" RunSScript >/dev/null
 # The same libraries again with position tracking on, which is what hxScript always does. Without
 # it they record no source positions at all, so the plain rows are not a like-for-like comparison.
 build hscript-pos "$LIBS/hscript" RunHscript "$HERE/hscript-pos.hxml" >/dev/null
@@ -79,6 +84,7 @@ SCALES=${SCALES:-"100000"}
 
 for entry in "hxscript:$BIN/hxscript/RunHxScript.exe" \
              "insanity:$BIN/insanity/RunInsanity.exe" \
+             "sscript:$BIN/sscript/RunSScript.exe" \
              "hscript-pos:$BIN/hscript-pos/RunHscript.exe" \
              "hscript:$BIN/hscript/RunHscript.exe" \
              "hscript-improved-pos:$BIN/improved-pos/RunHscript.exe" \

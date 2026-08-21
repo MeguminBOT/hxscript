@@ -13,6 +13,7 @@ import sys, collections
 PREFERRED = [
     "hxscript",
     "insanity",
+    "sscript",
     "hscript-pos",
     "hscript-improved-pos",
     "hscript-iris-pos",
@@ -25,6 +26,7 @@ PREFERRED = [
 LABEL = {
     "hxscript": "**hxScript**",
     "insanity": "insanity",
+    "sscript": "SScript",
     "hscript-pos": "hscript",
     "hscript-improved-pos": "improved",
     "hscript-iris-pos": "iris",

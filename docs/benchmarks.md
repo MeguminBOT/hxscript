@@ -147,78 +147,78 @@ iteration and would describe themselves rather than the interpreter.
 <details>
 <summary><strong>43 cases, click to expand</strong></summary>
 
-| case | kind | **hxScript** | insanity | hscript | improved | iris | rulescript |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `noCall` | op | 0.421 | 0.989 | 0.413 | 0.639 | 0.423 | 0.542 |
-| `loopPlain` | op | 0.475 | 1.140 | 0.439 | 0.606 | 0.462 | 0.592 |
-| `loopCont` | unwind | 0.636 | 3.645 | 2.648 | 2.816 | 2.538 | 3.362 |
-| `postIncr` | op | 0.445 | 0.978 | 0.384 | 0.521 | 0.395 | 0.485 |
-| `arith` | op | 0.580 | 1.368 | 0.562 | 0.802 | 0.569 | 0.714 |
-| `locals` | op | 0.510 | 1.259 | 0.498 | 0.751 | 0.538 | 0.661 |
-| `blocks` | op | 0.638 | 1.270 | 0.564 | 0.964 | 0.582 | 0.772 |
-| `field` | op | 0.551 | 1.170 | 0.451 | 0.723 | 0.470 | 0.625 |
-| `fieldSet` | op | 0.582 | 1.088 | 0.453 | 0.783 | 0.494 | 0.600 |
-| `method` | op | 1.037 | 1.583 | 0.720 | 1.168 | 0.741 | 0.925 |
-| `index` | op | 0.485 | 1.127 | 0.474 | 0.752 | 0.492 | 0.641 |
-| `indexSet` | op | 0.467 | 1.017 | 0.482 | 0.698 | 0.512 | 0.633 |
-| `not` | op | 0.502 | 1.142 | 0.507 | 0.803 | 0.511 | 0.673 |
-| `neg` | op | 0.459 | 1.053 | 0.450 | 0.673 | 0.470 | 0.592 |
-| `call0` | call | 0.838 | 4.731 | 3.689 | 4.181 | 3.661 | 4.345 |
-| `call1` | call | 1.256 | 5.166 | 4.073 | 4.497 | 3.991 | 4.719 |
-| `call3` | call | 1.826 | 6.037 | 4.458 | 4.883 | 4.511 | 5.077 |
-| `callCap20` | call | 1.243 | 8.636 | 6.216 | 4.460 | 6.247 | 7.197 |
-| `forRange` | op | 0.185 | 0.315 | 0.188 | 0.243 | 0.164 | 0.261 |
-| `forArray` | op | 0.184 | 0.317 | 0.212 | 0.282 | 0.177 | 0.255 |
-| `arrayDecl` | op | 0.957 | 1.610 | 0.722 | 1.224 | 0.702 | 0.973 |
-| `strConcat` | op | 0.777 | 1.789 | 0.967 | 1.172 | 0.963 | 1.159 |
-| `ternary` | op | 0.639 | 1.484 | 0.623 | 0.870 | 0.633 | 0.839 |
-| `anonField` | op | 0.817 | 1.433 | 0.634 | 1.116 | 0.671 | 0.862 |
-| `closureCall` | op | 1.204 | 5.754 | 4.421 | 4.979 | 4.495 | 5.516 |
-| `hostMethod` | op | 0.992 | 1.559 | 0.715 | 1.044 | 0.716 | 0.971 |
-| `hostStatic` | op | 1.375 | 1.785 | not supported | not supported | 0.865 | 1.143 |
-| `arrayPush` | op | 1.015 | 1.425 | 0.674 | 0.974 | 0.695 | 0.849 |
-| `boolLogic` | op | 0.685 | 1.733 | 0.714 | 1.000 | 0.729 | 0.943 |
-| `modArith` | op | 0.623 | 1.506 | 0.663 | 0.887 | 0.620 | 0.871 |
-| `switch` | op | 0.819 | 1.486 | 0.629 | 0.864 | 0.627 | 0.831 |
-| `tryCatch` | unwind | 3.575 | 4.939 | 4.163 | 4.549 | 3.985 | 5.225 |
-| `strInterp` | op | 0.961 | 1.556 | WRONG (v$n) | WRONG (v$n) | 0.730 | 0.849 |
-| `mapLiteral` | op | 1.329 | 2.115 | 1.210 | 1.524 | 1.103 | 1.481 |
-| `arrayCompr` | compound | 2.977 | 4.507 | 3.386 | 5.351 | 6.494 | 7.290 |
-| `varTyped` | op | 0.449 | 1.001 | 0.410 | 0.658 | 0.412 | not supported |
-| `fnTyped` | call | 1.761 | 5.428 | 3.961 | 4.435 | 3.979 | not supported |
-| `classNew` | compound | 2.849 | 73.335 | not supported | 4.920 | not supported | not supported |
-| `classCall` | call | 1.564 | 5.520 | not supported | 4.651 | not supported | not supported |
-| `classField` | op | 0.659 | 1.261 | not supported | 0.897 | not supported | not supported |
-| `stringSwitch` | op | 0.807 | 1.391 | 0.605 | 0.855 | 0.610 | 0.808 |
-| `nullCoal` | op | 0.435 | 1.174 | 0.466 | 0.681 | 0.497 | 0.645 |
-| `abstractOp` | op | 5.543 | 10.848 | not supported | not supported | not supported | not supported |
+| case | kind | **hxScript** | insanity | SScript | hscript | improved | iris | rulescript |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `noCall` | op | 0.409 | 0.953 | 0.484 | 0.462 | 0.687 | 0.414 | 0.579 |
+| `loopPlain` | op | 0.457 | 1.097 | 0.490 | 0.431 | 0.602 | 0.475 | 0.578 |
+| `loopCont` | unwind | 0.623 | 3.678 | 2.702 | 2.579 | 2.808 | 2.518 | 3.274 |
+| `postIncr` | op | 0.440 | 0.963 | 0.421 | 0.407 | 0.530 | 0.427 | 0.514 |
+| `arith` | op | 0.576 | 1.312 | 0.674 | 0.549 | 0.772 | 0.533 | 0.736 |
+| `locals` | op | 0.498 | 1.225 | 0.599 | 0.487 | 0.748 | 0.558 | 0.697 |
+| `blocks` | op | 0.633 | 1.262 | 0.699 | 0.553 | 0.934 | 0.563 | 0.751 |
+| `field` | op | 0.551 | 1.105 | 0.517 | 0.506 | 0.761 | 0.463 | 0.663 |
+| `fieldSet` | op | 0.596 | 1.061 | 0.515 | 0.448 | 0.716 | 0.514 | 0.588 |
+| `method` | op | 1.023 | 1.512 | 0.815 | 0.704 | 1.106 | 0.722 | 0.930 |
+| `index` | op | 0.485 | 1.036 | 2.961 | 0.464 | 0.687 | 0.480 | 0.632 |
+| `indexSet` | op | 0.489 | 1.047 | 8.048 | 0.478 | 0.704 | 0.499 | 0.621 |
+| `not` | op | 0.497 | 1.038 | 0.582 | 0.503 | 0.722 | 0.503 | 0.672 |
+| `neg` | op | 0.473 | 1.028 | 0.525 | 0.436 | 0.669 | 0.454 | 0.606 |
+| `call0` | call | 0.815 | 4.736 | 3.956 | 3.744 | 4.186 | 3.652 | 4.277 |
+| `call1` | call | 1.265 | 5.149 | 4.377 | 4.092 | 4.398 | 3.896 | 4.590 |
+| `call3` | call | 1.816 | 6.079 | 4.801 | 4.337 | 4.888 | 4.281 | 5.097 |
+| `callCap20` | call | 1.246 | 8.064 | 7.022 | 6.268 | 4.400 | 6.130 | 6.898 |
+| `forRange` | op | 0.171 | 0.310 | 0.213 | 0.192 | 0.244 | 0.159 | 0.256 |
+| `forArray` | op | 0.195 | 0.314 | 0.241 | 0.218 | 0.280 | 0.174 | 0.259 |
+| `arrayDecl` | op | 0.982 | 1.591 | 0.847 | 0.707 | 1.263 | 0.686 | 0.999 |
+| `strConcat` | op | 0.782 | 1.732 | 1.101 | 0.931 | 1.208 | 0.950 | 1.102 |
+| `ternary` | op | 0.632 | 1.419 | 0.723 | 0.613 | 0.856 | 0.607 | 0.871 |
+| `anonField` | op | 0.821 | 1.410 | 0.790 | 0.614 | 1.020 | 0.658 | 0.861 |
+| `closureCall` | op | 1.216 | 5.651 | 4.826 | 4.451 | 4.976 | 4.386 | 5.395 |
+| `hostMethod` | op | 0.979 | 1.506 | 0.816 | 0.673 | 1.065 | 0.766 | 1.000 |
+| `hostStatic` | op | 1.364 | 1.775 | 0.987 | not supported | not supported | 0.852 | 1.067 |
+| `arrayPush` | op | 0.977 | 1.399 | 3.141 | 0.642 | 0.998 | 0.695 | 0.851 |
+| `boolLogic` | op | 0.679 | 1.764 | 0.795 | 0.719 | 0.980 | 0.709 | 0.914 |
+| `modArith` | op | 0.620 | 1.512 | 0.774 | 0.645 | 0.892 | 0.681 | 0.897 |
+| `switch` | op | 0.789 | 1.444 | 0.784 | 0.612 | 0.852 | 0.616 | 0.836 |
+| `tryCatch` | unwind | 3.533 | 4.830 | 4.328 | 4.132 | 4.567 | 3.949 | 5.106 |
+| `strInterp` | op | 0.968 | 1.545 | 3.824 | WRONG (v$n) | WRONG (v$n) | 0.787 | 0.830 |
+| `mapLiteral` | op | 1.342 | 1.993 | 3.460 | 1.217 | 1.538 | 1.088 | 1.429 |
+| `arrayCompr` | compound | 2.942 | 4.509 | 3.977 | 3.619 | 5.303 | 6.219 | 7.225 |
+| `varTyped` | op | 0.423 | 0.962 | 0.514 | 0.398 | 0.634 | 0.467 | not supported |
+| `fnTyped` | call | 1.662 | 5.387 | 4.371 | 4.069 | 4.405 | 4.019 | not supported |
+| `classNew` | compound | 2.868 | 68.586 | not supported | not supported | 5.218 | not supported | not supported |
+| `classCall` | call | 1.560 | 5.445 | not supported | not supported | 4.597 | not supported | not supported |
+| `classField` | op | 0.655 | 1.249 | not supported | not supported | 0.824 | not supported | not supported |
+| `stringSwitch` | op | 0.780 | 1.376 | 0.756 | 0.601 | 0.880 | 0.585 | 0.824 |
+| `nullCoal` | op | 0.451 | 1.194 | 0.587 | 0.458 | 0.679 | 0.534 | 0.611 |
+| `abstractOp` | op | 5.421 | 10.509 | not supported | not supported | not supported | not supported | not supported |
 
 </details>
 
 ### Summary, over the 35 cases every library ran
 
-| | **hxScript** | insanity | hscript | improved | iris | rulescript |
-| --- | --- | --- | --- | --- | --- | --- |
-| us per operation (28 cases), lower is faster | 0.665 | 1.438 | 0.709 | 0.986 | 0.716 | 0.919 |
-| us per call (4 cases), lower is faster | 1.291 | 6.143 | 4.609 | 4.505 | 4.603 | 5.334 |
-| parse, ms, lower is faster | 0.879 | 1.21 | 1.193 | 3.297 | 0.851 | 1.395 |
-| corpus total, ms, lower is faster | 3097 | 7794 | 4847 | 5834 | 5149 | 6293 |
-| total relative to hxScript, higher is slower | 1.00x | 2.52x | 1.57x | 1.88x | 1.66x | 2.03x |
+| | **hxScript** | insanity | SScript | hscript | improved | iris | rulescript |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| us per operation (28 cases), lower is faster | 0.662 | 1.402 | 1.328 | 0.704 | 0.977 | 0.711 | 0.917 |
+| us per call (4 cases), lower is faster | 1.285 | 6.007 | 5.039 | 4.610 | 4.468 | 4.490 | 5.216 |
+| parse, ms, lower is faster | 0.84 | 1.153 | 2.918 | 1.212 | 3.286 | 0.803 | 1.363 |
+| corpus total, ms, lower is faster | 3078 | 7630 | 6835 | 4849 | 5792 | 5054 | 6214 |
+| total relative to hxScript, higher is slower | 1.00x | 2.48x | 2.22x | 1.58x | 1.88x | 1.64x | 2.02x |
 
 ```mermaid
 xychart-beta
     title "Cost of one operation at 100,000 iterations"
-    x-axis ["hxScript", "hscript", "iris", "rulescript", "improved", "insanity"]
-    y-axis "microseconds" 0 --> 1.654
-    bar [0.665, 0.709, 0.716, 0.919, 0.986, 1.438]
+    x-axis ["hxScript", "hscript", "iris", "rulescript", "improved", "SScript", "insanity"]
+    y-axis "microseconds" 0 --> 1.612
+    bar [0.662, 0.704, 0.711, 0.917, 0.977, 1.328, 1.402]
 ```
 
 ```mermaid
 xychart-beta
     title "Cost of one call at 100,000 iterations"
-    x-axis ["hxScript", "improved", "iris", "hscript", "rulescript", "insanity"]
-    y-axis "microseconds" 0 --> 7.064
-    bar [1.291, 4.505, 4.603, 4.609, 5.334, 6.143]
+    x-axis ["hxScript", "improved", "iris", "hscript", "SScript", "rulescript", "insanity"]
+    y-axis "microseconds" 0 --> 6.908
+    bar [1.285, 4.468, 4.490, 4.610, 5.039, 5.216, 6.007]
 ```
 
 ### How much script fits in one frame
@@ -239,12 +239,12 @@ Read it the other way for a budget you already have in mind:
 per-call us  x  calls per frame  x  60  =  us per second spent in script
 ```
 
-| | **hxScript** | insanity | hscript | improved | iris | rulescript |
-| --- | --- | --- | --- | --- | --- | --- |
-| operations per 60Hz frame | 25,060 | 11,586 | 23,521 | 16,909 | 23,264 | 18,145 |
-| calls per 60Hz frame | 12,913 | 2,713 | 3,615 | 3,699 | 3,621 | 3,124 |
-| operations per 2ms slice | 3,007 | 1,390 | 2,822 | 2,029 | 2,791 | 2,177 |
-| calls per 2ms slice | 1,549 | 325 | 433 | 443 | 434 | 374 |
+| | **hxScript** | insanity | SScript | hscript | improved | iris | rulescript |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| operations per 60Hz frame | 25,167 | 11,888 | 12,549 | 23,661 | 17,050 | 23,455 | 18,176 |
+| calls per 60Hz frame | 12,965 | 2,774 | 3,307 | 3,615 | 3,730 | 3,712 | 3,195 |
+| operations per 2ms slice | 3,020 | 1,426 | 1,505 | 2,839 | 2,046 | 2,814 | 2,181 |
+| calls per 2ms slice | 1,555 | 332 | 396 | 433 | 447 | 445 | 383 |
 
 ### What position tracking costs the libraries that can switch it off
 
@@ -253,11 +253,11 @@ with them on everywhere; this is what that decision costs the others. At 100,000
 
 | | hscript | improved | iris | rulescript |
 | --- | --- | --- | --- | --- |
-| us per operation, with | 0.709 | 0.986 | 0.716 | 0.919 |
-| us per operation, without | 0.639 | 0.888 | 0.707 | 0.759 |
-| cost | 10.9% | 11.0% | 1.3% | 21.1% |
-| parse with, ms | 1.193 | 3.297 | 0.851 | 1.395 |
-| parse without, ms | 0.595 | 2.828 | 0.563 | 0.647 |
+| us per operation, with | 0.704 | 0.977 | 0.711 | 0.917 |
+| us per operation, without | 0.642 | 0.877 | 0.703 | 0.772 |
+| cost | 9.8% | 11.4% | 1.1% | 18.7% |
+| parse with, ms | 1.212 | 3.286 | 0.803 | 1.363 |
+| parse without, ms | 0.56 | 2.757 | 0.593 | 0.61 |
 
 <!-- END GENERATED -->
 
@@ -298,12 +298,21 @@ Haxe 4.3.7, hxcpp, `-dce no`, Windows, single machine, one sitting, 24-thread bu
 | --- | --- | --- |
 | hxScript | working tree | always tracks positions |
 | [hscript-insanity](https://github.com/inky03/hscript-insanity) ("insanity") | `ad67b16` (main) | always tracks positions |
+| [SScript](https://github.com/ThomasDarkson/SScript) | `9102af3` (main, 22.4.1) | always tracks positions |
 | [hscript](https://github.com/HaxeFoundation/hscript) | `7d5eacc` (master, post-2.7.0) | built both ways |
 | [hscript-improved](https://github.com/CodenameCrew/hscript-improved) | `48ec0f4` (master) | built both ways |
 | [hscript-iris](https://github.com/pisayesiwsi/hscript-iris) | `62d828b` (**dev**) | built both ways |
 | [RuleScript](https://github.com/Kriptel/RuleScript) | `b5b377a` (master) | built both ways; needs hscript `609c489` |
 
 Every library is at its default branch's tip, except hscript-iris, measured on `dev`.
+
+**SScript is new to this table.** It is a class-oriented fork, and two things about measuring it
+are worth stating rather than leaving in the runner. Its `execute()` reparses the source on every
+call, so using it would have put parse cost inside the timed section where every other library has
+only execution there; its `parser` and `interp` are both public, so the runner parses once and runs
+the tree, which is what the RuleScript runner does for the same reason. And its `Expr` carries
+`pmin`, `pmax` and `line` unconditionally, so like hxScript and insanity it is built once rather
+than both ways.
 
 **Only insanity moved since the previous run**, by 28 commits to the tip of `main`. hscript,
 hscript-improved, hscript-iris and RuleScript are at the same commits as before, and the corpus is
