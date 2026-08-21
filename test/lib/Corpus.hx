@@ -27,8 +27,8 @@ class Corpus {
 	 * @param check What to do with one. Whether a case is run interpreted, compiled, or both is the
 	 *        runner's business; this only says what the cases are.
 	 */
-	public static function run(check:Check, ?section:String -> Void):Void {
-		var at:String -> Void = section == null ? function(_:String):Void {} : section;
+	public static function run(check:Check, ?section:String->Void):Void {
+		var at:String->Void = section == null ? function(_:String):Void {} : section;
 
 		at('basics');
 		check('int literal', 'return 7;', '7');
@@ -42,7 +42,8 @@ class Corpus {
 		check('string ops', 'var s = "hello"; return s.length;', '5');
 		check('nested calls', 'return Std.string(Math.floor(3.7));', '3');
 		check('ternary', 'var a = 4; return a > 2 ? "y" : "n";', 'y');
-		check('switch', 'var a = 2; switch (a) { case 1: return "one"; case 2: return "two"; default: return "other"; }', 'two');
+		check('switch',
+			'var a = 2; switch (a) { case 1: return "one"; case 2: return "two"; default: return "other"; }', 'two');
 		check('do while', 'var i = 0; do { i++; } while (i < 5); return i;', '5');
 		check('try catch', 'try { throw "boom"; } catch (e:Dynamic) { return "caught"; } return "no";', 'caught');
 		check('object literal', 'var o = {a: 1, b: 2}; return o.a + o.b;', '3');
@@ -60,7 +61,8 @@ class Corpus {
 		// Every case above lands one in an `Int`, which is the one destination needing no conversion.
 		check('bitwise into a float', 'var f:Float = (255 >> 4) & 0xF; return f;', '15');
 		check('bitwise into a dynamic', 'var d:Dynamic = 12 & 10; return d;', '8');
-		check('a masked byte as a fraction', 'var a:Float = ((0xC0FFEE >> 16) & 0xFF) / 255; return Math.round(a * 100);', '75');
+		check('a masked byte as a fraction',
+			'var a:Float = ((0xC0FFEE >> 16) & 0xFF) / 255; return Math.round(a * 100);', '75');
 		check('modulo and division', 'return Std.string(17 % 5) + Std.string(Std.int(17 / 5));', '23');
 		check('string compare', 'return "abc" == "abc" ? "eq" : "ne";', 'eq');
 
@@ -69,14 +71,19 @@ class Corpus {
 		check('closure captures local', 'var n = 10; var f = function(a:Int) { return a + n; }; return f(5);', '15');
 		check('closure sees later writes', 'var n = 1; var f = function() { return n; }; n = 99; return f();', '99');
 		check('closure writes outward', 'var n = 0; var f = function() { n = 7; }; f(); return n;', '7');
-		check('named local recursion', 'function fib(n:Int):Int { if (n < 2) return n; return fib(n - 1) + fib(n - 2); } return fib(10);', '55');
+		check('named local recursion',
+			'function fib(n:Int):Int { if (n < 2) return n; return fib(n - 1) + fib(n - 2); } return fib(10);', '55');
 		check('closure over arg', 'return make(4)();', '16', '
 			static function make(k:Int):Dynamic {
 				return function() { return k * k; };
 			}
 		');
-		check('nested closures', 'var a = 1; var f = function() { var b = 2; var g = function() { return a + b; }; return g(); }; return f();', '3');
-		check('closure in loop', 'var fs = []; for (i in 0...3) { fs.push(function() { return i; }); } return fs[0]() + fs[1]() + fs[2]();', '3');
+		check('nested closures',
+			'var a = 1; var f = function() { var b = 2; var g = function() { return a + b; }; return g(); }; return f();',
+			'3');
+		check('closure in loop',
+			'var fs = []; for (i in 0...3) { fs.push(function() { return i; }); } return fs[0]() + fs[1]() + fs[2]();',
+			'3');
 		check('array map with closure', 'var a = [1, 2, 3]; var t = 0; for (v in a) t += v * 2; return t;', '12');
 
 		var colour:String = 'enum Colour { Red; Green; Rgb(r:Int, g:Int, b:Int); }';
@@ -86,16 +93,21 @@ class Corpus {
 		check('enum inequality', 'return Colour.Red == Colour.Green ? "eq" : "ne";', 'ne', '', colour);
 		check('enum index', 'return Std.string(Type.enumIndex(Colour.Green));', '1', '', colour);
 		check('enum with args', 'var c = Colour.Rgb(1, 2, 3); return Type.enumConstructor(c);', 'Rgb', '', colour);
-		check('enum parameters', 'var c = Colour.Rgb(1, 2, 3); return Std.string(Type.enumParameters(c)[1]);', '2', '', colour);
-		check('enum in array', 'var a = [Colour.Red, Colour.Green]; return Type.enumConstructor(a[1]);', 'Green', '', colour);
+		check('enum parameters', 'var c = Colour.Rgb(1, 2, 3); return Std.string(Type.enumParameters(c)[1]);', '2',
+			'', colour);
+		check('enum in array', 'var a = [Colour.Red, Colour.Green]; return Type.enumConstructor(a[1]);', 'Green', '',
+			colour);
 		check('enum returned from method', 'return Type.enumConstructor(pick(true));', 'Red', '
 			static function pick(b:Bool):Colour {
 				return b ? Colour.Red : Colour.Green;
 			}
 		', colour);
-		check('enum switch', 'var c = Colour.Green; switch (c) { case Colour.Red: return "r"; case Colour.Green: return "g"; default: return "?"; }', 'g', '',
+		check('enum switch',
+			'var c = Colour.Green; switch (c) { case Colour.Red: return "r"; case Colour.Green: return "g"; default: return "?"; }',
+			'g', '', colour);
+		check('enum switch falls to default',
+			'var c = Colour.Rgb(1, 2, 3); switch (c) { case Colour.Red: return "r"; default: return "d"; }', 'd', '',
 			colour);
-		check('enum switch falls to default', 'var c = Colour.Rgb(1, 2, 3); switch (c) { case Colour.Red: return "r"; default: return "d"; }', 'd', '', colour);
 		check('enum-typed argument', 'return tag(Colour.Green);', 'Green', '
 			static function tag(c:Colour):String {
 				return Type.enumConstructor(c);
@@ -107,22 +119,30 @@ class Corpus {
 			}
 		', colour);
 		check('enum destructure binds parameters',
-			'var c = Colour.Rgb(1, 2, 3); switch (c) { case Rgb(r, g, b): return Std.string(r + g + b); default: return "no"; }', '6', '', colour);
+			'var c = Colour.Rgb(1, 2, 3); switch (c) { case Rgb(r, g, b): return Std.string(r + g + b); default: return "no"; }',
+			'6', '', colour);
 		check('enum destructure picks the right constructor',
-			'var c = Colour.Green; switch (c) { case Rgb(r, g, b): return "rgb"; case Colour.Green: return "green"; default: return "?"; }', 'green', '',
-			colour);
+			'var c = Colour.Green; switch (c) { case Rgb(r, g, b): return "rgb"; case Colour.Green: return "green"; default: return "?"; }',
+			'green', '', colour);
 		check('enum destructure skips wildcards',
-			'var c = Colour.Rgb(4, 5, 6); switch (c) { case Rgb(_, g, _): return Std.string(g); default: return "no"; }', '5', '', colour);
+			'var c = Colour.Rgb(4, 5, 6); switch (c) { case Rgb(_, g, _): return Std.string(g); default: return "no"; }',
+			'5', '', colour);
 		check('enum destructure with guard',
 			'var c = Colour.Rgb(1, 2, 3); switch (c) { case Rgb(r, g, b) if (r > 9): return "big"; case Rgb(r, g, b): return "small"; default: return "?"; }',
 			'small', '', colour);
-		check('bare ident case captures, not compares', 'var k = 99; var a = 2; switch (a) { case k: return "captured"; default: return "compared"; }',
-			'captured');
-		check('bare ident case rebinds the name', 'var k = 99; var a = 2; switch (a) { case k: return Std.string(k); default: return "no"; }', '2');
-		check('capture with guard that fails', 'var a = 2; switch (a) { case v if (v > 5): return "big"; default: return "small"; }', 'small');
-		check('capture after a literal case', 'var a = 7; switch (a) { case 1: return "one"; case v: return Std.string(v * 2); }', '14');
-		check('switch multi value', 'var a = 3; switch (a) { case 1, 2: return "low"; case 3, 4: return "high"; default: return "?"; }', 'high');
-		check('switch on string', 'var s = "b"; switch (s) { case "a": return "A"; case "b": return "B"; default: return "?"; }', 'B');
+		check('bare ident case captures, not compares',
+			'var k = 99; var a = 2; switch (a) { case k: return "captured"; default: return "compared"; }', 'captured');
+		check('bare ident case rebinds the name',
+			'var k = 99; var a = 2; switch (a) { case k: return Std.string(k); default: return "no"; }', '2');
+		check('capture with guard that fails',
+			'var a = 2; switch (a) { case v if (v > 5): return "big"; default: return "small"; }', 'small');
+		check('capture after a literal case',
+			'var a = 7; switch (a) { case 1: return "one"; case v: return Std.string(v * 2); }', '14');
+		check('switch multi value',
+			'var a = 3; switch (a) { case 1, 2: return "low"; case 3, 4: return "high"; default: return "?"; }',
+			'high');
+		check('switch on string',
+			'var s = "b"; switch (s) { case "a": return "A"; case "b": return "B"; default: return "?"; }', 'B');
 
 		var metres:String = 'abstract Metres(Float) from Float to Float {
 			public function new(v:Float) this = v;
@@ -131,17 +151,25 @@ class Corpus {
 			public function describe():String return this + "m";
 		}';
 		at('abstracts');
-		check('scripted abstract method, annotated', 'var a:Metres = new Metres(2); return a.describe();', '2m', '', metres);
+		check('scripted abstract method, annotated', 'var a:Metres = new Metres(2); return a.describe();', '2m', '',
+			metres);
 		check('scripted abstract method, inferred', 'var a = new Metres(2); return a.describe();', '2m', '', metres);
 		check('scripted abstract method on a fresh value', 'return new Metres(2).describe();', '2m', '', metres);
-		check('scripted abstract operator runs its body', 'var a:Metres = new Metres(2); var b:Metres = new Metres(3); return (a + b).describe();', '105m',
+		check('scripted abstract operator runs its body',
+			'var a:Metres = new Metres(2); var b:Metres = new Metres(3); return (a + b).describe();', '105m', '',
+			metres);
+		check('scripted abstract operator, inferred operands',
+			'var a = new Metres(2); var b = new Metres(3); return (a + b).describe();', '105m', '', metres);
+		check('scripted abstract operator with a plain operand',
+			'var a:Metres = new Metres(2); return (a * 3).describe();', '6m', '', metres);
+		check('scripted abstract compound assignment',
+			'var a:Metres = new Metres(2); a += new Metres(3); return a.describe();', '105m', '', metres);
+		check('scripted abstract opens to its declared target',
+			'var a:Metres = new Metres(2); var f:Float = a; return Std.string(f + 1);', '3', '', metres);
+		check('scripted abstract cast to its declared target',
+			'var a:Metres = new Metres(2); return Std.string((a : Float));', '2', '', metres);
+		check('scripted abstract in an array', 'var a:Array<Metres> = [new Metres(2)]; return a[0].describe();', '2m',
 			'', metres);
-		check('scripted abstract operator, inferred operands', 'var a = new Metres(2); var b = new Metres(3); return (a + b).describe();', '105m', '', metres);
-		check('scripted abstract operator with a plain operand', 'var a:Metres = new Metres(2); return (a * 3).describe();', '6m', '', metres);
-		check('scripted abstract compound assignment', 'var a:Metres = new Metres(2); a += new Metres(3); return a.describe();', '105m', '', metres);
-		check('scripted abstract opens to its declared target', 'var a:Metres = new Metres(2); var f:Float = a; return Std.string(f + 1);', '3', '', metres);
-		check('scripted abstract cast to its declared target', 'var a:Metres = new Metres(2); return Std.string((a : Float));', '2', '', metres);
-		check('scripted abstract in an array', 'var a:Array<Metres> = [new Metres(2)]; return a[0].describe();', '2m', '', metres);
 		check('scripted abstract returned from a method', 'return grow(new Metres(1)).describe();', '102m', '
 			static function grow(m:Metres):Metres {
 				return m + new Metres(1);
@@ -157,25 +185,27 @@ class Corpus {
 		at('host');
 		var colour:String = 'import OpColor;';
 		check('a host abstract constant', 'var c:OpColor = OpColor.RED; return Std.string(c.red);', '255', '', colour);
-		check('a host abstract constant, read-only accessor', 'var c:OpColor = OpColor.BLUE; return Std.string(c.alpha);',
-			'255', '', colour);
-		check('a host abstract method on a value', 'var c:OpColor = OpColor.RED; return c.toHexString();', 'FFFF0000', '',
-			colour);
-		check('a host abstract constant compared', 'var c:OpColor = OpColor.RED; return c == OpColor.RED ? "eq" : "ne";', 'eq',
+		check('a host abstract constant, read-only accessor',
+			'var c:OpColor = OpColor.BLUE; return Std.string(c.alpha);', '255', '', colour);
+		check('a host abstract method on a value', 'var c:OpColor = OpColor.RED; return c.toHexString();', 'FFFF0000',
 			'', colour);
-		check('a static method of a host abstract', 'return OpBlend.additive("add") ? "y" : "n";', 'y', '', 'import OpBlend;');
-		check('a static of a host abstract that is not a constant', 'var z:Int = OpVec.ZERO; return Std.string(z);', '0', '',
-			'import OpVec;');
+		check('a host abstract constant compared',
+			'var c:OpColor = OpColor.RED; return c == OpColor.RED ? "eq" : "ne";', 'eq', '', colour);
+		check('a static method of a host abstract', 'return OpBlend.additive("add") ? "y" : "n";', 'y', '',
+			'import OpBlend;');
+		check('a static of a host abstract that is not a constant', 'var z:Int = OpVec.ZERO; return Std.string(z);',
+			'0', '', 'import OpVec;');
 
 		/** A value annotated with the abstract it already is, which the cast used to wrap a second time. */
-		check('an enum abstract annotated with its own type', 'var a:HostAxes = HostAxes.XY; return Std.string(a.x);', 'true',
-			'', 'import HostAxes;');
-		check('an enum abstract annotated, an accessor that is false', 'var a:HostAxes = HostAxes.X; return Std.string(a.y);',
-			'false', '', 'import HostAxes;');
+		check('an enum abstract annotated with its own type', 'var a:HostAxes = HostAxes.XY; return Std.string(a.x);',
+			'true', '', 'import HostAxes;');
+		check('an enum abstract annotated, an accessor that is false',
+			'var a:HostAxes = HostAxes.X; return Std.string(a.y);', 'false', '', 'import HostAxes;');
 
 		at('modules');
 		check('interval as a value', 'var it = 0...3; var t = 0; while (it.hasNext()) t += it.next(); return t;', '3');
-		check('interval bound to a local then looped', 'var it = 1...4; var t = 0; for (v in it) t += v; return t;', '6');
+		check('interval bound to a local then looped', 'var it = 1...4; var t = 0; for (v in it) t += v; return t;',
+			'6');
 
 		check('module-level function', 'return helper(6);', '12', '', 'function helper(n:Int):Int return n * 2;');
 		check('module-level var', 'return offset;', '9', '', 'var offset:Int = 9;');
@@ -218,7 +248,8 @@ class Corpus {
 		// A plain field is reached by offset while a property on the SAME class must still go through
 		// its accessor. Getting that wrong reads the storage behind the property and silently skips
 		// the doubling, so the two are exercised together and the answer separates them.
-		check('plain field and property together', 'var t = new T(); t.raw = 3; t.value = 4; return t.raw + t.value;', '11', '
+		check('plain field and property together', 'var t = new T(); t.raw = 3; t.value = 4; return t.raw + t.value;',
+			'11', '
 			public var raw:Int = 0;
 			public var store:Int = 0;
 			public var value(get, set):Int;
@@ -245,10 +276,11 @@ class Corpus {
 
 		check('host property setter', 'var h = new HostBase(); h.scaled = 5; return h.scaled;', '10', null, host);
 		check('host property setter ran', 'var h = new HostBase(); h.scaled = 5; return h.writes;', '1', null, host);
-		check('host property setter twice', 'var h = new HostBase(); h.scaled = 1; h.scaled = 3; return h.writes;', '2', null, host);
+		check('host property setter twice', 'var h = new HostBase(); h.scaled = 1; h.scaled = 3; return h.writes;',
+			'2', null, host);
 		check('host property getter', 'var h = new HostBase(); h.shown = 4; return h.shown;', '5', null, host);
-		check('host plain field beside a property', 'var h = new HostBase(); h.kept = 2; h.scaled = 3; return h.kept + h.scaled;', '8',
-			null, host);
+		check('host plain field beside a property',
+			'var h = new HostBase(); h.kept = 2; h.scaled = 3; return h.kept + h.scaled;', '8', null, host);
 
 		// An array literal has nothing in it to say what it holds, so it used to be built loose while an
 		// annotation promised a specific kind. Reading it back through that annotation reinterprets the
@@ -319,14 +351,21 @@ class Corpus {
 		check('regex replace', 'var r = ~/[0-9]/g; return r.replace("a1b2", "#");', 'a#b#');
 
 		at('matching');
-		check('case guard taken', 'var a = 5; switch (a) { case v if (v > 3): return "big"; default: return "small"; }', 'big');
+		check('case guard taken',
+			'var a = 5; switch (a) { case v if (v > 3): return "big"; default: return "small"; }', 'big');
 		check('case guard falls through to later case',
-			'var a = 2; switch (a) { case 2 if (false): return "no"; case 2: return "yes"; default: return "?"; }', 'yes');
-		check('case guard falls to default', 'var a = 1; switch (a) { case 1 if (false): return "no"; default: return "d"; }', 'd');
-		check('case guard with multi value', 'var a = 3; switch (a) { case 1, 3 if (a > 2): return "hit"; default: return "miss"; }', 'hit');
-		check('typed catch selects clause', 'try { throw "boom"; } catch (e:Int) { return "int"; } catch (e:String) { return "str"; }', 'str');
-		check('typed catch first match wins', 'try { throw 7; } catch (e:Int) { return "int"; } catch (e:String) { return "str"; }', 'int');
-		check('typed catch falls to dynamic', 'try { throw 1.5; } catch (e:Int) { return "int"; } catch (e:Dynamic) { return "dyn"; }', 'dyn');
+			'var a = 2; switch (a) { case 2 if (false): return "no"; case 2: return "yes"; default: return "?"; }',
+			'yes');
+		check('case guard falls to default',
+			'var a = 1; switch (a) { case 1 if (false): return "no"; default: return "d"; }', 'd');
+		check('case guard with multi value',
+			'var a = 3; switch (a) { case 1, 3 if (a > 2): return "hit"; default: return "miss"; }', 'hit');
+		check('typed catch selects clause',
+			'try { throw "boom"; } catch (e:Int) { return "int"; } catch (e:String) { return "str"; }', 'str');
+		check('typed catch first match wins',
+			'try { throw 7; } catch (e:Int) { return "int"; } catch (e:String) { return "str"; }', 'int');
+		check('typed catch falls to dynamic',
+			'try { throw 1.5; } catch (e:Int) { return "int"; } catch (e:Dynamic) { return "dyn"; }', 'dyn');
 		check('catch binds the value', 'try { throw "x"; } catch (e:String) { return e + "!"; }', 'x!');
 
 		// A trap is a live entry on the VM's own stack, given back by falling out of the `try` that
@@ -335,13 +374,17 @@ class Corpus {
 		// wrong in whatever the function returned into, which is why the values below matter less
 		// than the fact that the process is still there to report them.
 		at('controlflow');
-		check('continue out of a try', 'var n = 0; for (i in 0...4) { try { if (i == 1) continue; n += i; } catch (e:Dynamic) {} } return n;',
+		check('continue out of a try',
+			'var n = 0; for (i in 0...4) { try { if (i == 1) continue; n += i; } catch (e:Dynamic) {} } return n;',
 			'5');
-		check('break out of a try', 'var n = 0; for (i in 0...4) { try { if (i == 2) break; n += i; } catch (e:Dynamic) {} } return n;', '1');
+		check('break out of a try',
+			'var n = 0; for (i in 0...4) { try { if (i == 2) break; n += i; } catch (e:Dynamic) {} } return n;', '1');
 		check('continue out of a try, many times',
-			'var n = 0; for (i in 0...200) { try { if (i % 2 == 0) continue; n += 1; } catch (e:Dynamic) {} } return n;', '100');
+			'var n = 0; for (i in 0...200) { try { if (i % 2 == 0) continue; n += 1; } catch (e:Dynamic) {} } return n;',
+			'100');
 		check('continue out of a try in a while',
-			'var n = 0; var i = 0; while (i < 4) { i++; try { if (i == 2) continue; n += i; } catch (e:Dynamic) {} } return n;', '8');
+			'var n = 0; var i = 0; while (i < 4) { i++; try { if (i == 2) continue; n += i; } catch (e:Dynamic) {} } return n;',
+			'8');
 		check('continue out of two nested trys',
 			'var n = 0; for (i in 0...3) { try { try { if (i == 1) continue; n += 1; } catch (e:Dynamic) {} } catch (e:Dynamic) {} } return n;',
 			'2');
@@ -355,7 +398,8 @@ class Corpus {
 			'101');
 		// A clause runs with the trap already given back, so leaving one gives back nothing.
 		check('continue from inside a catch',
-			'var n = 0; for (i in 0...4) { try { if (i == 1) throw "x"; n += i; } catch (e:Dynamic) { continue; } } return n;', '5');
+			'var n = 0; for (i in 0...4) { try { if (i == 1) throw "x"; n += i; } catch (e:Dynamic) { continue; } } return n;',
+			'5');
 
 		check('null-safe field, present', 'var o = {a: 5}; return o?.a;', '5');
 		check('null-safe field, null', 'var o:Dynamic = null; return o?.a;', 'null');
@@ -374,17 +418,36 @@ class Corpus {
 		check('map literal, int keys', 'var m = [1 => "x", 2 => "y"]; return m.get(2);', 'y');
 		check('map literal, exists', "var m = ['a' => 1]; return m.exists('a') && !m.exists('b') ? 'ok' : 'no';", 'ok');
 		check('map literal, empty then set', "var m = ['a' => 1]; m.set('c', 9); return Std.string(m.get('c'));", '9');
-		check('key-value for over map', "var m = ['a' => 1, 'b' => 2]; var t = 0; for (k => v in m) t += v; return t;", '3');
+		check('key-value for over map',
+			"var m = ['a' => 1, 'b' => 2]; var t = 0; for (k => v in m) t += v; return t;", '3');
 		check('key-value for keys', "var m = ['a' => 1]; var s = ''; for (k => v in m) s += k; return s;", 'a');
-		check('key-value for over array', 'var a = [10, 20, 30]; var t = 0; for (i => v in a) t += i * v; return t;', '80');
+		check('key-value for over array', 'var a = [10, 20, 30]; var t = 0; for (i => v in a) t += i * v; return t;',
+			'80');
 
 		// hxcpp cannot tell a whole Float from an Int inside a Dynamic, so a running total declared
 		// Float used to be added as an Int and wrapped at two billion. These accumulate past that.
 		at('numbers');
-		check('float total past the int limit', 'var t:Float = 0; var i:Int = 0; while (i < 100) { t = t + 100000000; i++; } return t;', '10000000000');
-		check('float total, compound assign', 'var t:Float = 0; var i:Int = 0; while (i < 100) { t += 100000000; i++; } return t;', '10000000000');
-		check('float total, subtracting', 'var t:Float = 0; var i:Int = 0; while (i < 100) { t -= 100000000; i++; } return t;', '-10000000000');
-		check('int multiply still wraps', 'var s:Int = 123456789; s = s * 1103515245; return s & 1073741823;', '231782385');
+		check('float total past the int limit',
+			'var t:Float = 0; var i:Int = 0; while (i < 100) { t = t + 100000000; i++; } return t;', '10000000000');
+		check('float total, compound assign',
+			'var t:Float = 0; var i:Int = 0; while (i < 100) { t += 100000000; i++; } return t;', '10000000000');
+		check('float total, subtracting',
+			'var t:Float = 0; var i:Int = 0; while (i < 100) { t -= 100000000; i++; } return t;', '-10000000000');
+		check('int multiply still wraps', 'var s:Int = 123456789; s = s * 1103515245; return s & 1073741823;',
+			'231782385');
+
+		// The same total through a field of a class the HOST compiled, which is the shape a script
+		// reaches for far more often than a local: an engine object's own counter. Nothing at runtime
+		// says what a host field holds, so this used to wrap where every compiled mode did not, and
+		// the benchmark that caught it reported -1455759936 against 1999999000000.
+		check('float total through a host field',
+			'var h = new HostBase(); var i:Int = 0; while (i < 100) { h.tally = h.tally + 100000000; i++; } return h.tally;',
+			'10000000000', null, 'import HostBase;');
+		check('float total through a host field, compound assign',
+			'var h = new HostBase(); var i:Int = 0; while (i < 100) { h.tally += 100000000; i++; } return h.tally;',
+			'10000000000', null, 'import HostBase;');
+		check('int static still wraps', 'return step();', '-2147483648', 'static var edge:Int = 2147483647;
+			static function step():Int { edge = edge + 1; return edge; }');
 
 		at('stdlib');
 		check('string interpolation, ident', "var n = 5; return 'n is $n';", 'n is 5');
@@ -425,37 +488,50 @@ class Corpus {
 		// An enum abstract whose constants collide with its own accessors, which forces the wrapper to
 		// build them eagerly while the class is still booting. Reaching one used to end the process
 		// before anything ran, so the value here matters less than the case existing at all.
-		check('an enum abstract whose constant collides with an accessor', 'return Std.string(HostAxes.XY);', '17', null, 'import HostAxes;');
+		check('an enum abstract whose constant collides with an accessor', 'return Std.string(HostAxes.XY);', '17',
+			null, 'import HostAxes;');
 		check('safe navigation', 'var o:Dynamic = null; return Std.string(o?.x);', 'null');
 		check('arrow function', 'var f = x -> x * 2; return f(4);', '8');
 		check('closure capture', 'var n = 3; var f = function() return n * 2; return f();', '6');
-		check('switch on string', 'var s = "b"; switch (s) { case "a": return 1; case "b": return 2; default: return 0; }', '2');
-		check('switch or-pattern', 'var i = 3; switch (i) { case 1 | 3: return "odd"; default: return "even"; }', 'odd');
-		check('switch with guard', 'var i = 7; switch (i) { case n if (n > 5): return "big"; default: return "small"; }', 'big');
+		check('switch on string',
+			'var s = "b"; switch (s) { case "a": return 1; case "b": return 2; default: return 0; }', '2');
+		check('switch or-pattern', 'var i = 3; switch (i) { case 1 | 3: return "odd"; default: return "even"; }',
+			'odd');
+		check('switch with guard',
+			'var i = 7; switch (i) { case n if (n > 5): return "big"; default: return "small"; }', 'big');
 		check('string interpolation', "var n = 5; return 'n is ${n}';", 'n is 5');
 		check('nested function', 'function inner(a:Int) return a + 1; return inner(4);', '5');
 		check('final local', 'final n = 4; return n * 2;', '8');
 		check('untyped passthrough', 'return untyped 5;', '5');
-		check('multi catch', 'try { throw "x"; } catch (e:Int) { return "int"; } catch (e:String) { return "str"; }', 'str');
+		check('multi catch', 'try { throw "x"; } catch (e:Int) { return "int"; } catch (e:String) { return "str"; }',
+			'str');
 		check('static extension', 'return "ab".startsWith("a") ? "y" : "n";', 'y', '', 'using StringTools;');
-		check('instance field', 'var t = new T(); t.n = 6; return t.n;', '6', 'public var n:Int = 0;\n\tpublic function new() {}');
-		check('instance method', 'return new T().twice(4);', '8', 'public function new() {}\n\tpublic function twice(a:Int) return a * 2;');
-		check('property accessors', 'var t = new T(); t.v = 5; return t.v;',
-			'10', 'public var v(get, set):Int;\n\tvar raw:Int = 0;\n\tpublic function new() {}\n\tfunction get_v() return raw * 2;\n\tfunction set_v(x:Int) { raw = x; return x; }');
+		check('instance field', 'var t = new T(); t.n = 6; return t.n;', '6',
+			'public var n:Int = 0;\n\tpublic function new() {}');
+		check('instance method', 'return new T().twice(4);', '8',
+			'public function new() {}\n\tpublic function twice(a:Int) return a * 2;');
+		check('property accessors', 'var t = new T(); t.v = 5; return t.v;', '10',
+			'public var v(get, set):Int;\n\tvar raw:Int = 0;\n\tpublic function new() {}\n\tfunction get_v() return raw * 2;\n\tfunction set_v(x:Int) { raw = x; return x; }');
 
-		check('switch array destructure', 'var a = [1, 2]; switch (a) { case [x, y]: return x * 10 + y; default: return 0; }', '12');
-		check('switch object pattern', 'var o = {k: 3}; switch (o) { case {k: 3}: return "hit"; default: return "miss"; }', 'hit');
-		check('switch nested array', 'var a = [[1, 2]]; switch (a) { case [[x, y]]: return x + y; default: return 0; }', '3');
+		check('switch array destructure',
+			'var a = [1, 2]; switch (a) { case [x, y]: return x * 10 + y; default: return 0; }', '12');
+		check('switch object pattern',
+			'var o = {k: 3}; switch (o) { case {k: 3}: return "hit"; default: return "miss"; }', 'hit');
+		check('switch nested array',
+			'var a = [[1, 2]]; switch (a) { case [[x, y]]: return x + y; default: return 0; }', '3');
 
 		at('closures');
-		check('sibling closures share a name', 'var out = [];'
+		check('sibling closures share a name',
+			'var out = [];'
 			+ ' var a = function() return [for (i in 0...3) i].join(",");'
 			+ ' var b = function() { var i = 0; while (i < 3) i++; return i; };'
-			+ ' out.push(a()); out.push(b()); return out.join("/");', '0,1,2/3');
+			+ ' out.push(a()); out.push(b()); return out.join("/");',
+			'0,1,2/3');
 
-		check('sibling closures, for and for', 'var a = function() { var t = 0; for (i in 0...4) t += i; return t; };'
-			+ ' var b = function() { var i = 9; return i; };'
-			+ ' return a() + "/" + b();', '6/9');
+		check('sibling closures, for and for',
+			'var a = function() { var t = 0; for (i in 0...4) t += i; return t; };' +
+			' var b = function() { var i = 9; return i; };' + ' return a() + "/" + b();',
+			'6/9');
 
 		check('capture still boxes', 'var n = 1; var bump = function() n = n + 10; bump(); return n;', '11');
 
@@ -469,41 +545,44 @@ class Corpus {
 			'public function new() {}');
 
 		at('inheritance');
-		check('super call', 'return new Child().speak();', 'base then child',
-			null,
-			'class Base { public function new() {} public function speak():String return "base"; }\n'
-			+ 'class Child extends Base { public function new() { super(); } '
-			+ 'override public function speak():String return super.speak() + " then child"; }');
+		check('super call', 'return new Child().speak();', 'base then child', null,
+			'class Base { public function new() {} public function speak():String return "base"; }\n' +
+			'class Child extends Base { public function new() { super(); } ' +
+			'override public function speak():String return super.speak() + " then child"; }');
 
-		check('super constructor with an argument', 'return new Child(7).total();', '9',
-			null,
-			'class Base { var n:Int; public function new(n:Int) { this.n = n; } public function total():Int return n; }\n'
-			+ 'class Child extends Base { public function new(n:Int) { super(n + 2); } }');
+		check('super constructor with an argument', 'return new Child(7).total();', '9', null,
+			'class Base { var n:Int; public function new(n:Int) { this.n = n; } public function total():Int return n; }\n' +
+			'class Child extends Base { public function new(n:Int) { super(n + 2); } }');
 
-		check('super field read', 'return new Child().borrowed();', 'held',
-			null,
-			'class Base { public var kept:String; public function new() { kept = "held"; } }\n'
-			+ 'class Child extends Base { public function new() { super(); } '
-			+ 'public function borrowed():String return super.kept; }');
+		check('super field read', 'return new Child().borrowed();', 'held', null,
+			'class Base { public var kept:String; public function new() { kept = "held"; } }\n' +
+			'class Child extends Base { public function new() { super(); } ' +
+			'public function borrowed():String return super.kept; }');
 
 		at('shapes');
 		check('a do while', 'var i = 0; var n = 0; do { n += i; i++; } while (i < 5); return n;', '10');
-		check('a nested function calling itself', 'return fact(5);', '120', 'static function fact(n:Int):Int { return n <= 1 ? 1 : n * fact(n - 1); }');
+		check('a nested function calling itself', 'return fact(5);', '120',
+			'static function fact(n:Int):Int { return n <= 1 ? 1 : n * fact(n - 1); }');
 		check('a function value in a local', 'var f = function(x:Int):Int return x * 3; return f(4);', '12');
 		check('a function value passed along', 'return apply(function(x:Int):Int return x + 1, 41);', '42',
 			'static function apply(f:Int->Int, v:Int):Int { return f(v); }');
-		check('a typed catch', 'try { throw "boom"; } catch (e:String) { return "got " + e; } return "no";', 'got boom');
-		check('a rethrow', 'try { try { throw "inner"; } catch (e:Dynamic) { throw e; } } catch (e:Dynamic) { return "out " + e; } return "no";',
+		check('a typed catch', 'try { throw "boom"; } catch (e:String) { return "got " + e; } return "no";',
+			'got boom');
+		check('a rethrow',
+			'try { try { throw "inner"; } catch (e:Dynamic) { throw e; } } catch (e:Dynamic) { return "out " + e; } return "no";',
 			'out inner');
 		check('a comprehension with a guard', 'return [for (i in 0...10) if (i % 3 == 0) i].join(",");', '0,3,6,9');
 		check('a map literal read back', 'var m = ["a" => 1, "b" => 2]; return m["a"] + m["b"];', '3');
 		check('a nested structure', 'var o = {a: {b: 7}}; return o.a.b;', '7');
 		check('an array of arrays', 'var g = [[1, 2], [3, 4]]; return g[1][0] + g[0][1];', '5');
-		check('a static calling a static', 'return outer(3);', '12', 'static function inner(n:Int):Int { return n * 3; } static function outer(n:Int):Int { return inner(n) + 3; }');
+		check('a static calling a static', 'return outer(3);', '12',
+			'static function inner(n:Int):Int { return n * 3; } static function outer(n:Int):Int { return inner(n) + 3; }');
 		check('a string built in a loop', 'var s = ""; for (i in 0...4) s += i; return s;', '0123');
-		check('a while with a break and a continue', 'var i = 0; var n = 0; while (true) { i++; if (i > 8) break; if (i % 2 == 0) continue; n += i; } return n;',
+		check('a while with a break and a continue',
+			'var i = 0; var n = 0; while (true) { i++; if (i > 8) break; if (i % 2 == 0) continue; n += i; } return n;',
 			'16');
-		check('a switch on a string', 'var s = "b"; switch (s) { case "a": return 1; case "b": return 2; default: return 3; }', '2');
+		check('a switch on a string',
+			'var s = "b"; switch (s) { case "a": return 1; case "b": return 2; default: return 3; }', '2');
 		check('a ternary chain', 'var n = 7; return n < 5 ? "low" : n < 10 ? "mid" : "high";', 'mid');
 
 		at('arguments');
@@ -535,20 +614,24 @@ class Corpus {
 		// carries a constructor's signature, so this is the half that had to be recorded to be asked.
 		var shaped:String = 'import HostShaped;';
 
-		check('a host optional in the middle left out', 'var p = new HostShaped("p"); return new HostShaped("c", p).shape();', 'c/-/p',
+		check('a host optional in the middle left out',
+			'var p = new HostShaped("p"); return new HostShaped("c", p).shape();', 'c/-/p', null, shaped);
+
+		check('a host optional in the middle given',
+			'var p = new HostShaped("p"); return new HostShaped("c", new HostTint("red"), p).shape();', 'c/red/p',
 			null, shaped);
 
-		check('a host optional in the middle given', 'var p = new HostShaped("p"); return new HostShaped("c", new HostTint("red"), p).shape();',
-			'c/red/p', null, shaped);
-
-		check('a host optional at the end left out', 'return new HostShaped("c", new HostTint("red")).shape();', 'c/red/-', null, shaped);
+		check('a host optional at the end left out', 'return new HostShaped("c", new HostTint("red")).shape();',
+			'c/red/-', null, shaped);
 
 		check('every host optional left out', 'return new HostShaped("c").shape();', 'c/-/-', null, shaped);
 
 		// The same call written as a `super`, which reaches the base through a bridge rather than
 		// through `new` and so is a separate path on every backend.
-		check('a host optional in the middle left out of a super', 'var p = new HostShaped("p"); return new Sub("c", p).shape();', 'c/-/p',
-			null, shaped + '\nclass Sub extends HostShaped { public function new(label:String, ?held:HostShaped) { super(label, held); } }');
+		check('a host optional in the middle left out of a super',
+			'var p = new HostShaped("p"); return new Sub("c", p).shape();', 'c/-/p', null,
+			shaped +
+			'\nclass Sub extends HostShaped { public function new(label:String, ?held:HostShaped) { super(label, held); } }');
 
 		// Placing an argument means looking at it, and what a script holds an abstract in is a wrapper
 		// around the value rather than the value. Every other call unwraps one on the way through and
@@ -557,11 +640,10 @@ class Corpus {
 			'public var seen:Float; public function new(v:HostVec) { seen = v.x; }', 'import HostVec;');
 
 		at('inheritance');
-		check('an override through a base reference', 'var v:Base = new Child(); return v.speak();', 'child',
-			null,
-			'class Base { public function new() {} public function speak():String return "base"; }\n'
-			+ 'class Child extends Base { public function new() { super(); } '
-			+ 'override public function speak():String return "child"; }');
+		check('an override through a base reference', 'var v:Base = new Child(); return v.speak();', 'child', null,
+			'class Base { public function new() {} public function speak():String return "base"; }\n' +
+			'class Child extends Base { public function new() { super(); } ' +
+			'override public function speak():String return "child"; }');
 
 		check('a method calling another on this', 'return new T().outer();', '21',
 			'public function new() {} public function inner():Int return 21; public function outer():Int return inner();');
@@ -574,14 +656,12 @@ class Corpus {
 		check('a method calling another on this with two arguments', 'return new T().outer();', '11',
 			'public function new() {} public function inner(a:Int, b:Float):Int return a + Std.int(b); public function outer():Int return inner(4, 7.5);');
 
-		check('a field set by the base and read by the child', 'return new Child().read();', '7',
-			null,
-			'class Base { public var kept:Int; public function new() { kept = 7; } }\n'
-			+ 'class Child extends Base { public function new() { super(); } '
-			+ 'public function read():Int return kept; }');
+		check('a field set by the base and read by the child', 'return new Child().read();', '7', null,
+			'class Base { public var kept:Int; public function new() { kept = 7; } }\n' +
+			'class Child extends Base { public function new() { super(); } ' +
+			'public function read():Int return kept; }');
 
-		check('super two deep', 'return new C().name();', 'A/B/C',
-			null,
+		check('super two deep', 'return new C().name();', 'A/B/C', null,
 			'class A { public function new() {} public function name():String return "A"; }\n'
 			+ 'class B extends A { public function new() { super(); } '
 			+ 'override public function name():String return super.name() + "/B"; }\n'

@@ -561,9 +561,19 @@ class Interp {
 	 * @return The sum.
 	 */
 	function addExpr(e1:Expr, e2:Expr):Dynamic {
-		var a:Dynamic = expr(e1);
-		var b:Dynamic = expr(e2);
+		return addValues(expr(e1), expr(e2), e1, e2);
+	}
 
+	/**
+	 * Adds two values already in hand, promoting a carry when either side is not known to be an `Int`.
+	 *
+	 * @param a The left value.
+	 * @param b The right value.
+	 * @param e1 The expression `a` came from, asked only on a carry.
+	 * @param e2 The expression `b` came from, asked only on a carry.
+	 * @return The sum.
+	 */
+	function addValues(a:Dynamic, b:Dynamic, e1:Expr, e2:Expr):Dynamic {
 		if (a is Int && b is Int) {
 			/**
 			 * `Std.int` rather than a cast, because `v is Int` is true of a whole `Float` on every
@@ -591,9 +601,19 @@ class Interp {
 	 * @return The difference.
 	 */
 	function subExpr(e1:Expr, e2:Expr):Dynamic {
-		var a:Dynamic = expr(e1);
-		var b:Dynamic = expr(e2);
+		return subValues(expr(e1), expr(e2), e1, e2);
+	}
 
+	/**
+	 * Subtracts two values already in hand, on the same terms `addValues` gives.
+	 *
+	 * @param a The left value.
+	 * @param b The right value.
+	 * @param e1 The expression `a` came from, asked only on a carry.
+	 * @param e2 The expression `b` came from, asked only on a carry.
+	 * @return The difference.
+	 */
+	function subValues(a:Dynamic, b:Dynamic, e1:Expr, e2:Expr):Dynamic {
 		if (a is Int && b is Int) {
 			/**
 			 * `Std.int` rather than a cast, because `v is Int` is true of a whole `Float` on every
@@ -634,14 +654,77 @@ class Interp {
 		return switch (ExprTools.expr(e)) {
 			case EParent(inner) | ECheckType(inner, _): widensNumbers(inner);
 			case EIdent(id): promoting(locals.get(id));
-			/** `this.total` is the one field shape reachable without evaluating a receiver twice. */
-			case EField(owner, f, _):
-				switch (ExprTools.expr(owner)) {
-					case EIdent('this'): promoting(locals.get(f));
-					case _: false;
-				}
+			case EField(owner, f, _): fieldWidens(owner, f);
 			case _: false;
 		}
+	}
+
+	/**
+	 * Whether a field read should promote an addition that carried past `Int`.
+	 *
+	 * **A whole `Float` is an `Int` as far as hxcpp is concerned.** `2.0` held as `Dynamic` answers
+	 * true to `is Int` and `TInt` to `Type.typeof`, and so does the same value read straight out of a
+	 * field declared `Float`. So nothing about the value says which it is, and the declared type is
+	 * the only thing that can.
+	 *
+	 * The interpreter has that type for its own slots and does not have it for a field of a class the
+	 * host compiled: Haxe keeps no field types at runtime, and the build's type index records what a
+	 * type is rather than what its fields hold. So a field of a host object is genuinely unknown, and
+	 * the question is what to assume about one.
+	 *
+	 * **Unknown promotes.** `sink.total = sink.total + i` against a `Float` field is what a script
+	 * accumulating a total looks like, and wrapping it produced `-1455759936` where every compiled
+	 * mode produced `1999999000000`: a wrong number, silently, in the shape this is most used in.
+	 * Assuming the other way costs a host field really declared `Int` its wraparound at 2^31, which is
+	 * a shape scripts reach for deliberately and almost always through bitwise operators, and those
+	 * never come here.
+	 *
+	 * @param owner The receiver expression.
+	 * @param f The field being read.
+	 * @return Whether to compute in `Float`.
+	 */
+	function fieldWidens(owner:Expr, f:String):Bool {
+		var slot:Null<Variable> = null;
+
+		switch (ExprTools.expr(owner)) {
+			case EIdent('this'):
+				/**
+				 * Its own slots are the locals here. A name missing from them is a field of the host
+				 * class this one extends, which is as unknown as any other host field.
+				 */
+				slot = locals.get(f);
+
+			case EIdent(id):
+				/**
+				 * Read rather than evaluated, so asking cannot run anything twice. A receiver this
+				 * cannot read without evaluating falls through to the unknown answer.
+				 */
+				var l:Variable = locals.get(id);
+				if (l == null)
+					return true;
+
+				slot = slotOf(l.r, f);
+
+			case _:
+				return true;
+		}
+
+		/** Nothing declared it, so nothing says it is an `Int`, so it promotes. */
+		return slot == null ? true : promoting(slot);
+	}
+
+	/**
+	 * @param receiver A value a field is being read from.
+	 * @param f The field's name.
+	 * @return Its slot when the receiver is a scripted instance carrying one, or null when the
+	 *         receiver is something the host compiled and nothing at runtime says what its fields hold.
+	 */
+	function slotOf(receiver:Dynamic, f:String):Null<Variable> {
+		if (!(receiver is IScriptedInstance))
+			return null;
+
+		var slots:Map<String, Variable> = @:privateAccess (cast receiver : IScriptedInstance).__vars;
+		return slots == null ? null : slots.get(f);
 	}
 
 	/**
@@ -823,18 +906,24 @@ class Interp {
 	 * and the same reason: `t += n` on a `var t:Float` is a total being accumulated, and nothing about
 	 * the values says so once a whole `Float` reads back as an `Int`.
 	 *
+	 * Asking whether it widens costs a slot lookup and sometimes a reach into the receiver, and only
+	 * an addition that carried past `Int` cares about the answer. So the operands come in as
+	 * expressions and the question is asked where it is needed rather than on the way in: measured on
+	 * `s += o.a`, asking every time cost 15%.
+	 *
 	 * @param op The compound operator token.
 	 * @param v1 The current value.
 	 * @param v2 The right-hand value.
-	 * @param wide Whether either side was declared wider than an `Int`.
+	 * @param e1 The target expression, for deciding a carry.
+	 * @param e2 The right-hand expression, for the same.
 	 * @return The combined value.
 	 */
-	function combine(op:String, v1:Dynamic, v2:Dynamic, wide:Bool):Dynamic {
+	function combine(op:String, v1:Dynamic, v2:Dynamic, e1:Expr, e2:Expr):Dynamic {
 		switch (op) {
 			case "+=":
-				return numAdd(v1, v2, wide);
+				return addValues(v1, v2, e1, e2);
 			case "-=":
-				return numSub(v1, v2, wide);
+				return subValues(v1, v2, e1, e2);
 			case "*=":
 				return numMul(v1, v2);
 			case "/=":
@@ -973,16 +1062,15 @@ class Interp {
 	 */
 	function evalAssignOp(op:String, e1:Expr, e2:Expr):Dynamic {
 		var v;
-		var wide:Bool = widensNumbers(e1) || widensNumbers(e2);
 
 		switch (ExprTools.expr(e1)) {
 			case EIdent(id):
 				var l:Variable = hasCaptures ? null : locals.get(id);
 				if (l != null) {
-					v = combine(op, readLocal(l, id), expr(e2), wide);
+					v = combine(op, readLocal(l, id), expr(e2), e1, e2);
 					writeLocal(l, id, v);
 				} else {
-					v = combine(op, expr(e1), expr(e2), wide);
+					v = combine(op, expr(e1), expr(e2), e1, e2);
 
 					if (locals.exists(id)) {
 						setLocal(id, v);
@@ -992,19 +1080,19 @@ class Interp {
 				}
 			case EField(e, f, _):
 				var obj = expr(e);
-				v = combine(op, get(obj, f), expr(e2), wide);
+				v = combine(op, get(obj, f), expr(e2), e1, e2);
 				v = set(obj, f, v);
 			case EArray(e, index):
 				var arr:Dynamic = expr(e);
 				var index:Dynamic = expr(index);
 				if (isMap(arr)) {
-					v = combine(op, getMapValue(arr, index), expr(e2), wide);
+					v = combine(op, getMapValue(arr, index), expr(e2), e1, e2);
 					setMapValue(arr, index, v);
 				} else if (arr is AbstractValue) {
-					v = combine(op, abstractGetIndex(arr, index), expr(e2), wide);
+					v = combine(op, abstractGetIndex(arr, index), expr(e2), e1, e2);
 					abstractSetIndex(arr, index, v);
 				} else {
-					v = combine(op, arr[index], expr(e2), wide);
+					v = combine(op, arr[index], expr(e2), e1, e2);
 					arr[index] = v;
 				}
 			default:

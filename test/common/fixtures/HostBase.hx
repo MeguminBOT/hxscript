@@ -13,6 +13,15 @@ class HostBase {
 	public var kept:Int = 0;
 
 	/**
+	 * A running total, declared `Float`, for accumulating past what an `Int` holds.
+	 *
+	 * hxcpp cannot tell a whole `Float` from an `Int` inside a `Dynamic`, and Haxe keeps no field
+	 * types at runtime, so a script adding into this has nothing to say which it is. It is here
+	 * because getting that wrong is silent: the total simply wraps and reads as a plausible negative.
+	 */
+	public var tally:Float = 0;
+
+	/**
 	 * A property whose setter does more than store.
 	 *
 	 * A property of a compiled class has storage of its own name, so a write that reaches the storage

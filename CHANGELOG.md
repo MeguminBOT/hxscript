@@ -52,6 +52,27 @@
   ones still read through a call can be found and given a real home. `-D hxscript_verbose` names them
   as they happen.
 
+### Fixed
+
+- **A running total accumulated through a field of a host class wrapped at two billion.** hxcpp
+  cannot tell a whole `Float` from an `Int`: `2.0` held as `Dynamic` answers true to `is Int` and
+  `TInt` to `Type.typeof`, and so does the same value read straight out of a field declared `Float`.
+  The declared type is the only thing that can say which it is, and the interpreter had that for its
+  own slots and not for a field of a class the host compiled, since Haxe keeps no field types at
+  runtime and the build's type index records what a type is rather than what its fields hold.
+
+  So `sink.total = sink.total + i` against a `Float` field was added as an `Int` and wrapped, which
+  `CppiaHostBench` had been reporting for some time as `-1455759936` where every compiled mode said
+  `1999999000000`. A field nothing declares now promotes rather than wrapping. That costs a host field
+  really declared `Int` its wraparound at 2^31, which is a shape scripts reach for deliberately and
+  almost always through bitwise operators, and those never come this way. A field of a scripted
+  object is still read from its own slot and still wraps when that slot says `Int`.
+
+  Asking the question got cheaper at the same time. `x += y` used to work out whether either side
+  widens before doing anything, and only an addition that carries past `Int` cares about the answer,
+  so it is asked on the carry instead: `field` 118 to 111, `fieldGuard` 120 to 114, `instFieldGuard`
+  82 to 68.
+
 ### Changed
 
 - **Operator dispatch is a jump table instead of a table of closures, worth 16 to 23% across the
