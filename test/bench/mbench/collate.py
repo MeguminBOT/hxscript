@@ -117,6 +117,10 @@ def chart(title, unit, pairs, sort=True):
 # ---------------------------------------------------------------- the list
 
 print(f"\n### Every case, microseconds per iteration at {REF:,}\n")
+print("**Lower is faster**, except the two `vs interpreted` rows in the summary, which are")
+print("speedups where a bigger multiple is better, and `break-even`, where a smaller count")
+print("means compiling repays sooner.")
+print("")
 print("One row per case, and the only per-case table in this document. `kind` is which average the")
 print("row feeds: `op` and `call` are averaged separately because they differ by design rather than")
 print("by degree. `unwind` cases are in neither, being dominated by how each mode implements")
@@ -159,8 +163,8 @@ base = tot.get("interp") or 1.0
 print(f"\n### Summary, over the {len(sh)} cases every mode ran\n")
 print("| | " + " | ".join(LABEL[m] for m in MODES) + " |")
 print("| --- |" + " --- |" * len(MODES))
-print(f"| us per operation ({len(perop)} cases) | " + " | ".join("%.3f" % avg(m, perop, REF) for m in MODES) + " |")
-print(f"| us per call ({len(callc)} cases) | " + " | ".join("%.3f" % avg(m, callc, REF) for m in MODES) + " |")
+print(f"| us per operation ({len(perop)} cases), lower is faster | " + " | ".join("%.3f" % avg(m, perop, REF) for m in MODES) + " |")
+print(f"| us per call ({len(callc)} cases), lower is faster | " + " | ".join("%.3f" % avg(m, callc, REF) for m in MODES) + " |")
 
 # Ratios per kind, not a ratio of totals. A total is a sum over cases of wildly different cost, so
 # whichever case is slowest in a given mode decides it: `tryCatch` alone is most of the cppia total,
@@ -170,9 +174,9 @@ def ratio(m, cases):
     return "%.1fx" % (a / b) if b else "n/a"
 
 
-print("| operation, vs interpreted | " + " | ".join(ratio(m, perop) for m in MODES) + " |")
-print("| call, vs interpreted | " + " | ".join(ratio(m, callc) for m in MODES) + " |")
-print("| corpus total, ms | " + " | ".join("%.0f" % tot[m] for m in MODES) + " |")
+print("| operation, vs interpreted, higher is faster | " + " | ".join(ratio(m, perop) for m in MODES) + " |")
+print("| call, vs interpreted, higher is faster | " + " | ".join(ratio(m, callc) for m in MODES) + " |")
+print("| corpus total, ms, lower is faster | " + " | ".join("%.0f" % tot[m] for m in MODES) + " |")
 
 # Name what the total is made of, so nobody quotes it as a speedup.
 worst = {}
@@ -205,7 +209,7 @@ print("a module, interpreting finishes first.")
 print("")
 print("| | " + " | ".join(LABEL[m] for m in MODES) + " |")
 print("| --- |" + " --- |" * len(MODES))
-print("| prepare, ms | " + " | ".join(str(prep.get(m, "n/a")) for m in MODES) + " |")
+print("| prepare, ms, lower is faster | " + " | ".join(str(prep.get(m, "n/a")) for m in MODES) + " |")
 
 interp_op = avg("interp", perop, REF) if "interp" in MODES else 0.0
 row = []
@@ -216,4 +220,4 @@ for m in MODES:
     extra_ms = float(prep[m]) - float(prep.get("interp", 0) or 0)
     saved_us = interp_op - avg(m, perop, REF)
     row.append("%s" % f"{int(extra_ms * 1000.0 / saved_us):,}" if saved_us > 0 else "never")
-print("| break-even, operations | " + " | ".join(row) + " |")
+print("| break-even, operations, lower repays sooner | " + " | ".join(row) + " |")

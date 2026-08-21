@@ -4,6 +4,10 @@ A log of what has been optimized, what it cost before, and how it was measured. 
 [`test/bench/Bench.hx`](../test/bench/Bench.hx), a micro-benchmark whose cases are chosen so a gain
 can be attributed to a specific change rather than to "things feel faster".
 
+**Every number on this page is milliseconds, so lower is faster.** A table showing `before` and
+`now` is an improvement when `now` is the smaller of the two. The only figures that read the other
+way are the explicit `Nx` speedups, where a bigger multiple is better, and they say so.
+
 ## Running it
 
 ```
@@ -549,7 +553,7 @@ Constructing one used to copy the class's whole variable table into the new inst
 so a host's script API cost something per object spawned and the cost grew with the API. Measured by
 binding values into a world and timing construction:
 
-| bound values | before | after |
+| bound values | before, ms | after, ms |
 | --- | --- | --- |
 | 8 | 5.74us | 4.57us |
 | 18 | 6.60us | 3.95us |
@@ -602,7 +606,7 @@ that never write a typed variable: `blocks`, `neg`, `indexSet`, `call_cap20`, `n
 whether or not it uses the feature. Packed into one `Int`, low three bits the plan and the rest the
 stamp, with the name derived from the plan for the complaint:
 
-| | three fields | one packed field |
+| lower is faster | three fields | one packed field |
 | --- | --- | --- |
 | `varTyped` | 79 | 74 |
 | `varTypedObj` | 133 | 124 |

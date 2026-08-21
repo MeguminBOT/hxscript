@@ -115,6 +115,10 @@ that a fixed per-call cost would show up as scale sensitivity, and nothing has r
 
 ### Every case, microseconds per iteration at 100,000
 
+**Lower is faster**, except the two `vs interpreted` rows in the summary, which are
+speedups where a bigger multiple is better, and `break-even`, where a smaller count
+means compiling repays sooner.
+
 One row per case, and the only per-case table in this document. `kind` is which average the
 row feeds: `op` and `call` are averaged separately because they differ by design rather than
 by degree. `unwind` cases are in neither, being dominated by how each mode implements
@@ -176,11 +180,11 @@ constructs a hot script actually uses, not from the language's edges.
 
 | | interpreted | cppia | cppia + JIT |
 | --- | --- | --- | --- |
-| us per operation (29 cases) | 1.569 | 0.064 | 0.043 |
-| us per call (6 cases) | 2.669 | 0.059 | 0.027 |
-| operation, vs interpreted | 1.0x | 24.6x | 36.3x |
-| call, vs interpreted | 1.0x | 45.5x | 98.5x |
-| corpus total, ms | 8056 | 500 | 160 |
+| us per operation (29 cases), lower is faster | 1.569 | 0.064 | 0.043 |
+| us per call (6 cases), lower is faster | 2.669 | 0.059 | 0.027 |
+| operation, vs interpreted, higher is faster | 1.0x | 24.6x | 36.3x |
+| call, vs interpreted, higher is faster | 1.0x | 45.5x | 98.5x |
+| corpus total, ms, lower is faster | 8056 | 500 | 160 |
 
 The total row is a sum over cases of very different cost, so it is not a speedup and should
 not be quoted as one. The single largest case in each column takes 16% (`classNew`) of interpreted, 51% (`tryCatch`) of cppia, 11% (`hostStatic`) of cppia + JIT. The two
@@ -214,8 +218,8 @@ a module, interpreting finishes first.
 
 | | interpreted | cppia | cppia + JIT |
 | --- | --- | --- | --- |
-| prepare, ms | 1.196 | 9.862 | 10.598 |
-| break-even, operations | n/a | 5,758 | 6,164 |
+| prepare, ms, lower is faster | 1.196 | 9.862 | 10.598 |
+| break-even, operations, lower repays sooner | n/a | 5,758 | 6,164 |
 
 <!-- END GENERATED -->
 
