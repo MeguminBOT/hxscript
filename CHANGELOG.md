@@ -54,6 +54,20 @@
 
 ### Changed
 
+- **Operator dispatch is a jump table instead of a table of closures, worth 16 to 23% across the
+  interpreter.** `binops` was a `Map<String, Expr->Expr->Dynamic>` built per interpreter, so every
+  operator cost a string hash, a null test and a call through a closure field, and every interpreter
+  allocated thirty-eight closures and a map before running anything. A scripted class gets its own
+  interpreter, so that was thirty-eight per class too.
+
+  Switching on the operator token is worse than the map, which is worth knowing because it is the
+  obvious fix: hxcpp lays a string switch out as a chain of comparisons, so `<` in a loop condition
+  paid for every operator ahead of it. Switching on the token's length and first character is two
+  integer switches, which become jump tables. `arith` 211 to 172, `locals` 163 to 125, `noCall` 43 to
+  33, `varPlain` 83 to 65, `newInstBare` 144 to 119. The instantiation rows are the closures no longer
+  being built, which every scripted class and instance was paying for whether or not it evaluated an
+  operator.
+
 - **A compiled class resolves its bound names against its own interpreter, not its module's.** A
   scripted class runs on an interpreter seeded with a copy of the module's names rather than sharing
   them, so `damage` inside one class and `damage` inside its neighbour are two bindings. Reaching the

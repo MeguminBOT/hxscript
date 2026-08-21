@@ -512,6 +512,37 @@ is worth knowing: allocation during parse is paid for again during execution.
 > attribution, because parsing happens outside the benchmark's timer. Re-running both binaries interleaved
 > at the same moment gave -1.6%, and showed the machine had drifted nearly 9% faster in between.
 
+### Operator dispatch by jump table instead of a closure table
+
+`binops` was a `Map<String, Expr->Expr->Dynamic>` built per interpreter, so every operator a script
+evaluated cost a string hash, a null test and a call through a closure field, and every interpreter
+allocated thirty-eight closures and a map before running anything. A scripted class gets its own
+interpreter, so that was thirty-eight per class as well.
+
+**Switching on the operator token is worse than the map it replaces**, which is worth recording
+because it is the obvious fix and it is wrong: hxcpp lays a string switch out as a chain of
+comparisons, so `<` in a loop condition pays for every operator declared ahead of it. Measured that
+way, `arith` went 211 to 227 and `loopPlain` 51 to 63, against the map's own numbers.
+
+Switching on `op.length` and then on `StringTools.fastCodeAt(op, 0)` is two integer switches, which
+it lays out as jump tables, and no operator is compared against a string at all. Same session, same
+machine, control rebuilt:
+
+| case | before | now | | case | before | now |
+| --- | --- | --- | --- | --- | --- | --- |
+| `arith` | 211 | 172 | | `varPlain` | 83 | 65 |
+| `locals` | 163 | 125 | | `varTyped` | 121 | 106 |
+| `blocks` | 127 | 111 | | `varTypedObj` | 136 | 117 |
+| `indexSet` | 101 | 82 | | `neg` | 94 | 76 |
+| `noCall` | 43 | 33 | | `loopCont` | 67 | 56 |
+| `field` | 134 | 119 | | `newInstBare` | 144 | 119 |
+| `index` | 113 | 104 | | `newInstFields` | 233 | 212 |
+| `call0` | 80 | 73 | | `newInstGuard` | 194 | 169 |
+
+Interpreter-wide that is 16 to 23%. The instantiation rows are the closures no longer being built:
+that half of the gain is paid to every scripted class and every scripted instance, whether or not it
+ever evaluates an operator.
+
 ## Where the time goes now
 
 A script call is roughly 1.1us, against about 0.6us for an empty loop iteration, so call overhead is
@@ -560,8 +591,18 @@ Remaining known costs, none currently urgent:
 - Every generated bridge override tests `__interp.locals.exists(name)` and then reads it, so a native
   method the engine calls per frame pays two map hashes whether or not the script overrides it. The
   method set is known at macro time and could be a per-instance slot.
-- `initOps` builds a 36-entry map of 36 closures per interpreter, and every binary operator is a
-  string hash plus a closure call. A `switch` in `expr` removes both.
+- A typed write still costs a full `tryCast`, which is a `StringMap` miss on `imports` plus string
+  work on every store. Measured by skipping it: `varTyped` 106 to 64 and `varTypedObj` 117 to 61,
+  which is the whole of what annotating a variable costs, about 200 to 280ns a write. Caching the
+  resolved plan on the slot removes it, and the open question is when to resolve: at declaration,
+  which is Haxe's own rule and needs no invalidation, or on first write with the `imports` table
+  watched for changes the way `variables` now is.
+- A native method call into a scripted subclass costs 11.3ns where the same call on a plain host
+  object costs 1.3, because the generated override tests `__interp.locals.exists(name)` before
+  finding out the script did not override it. Paid per bridged method per instance per frame. The
+  method set is known at macro time and could be a per-instance slot.
+- A scripted instance is about 6us to construct, and an overridden method called from native code is
+  about 1.17us, which is the general script-call cost rather than anything the bridge adds.
 - `Environment.resolve` iterates every module and hashes into each one's table; `rebuildTypes` could
   build one flat index.
 - `Reflect.makeVarArgs` plus `Reflect.callMethod` remain in the call path. Measurement says they are

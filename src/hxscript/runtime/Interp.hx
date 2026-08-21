@@ -138,8 +138,6 @@ class Interp {
 	var locals(get, never):Map<String, Variable>;
 
 	/** Binary-operator implementations, keyed by operator token. */
-	var binops:Map<String, Expr->Expr->Dynamic>;
-
 	/** Maximum interpreter call depth before a stack-overflow guard trips. */
 	public var callStackDepth:Int = 200;
 
@@ -275,8 +273,6 @@ class Interp {
 		variables = new Bindings();
 		declaredNames = new Array();
 		declaredOld = new Array();
-
-		initOps();
 	}
 
 	/**
@@ -711,61 +707,157 @@ class Interp {
 	 * Arithmetic routes through the `num*` helpers so results keep Haxe's numeric type (an `Int`
 	 * operation stays an `Int`) instead of decaying to `Float` through untyped `Dynamic` math.
 	 */
-	function initOps() {
-		binops = [
-			"=" => assign,
-			"+" => function(e1, e2) return addExpr(e1, e2),
-			"-" => function(e1, e2) return subExpr(e1, e2),
-			"*" => function(e1, e2) return numMul(expr(e1), expr(e2)),
-			"/" => function(e1, e2) return numDiv(expr(e1), expr(e2)),
-			"%" => function(e1, e2) return numMod(expr(e1), expr(e2)),
-			"&" => function(e1, e2) return (expr(e1) : Int) & (expr(e2) : Int),
-			"|" => function(e1, e2) return (expr(e1) : Int) | (expr(e2) : Int),
-			"^" => function(e1, e2) return (expr(e1) : Int) ^ (expr(e2) : Int),
-			"<<" => function(e1, e2) return (expr(e1) : Int) << (expr(e2) : Int),
-			">>" => function(e1, e2) return (expr(e1) : Int) >> (expr(e2) : Int),
-			">>>" => function(e1, e2) return (expr(e1) : Int) >>> (expr(e2) : Int),
-			"==" => function(e1, e2) return eqValues(expr(e1), expr(e2)),
-			"!=" => function(e1, e2) return !eqValues(expr(e1), expr(e2)),
-			">=" => function(e1, e2) {
-				var a:Dynamic = expr(e1), b:Dynamic = expr(e2);
-				return (a is AbstractValue || b is AbstractValue) ? abstractCmp(">=", a, b) : a >= b;
-			},
-			"<=" => function(e1, e2) {
-				var a:Dynamic = expr(e1), b:Dynamic = expr(e2);
-				return (a is AbstractValue || b is AbstractValue) ? abstractCmp("<=", a, b) : a <= b;
-			},
-			">" => function(e1, e2) {
-				var a:Dynamic = expr(e1), b:Dynamic = expr(e2);
-				return (a is AbstractValue || b is AbstractValue) ? abstractCmp(">", a, b) : a > b;
-			},
-			"<" => function(e1, e2) {
-				var a:Dynamic = expr(e1), b:Dynamic = expr(e2);
-				return (a is AbstractValue || b is AbstractValue) ? abstractCmp("<", a, b) : a < b;
-			},
-			"||" => function(e1, e2) return expr(e1) == true || expr(e2) == true,
-			"&&" => function(e1, e2) return expr(e1) == true && expr(e2) == true,
-			"..." => function(e1, e2) return new IntIterator(expr(e1), expr(e2)),
-			"is" => function(e1, e2) return #if (haxe_ver >= 4.2) Std.isOfType #else Std.is #end (expr(e1), expr(e2)),
-			"??" => function(e1, e2) return expr(e1) ?? expr(e2)
-		];
-		/**
-		 * The target's own declaration decides an overflow here, which is the same rule `addExpr`
-		 * applies and the same reason: `t += n` on a `var t:Float` is a total being accumulated, and
-		 * nothing about the values says so once a whole `Float` reads back as an `Int`.
-		 */
-		assignOp("+=", function(v1, v2, wide) return numAdd(v1, v2, wide));
-		assignOp("-=", function(v1, v2, wide) return numSub(v1, v2, wide));
-		assignOp("*=", function(v1, v2, wide) return numMul(v1, v2));
-		assignOp("/=", function(v1, v2, wide) return numDiv(v1, v2));
-		assignOp("%=", function(v1, v2, wide) return numMod(v1, v2));
-		assignOp("&=", function(v1, v2, wide) return (v1 : Int) & (v2 : Int));
-		assignOp("|=", function(v1, v2, wide) return (v1 : Int) | (v2 : Int));
-		assignOp("^=", function(v1, v2, wide) return (v1 : Int) ^ (v2 : Int));
-		assignOp("<<=", function(v1, v2, wide) return (v1 : Int) << (v2 : Int));
-		assignOp(">>=", function(v1, v2, wide) return (v1 : Int) >> (v2 : Int));
-		assignOp(">>>=", function(v1, v2, wide) return (v1 : Int) >>> (v2 : Int));
-		assignOp("??=", function(v1, v2, wide) return v1 ?? v2);
+	/**
+	 * Evaluates a binary operation.
+	 *
+	 * **Dispatched on length and first character, not on the token.** This used to be a
+	 * `Map<String, Expr->Expr->Dynamic>` built per interpreter, so every operator a script evaluated
+	 * cost a string hash, a null test and a call through a closure field, and every interpreter
+	 * allocated thirty-eight closures and a map before running anything. A scripted class gets its own
+	 * interpreter, so that was thirty-eight per class as well.
+	 *
+	 * Switching on the token itself is worse than the map it replaces: hxcpp lays a string switch out
+	 * as a chain of comparisons, so `<` in a loop condition was paying for every operator declared
+	 * ahead of it. Both switches here are over integers, which it lays out as jump tables, and no
+	 * operator is compared against a string at all.
+	 *
+	 * @param op The operator token.
+	 * @param e1 Its left side.
+	 * @param e2 Its right side.
+	 * @return The result.
+	 */
+	function binop(op:String, e1:Expr, e2:Expr):Dynamic {
+		var c:Int = StringTools.fastCodeAt(op, 0);
+
+		switch (op.length) {
+			case 1:
+				switch (c) {
+					case '+'.code:
+						return addExpr(e1, e2);
+					case '-'.code:
+						return subExpr(e1, e2);
+					case '*'.code:
+						return numMul(expr(e1), expr(e2));
+					case '/'.code:
+						return numDiv(expr(e1), expr(e2));
+					case '%'.code:
+						return numMod(expr(e1), expr(e2));
+					case '<'.code:
+						var a:Dynamic = expr(e1), b:Dynamic = expr(e2);
+						return (a is AbstractValue || b is AbstractValue) ? abstractCmp("<", a, b) : a < b;
+					case '>'.code:
+						var a:Dynamic = expr(e1), b:Dynamic = expr(e2);
+						return (a is AbstractValue || b is AbstractValue) ? abstractCmp(">", a, b) : a > b;
+					case '='.code:
+						return assign(e1, e2);
+					case '&'.code:
+						return (expr(e1) : Int) & (expr(e2) : Int);
+					case '|'.code:
+						return (expr(e1) : Int) | (expr(e2) : Int);
+					case '^'.code:
+						return (expr(e1) : Int) ^ (expr(e2) : Int);
+				}
+
+			case 2:
+				var d:Int = StringTools.fastCodeAt(op, 1);
+
+				switch (c) {
+					case '='.code:
+						if (d == '='.code) return eqValues(expr(e1), expr(e2));
+					case '!'.code:
+						if (d == '='.code) return !eqValues(expr(e1), expr(e2));
+					case '<'.code:
+						if (d == '='.code) {
+							var a:Dynamic = expr(e1), b:Dynamic = expr(e2);
+							return (a is AbstractValue || b is AbstractValue) ? abstractCmp("<=", a, b) : a <= b;
+						}
+						if (d == '<'.code) return (expr(e1) : Int) << (expr(e2) : Int);
+					case '>'.code:
+						if (d == '='.code) {
+							var a:Dynamic = expr(e1), b:Dynamic = expr(e2);
+							return (a is AbstractValue || b is AbstractValue) ? abstractCmp(">=", a, b) : a >= b;
+						}
+						if (d == '>'.code) return (expr(e1) : Int) >> (expr(e2) : Int);
+					case '&'.code:
+						if (d == '&'.code) return expr(e1) == true && expr(e2) == true;
+					case '|'.code:
+						if (d == '|'.code) return expr(e1) == true || expr(e2) == true;
+					case 'i'.code:
+						if (d == 's'.code) return #if (haxe_ver >= 4.2) Std.isOfType #else Std.is #end (expr(e1),
+							expr(e2));
+					case '?'.code:
+						if (d == '?'.code) return expr(e1) ?? expr(e2);
+				}
+
+				if (d == '='.code)
+					return evalAssignOp(op, e1, e2);
+
+			case 3:
+				if (c == '.'.code)
+					return new IntIterator(expr(e1), expr(e2));
+
+				/**
+				 * `>>>` is the only three-character operator that is not a compound assignment, and it
+				 * shares its first two characters with `>>=`. The last one is what separates them.
+				 */
+				if (StringTools.fastCodeAt(op, 2) != '='.code) {
+					if (c == '>'.code)
+						return (expr(e1) : Int) >>> (expr(e2) : Int);
+
+					return error(EInvalidOp(op));
+				}
+
+				return evalAssignOp(op, e1, e2);
+
+			case 4:
+				return evalAssignOp(op, e1, e2);
+		}
+
+		return error(EInvalidOp(op));
+	}
+
+	/**
+	 * Combines the current and right-hand values of a compound assignment.
+	 *
+	 * The target's own declaration decides an overflow here, which is the same rule `addExpr` applies
+	 * and the same reason: `t += n` on a `var t:Float` is a total being accumulated, and nothing about
+	 * the values says so once a whole `Float` reads back as an `Int`.
+	 *
+	 * @param op The compound operator token.
+	 * @param v1 The current value.
+	 * @param v2 The right-hand value.
+	 * @param wide Whether either side was declared wider than an `Int`.
+	 * @return The combined value.
+	 */
+	function combine(op:String, v1:Dynamic, v2:Dynamic, wide:Bool):Dynamic {
+		switch (op) {
+			case "+=":
+				return numAdd(v1, v2, wide);
+			case "-=":
+				return numSub(v1, v2, wide);
+			case "*=":
+				return numMul(v1, v2);
+			case "/=":
+				return numDiv(v1, v2);
+			case "%=":
+				return numMod(v1, v2);
+			case "&=":
+				return (v1 : Int) & (v2 : Int);
+			case "|=":
+				return (v1 : Int) | (v2 : Int);
+			case "^=":
+				return (v1 : Int) ^ (v2 : Int);
+			case "<<=":
+				return (v1 : Int) << (v2 : Int);
+			case ">>=":
+				return (v1 : Int) >> (v2 : Int);
+			case ">>>=":
+				return (v1 : Int) >>> (v2 : Int);
+			case "??=":
+				return v1 ?? v2;
+			default:
+				return error(EInvalidOp(op));
+		}
 	}
 
 	/**
@@ -872,25 +964,14 @@ class Interp {
 	}
 
 	/**
-	 * Registers a compound-assignment operator (`+=`, `*=`, ...) built from a plain combiner.
-	 *
-	 * @param op The operator token.
-	 * @param fop The function combining the current and right-hand values.
-	 */
-	function assignOp(op, fop:Dynamic->Dynamic->Bool->Dynamic) {
-		binops.set(op, function(e1, e2) return evalAssignOp(op, fop, e1, e2));
-	}
-
-	/**
 	 * Evaluates a compound assignment `e1 op= e2` against a local, variable, field, or element.
 	 *
-	 * @param op The operator token (for error reporting).
-	 * @param fop The combiner applied to the current and right-hand values.
+	 * @param op The compound operator token.
 	 * @param e1 The assignment target.
 	 * @param e2 The right-hand expression.
 	 * @return The new value.
 	 */
-	function evalAssignOp(op, fop, e1, e2):Dynamic {
+	function evalAssignOp(op:String, e1:Expr, e2:Expr):Dynamic {
 		var v;
 		var wide:Bool = widensNumbers(e1) || widensNumbers(e2);
 
@@ -898,10 +979,10 @@ class Interp {
 			case EIdent(id):
 				var l:Variable = hasCaptures ? null : locals.get(id);
 				if (l != null) {
-					v = fop(readLocal(l, id), expr(e2), wide);
+					v = combine(op, readLocal(l, id), expr(e2), wide);
 					writeLocal(l, id, v);
 				} else {
-					v = fop(expr(e1), expr(e2), wide);
+					v = combine(op, expr(e1), expr(e2), wide);
 
 					if (locals.exists(id)) {
 						setLocal(id, v);
@@ -911,19 +992,19 @@ class Interp {
 				}
 			case EField(e, f, _):
 				var obj = expr(e);
-				v = fop(get(obj, f), expr(e2), wide);
+				v = combine(op, get(obj, f), expr(e2), wide);
 				v = set(obj, f, v);
 			case EArray(e, index):
 				var arr:Dynamic = expr(e);
 				var index:Dynamic = expr(index);
 				if (isMap(arr)) {
-					v = fop(getMapValue(arr, index), expr(e2), wide);
+					v = combine(op, getMapValue(arr, index), expr(e2), wide);
 					setMapValue(arr, index, v);
 				} else if (arr is AbstractValue) {
-					v = fop(abstractGetIndex(arr, index), expr(e2), wide);
+					v = combine(op, abstractGetIndex(arr, index), expr(e2), wide);
 					abstractSetIndex(arr, index, v);
 				} else {
-					v = fop(arr[index], expr(e2), wide);
+					v = combine(op, arr[index], expr(e2), wide);
 					arr[index] = v;
 				}
 			default:
@@ -2719,10 +2800,7 @@ class Interp {
 			case EBinop('=>', e1, e2) if (mapCompr):
 				return e;
 			case EBinop(op, e1, e2):
-				var fop = binops.get(op);
-				if (fop == null)
-					error(EInvalidOp(op));
-				return fop(e1, e2);
+				return binop(op, e1, e2);
 			case EUnop(op, prefix, e):
 				switch (op) {
 					case "!":
