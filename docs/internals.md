@@ -539,13 +539,20 @@ build has, so adding `-lib heaps` to a build is the whole of turning heaps on.
 The fourth step, shimming members with no runtime form, is a closure rather than a name and
 happens at startup in [`Shims`](../src/hxscript/setup/Shims.hx), reached from [`Boot`](../src/hxscript/setup/Boot.hx).
 
-The steps run at two different moments, and which one each belongs to is decided by the API it
-uses rather than by preference. `Compiler.include` and `Compiler.addMetadata` are initialization
-APIs and warn if called later, so they run here directly, which is safe, because every argument
-has already been read by the time an init macro runs and `-lib flixel` is visible whether it came
-before or after `-lib hxscript`. Anything that asks the typer waits for `onAfterInitMacros`, since
-another init macro may still add a class path and a type resolved before that resolves against an
-incomplete one.
+The steps run at two different moments and neither of them is here, in the init macro itself. Which
+libraries there are is a question with a different answer before and after the host's own init
+macros have run, because `Presets.custom` is where a host describes its own classes and an init
+macro of the host's is what fills it. No build file can make that macro run first: lime resolves
+each haxelib and writes its `extraParams.hxml` at the top of the generated hxml, beside the
+library's class path, while the project's own flags land some fifty lines below. So the list is
+read from `onAfterInitMacros`, and so is everything that reads it.
+
+Waiting costs nothing that was free before. `Compiler.addMetadata` is content to be called there.
+`Compiler.include` is not, since it asserts it was called from an init macro, so the package walk
+it would have done is `Autowire.walk` instead, deferred once more the way `Compiler.include` defers
+its own: the modules it pulls in have to arrive after the build metadata `Abstracts` registers for
+them, and metadata does nothing to a type that is already loaded. Anything that asks the typer waits
+for a pass after that walk, since a type resolved before it resolves against an incomplete build.
 
 | define | effect |
 | --- | --- |

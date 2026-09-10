@@ -1,7 +1,6 @@
 package hxscript.setup;
 
 #if macro
-import haxe.macro.Compiler;
 import haxe.macro.Context;
 import haxe.macro.Expr;
 import sys.FileSystem;
@@ -33,32 +32,51 @@ class Autowire {
 		if (Context.defined('hxscript_no_autowire'))
 			return;
 
-		var libs:Array<Library> = Presets.active();
-
-		var host:Library = hostLibrary();
-		if (host != null)
-			libs.push(host);
-
-		if (Context.defined('hxscript_verbose'))
-			Context.info('hxscript: wiring ' + [for (lib in libs) lib.title].join(', '), Context.currentPos());
-
-		include(libs);
-
-		var abstracts:Array<String> = Abstracts.generate(libs);
-
-		var globals:Array<String> = [];
-		for (lib in libs)
-			for (path in lib.globals)
-				if (globals.indexOf(path) < 0)
-					globals.push(path);
-
+		/**
+		 * The list is read after the init macros rather than during them, and that is the whole of
+		 * what lets a host's own record arrive.
+		 *
+		 * `Presets.custom` is filled from an init macro the host writes, and no build file can make
+		 * that macro run before this one: lime resolves each haxelib and writes its
+		 * `extraParams.hxml` at the top of the generated hxml, beside the library's own class path,
+		 * while the project's own flags land some fifty lines below. So `--macro
+		 * hxscript.setup.Autowire.run()` is always the earlier of the two, and a list read when it
+		 * runs is a list taken before the host had a chance to add to it.
+		 */
 		Context.onAfterInitMacros(function():Void {
-			var forced:{refs:Array<Expr>, args:Array<FunctionArg>, named:Array<String>} = reference(libs);
-			var bridges:Array<Expr> = Bridges.generate(libs);
-			var titles:Array<String> = [for (lib in libs) lib.title];
+			var libs:Array<Library> = Presets.active();
 
-			manifest(bridges, forced, globals, abstracts, titles);
-			hxscript.macro.Banner.wired(titles, bridges.length, forced.named.length, abstracts.length, globals.length);
+			var host:Library = hostLibrary();
+			if (host != null)
+				libs.push(host);
+
+			if (Context.defined('hxscript_verbose'))
+				Context.info('hxscript: wiring ' + [for (lib in libs) lib.title].join(', '), Context.currentPos());
+
+			include(libs);
+
+			var abstracts:Array<String> = Abstracts.generate(libs);
+
+			var globals:Array<String> = [];
+			for (lib in libs)
+				for (path in lib.globals)
+					if (globals.indexOf(path) < 0)
+						globals.push(path);
+
+			/**
+			 * Registered from inside this one rather than beside it, because `include` defers its own
+			 * walk the same way and the bridges below read the types that walk is what puts in the
+			 * build. Callbacks added while the queue is draining are still run, in the order they
+			 * were added, so this arrives after the walk it depends on.
+			 */
+			Context.onAfterInitMacros(function():Void {
+				var forced:{refs:Array<Expr>, args:Array<FunctionArg>, named:Array<String>} = reference(libs);
+				var bridges:Array<Expr> = Bridges.generate(libs);
+				var titles:Array<String> = [for (lib in libs) lib.title];
+
+				manifest(bridges, forced, globals, abstracts, titles);
+				hxscript.macro.Banner.wired(titles, bridges.length, forced.named.length, abstracts.length, globals.length);
+			});
 		});
 	}
 
@@ -111,6 +129,12 @@ class Autowire {
 	/**
 	 * Force-compiles every active library's package roots.
 	 *
+	 * The walk is deferred rather than done here, because the types it pulls in have to arrive after
+	 * the build metadata `Abstracts` registers for them, and metadata does nothing to a type that is
+	 * already loaded. `Compiler.include` defers its own walk for the same reason and would have done,
+	 * but it asserts it was called from an init macro, and by the time the active libraries are known
+	 * this is running out of `onAfterInitMacros` instead. So the walk is here, minus the assert.
+	 *
 	 * @param libs The active libraries.
 	 */
 	static function include(libs:Array<Library>):Void {
@@ -120,9 +144,11 @@ class Autowire {
 				if (ignore.indexOf(name) < 0)
 					ignore.push(name);
 
+		var roots:Array<String> = [];
 		for (lib in libs) {
 			for (root in lib.roots) {
-				Compiler.include(root, true, ignore);
+				if (roots.indexOf(root) < 0)
+					roots.push(root);
 
 				if (Context.defined('hxscript_verbose'))
 					Context.info('  include $root (recursive)', Context.currentPos());
@@ -131,6 +157,105 @@ class Autowire {
 
 		if (Context.defined('hxscript_verbose') && ignore.length > 0)
 			Context.info('  skipping ' + ignore.join(', '), Context.currentPos());
+
+		Context.onAfterInitMacros(function():Void {
+			var paths:Array<String> = searchPaths();
+			if (paths == null)
+				return;
+
+			for (root in roots)
+				walk(root, paths, ignore);
+		});
+	}
+
+	/**
+	 * The class paths a package walk searches, normalised the way `Compiler.include` normalises them.
+	 *
+	 * @return The paths, or null for a completion request, which must not force anything into a build
+	 * it is only asking questions about.
+	 */
+	static function searchPaths():Array<String> {
+		switch (Context.definedValue('display')) {
+			case null:
+			case 'usage':
+			case _:
+				return null;
+		}
+
+		var out:Array<String> = [];
+		for (cp in Context.getClassPath()) {
+			/**
+			 * `normalize` is what turns a Windows class path into one the walk can join with `/`, and
+			 * it drops a trailing separator on the way, which is the rest of what `Compiler.include`
+			 * does to these before it looks at them.
+			 */
+			var path:String = haxe.io.Path.normalize(cp);
+
+			out.push(path == '' ? '.' : path);
+		}
+
+		return out;
+	}
+
+	/**
+	 * One package root, force-compiled by loading every module under it.
+	 *
+	 * @param pack The package to walk.
+	 * @param paths The class paths to look for it in.
+	 * @param ignore Packages and modules to leave out.
+	 */
+	static function walk(pack:String, paths:Array<String>, ignore:Array<String>):Void {
+		var prefix:String = pack == '' ? '' : pack + '.';
+
+		for (cp in paths) {
+			var dir:String = pack == '' ? cp : cp + '/' + pack.split('.').join('/');
+			if (!FileSystem.exists(dir) || !FileSystem.isDirectory(dir))
+				continue;
+
+			for (entry in FileSystem.readDirectory(dir)) {
+				if (FileSystem.isDirectory('$dir/$entry')) {
+					if (!ignored(prefix + entry, ignore))
+						walk(prefix + entry, paths, ignore);
+
+					continue;
+				}
+
+				if (!StringTools.endsWith(entry, '.hx'))
+					continue;
+
+				/**
+				 * `import.hx` is not a module, and a name with a dot left in it after the extension
+				 * comes off is a module nothing can load by that name: `Macro.macro.hx` is the shape
+				 * a host writes for macro-only code. `Compiler.include` leaves both out and so does
+				 * this, which is why a host's macro package needs no ignore entry of its own.
+				 */
+				var name:String = entry.substr(0, entry.length - 3);
+				if (entry == 'import.hx' || name.indexOf('.') >= 0)
+					continue;
+
+				if (!ignored(prefix + name, ignore))
+					Context.getModule(prefix + name);
+			}
+		}
+	}
+
+	/**
+	 * Whether a package or module path is one to leave out.
+	 *
+	 * @param path The dot path.
+	 * @param ignore The entries to match, by name or by a trailing `*`.
+	 * @return Whether it is ignored.
+	 */
+	static function ignored(path:String, ignore:Array<String>):Bool {
+		for (rule in ignore) {
+			if (StringTools.endsWith(rule, '*')) {
+				if (StringTools.startsWith(path, rule.substr(0, rule.length - 1)))
+					return true;
+			} else if (rule == path)
+				return true;
+		}
+
+		return false;
 	}
 
 	/**

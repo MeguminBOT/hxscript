@@ -46,6 +46,17 @@ answer with the documentation above the function. A game library has to be in th
 mean anything: without one there are no scriptable bases, so no bridges are generated and the macro
 that could not run in display mode never runs.
 
+Whether a host's own `Presets.custom` record reaches the build, which is also not about running a
+script:
+
+```sh
+sh test/preset.sh
+```
+
+It pushes a record from an init macro and asks whether the setup acted on it, in both macro orders.
+The order that matters is the one where the host's macro runs second, since that is the only one a
+lime project can produce and the only one that was ever broken.
+
 One test on its own, which is often what you want while fixing it:
 
 ```sh

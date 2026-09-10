@@ -1,5 +1,52 @@
 # Changelog
 
+## 2.0.6
+
+### Fixed
+
+- **A host's own `Presets.custom` record never reached the build, and nothing said so.** A record
+  pushed from an init macro was pushed successfully and then ignored. The build wired the shipped
+  presets, generated no bridge for any class the record named, and reported the libraries it did
+  wire without mentioning the one it had not, so the only symptom was a script failing at runtime
+  with `Type not found` for a class the host had plainly described. Asking `Presets.active()` from
+  the host's own macro answered with the record present, which made the report look wrong rather
+  than the build.
+
+  `Autowire.run` read the active libraries at the top of itself, during the init macro that
+  `extraParams.hxml` runs, and no build file can fill `Presets.custom` before that point. Lime
+  resolves each haxelib and writes its `extraParams.hxml` at the top of the generated hxml, beside
+  that library's class path, while the project's own flags land some fifty lines below. So
+  `--macro hxscript.setup.Autowire.run()` is always the earlier of the two, and the host's push
+  always arrived after the list had been taken.
+
+  The list is read from `onAfterInitMacros` now, and so is everything that reads it.
+  `Compiler.include` could not come along, since it asserts it was called from an init macro, so the
+  package walk is `Autowire.walk` here instead, deferred once more the way `Compiler.include` defers
+  its own: the modules it loads have to arrive after the build metadata `Abstracts` registers for
+  them, because metadata does nothing to a type that is already loaded.
+
+  A build with no custom record wires exactly what it wired before, checked rather than assumed, by
+  diffing the verbose output of a lime, openfl, flixel and flixel-addons build against 2.0.5. Same
+  packages, same skip list, the same eighty-one abstracts in the same order. The one difference is
+  that the verbose lines no longer carry an `(unknown) :` prefix, since they are no longer written
+  from a position the compiler has no file for.
+
+  One thing did move, and it is worth knowing about. Bridge generation is registered from inside the
+  deferred pass rather than beside it, so it runs at the end of the `onAfterInitMacros` queue now
+  instead of early in it, after the callbacks other libraries registered while the init macros were
+  still running. Nothing measured changed because of it, on any configuration above or through a
+  warm compilation server, but it is a different moment and a host doing its own work in that queue
+  may care which side of it it is on.
+
+  Nothing shipped covered this. No example, test or sandbox app fills `Presets.custom`, and the two
+  apps that do describe host classes go through `-D hxscript_host`, which reads a define and scans
+  files on disk and so was never sensitive to when it ran. `test/preset.sh` covers it now: it pushes
+  a record from an init macro and asks the generated manifest whether the setup acted on it, in both
+  macro orders. Run against the 2.0.5 setup it fails on the order a lime project produces and passes
+  on the other, which is the shape of the bug. It also asserts the shipped presets survive, since a
+  record whose `define` matches one replaces it rather than adding to it, and the first draft of the
+  test lost `CORE` that way without failing.
+
 ## 2.0.5
 
 ### Changed

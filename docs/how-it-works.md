@@ -60,16 +60,18 @@ flowchart TD
     ep --> ban["Banner"]
 
     aw --> nat["Native"]
-    aw --> pick["which libraries?"]
+    aw --> after{{"onAfterInitMacros"}}
+
+    after --> pick["which libraries?"]
 
     pick --> s1["1. include"]
     pick --> s3["3. abstracts"]
 
-    s1 --> after{{"onAfterInitMacros"}}
-    s3 --> after
+    s1 --> walked{{"after the walk"}}
+    s3 --> walked
 
-    after --> ref["1b. reference"]
-    after --> s2["2. bridges"]
+    walked --> ref["1b. reference"]
+    walked --> s2["2. bridges"]
 
     ref --> man["Manifest"]
     s2 --> man
