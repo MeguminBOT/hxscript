@@ -5,20 +5,23 @@ Seven hscript-family libraries running identical scripts.
 ## Read this first: different, not better
 
 **No library here is "the best one."** Split the suite in two and the two halves say different
-things: on the cost of one ordinary operation hxScript and hscript-iris are level at the front, a
-third of a percent apart and well inside this machine's noise, while on the cost of one function
-call hxScript is first by more than three times. Both are in the summary below, and neither is the
-summary on its own.
+things: on the cost of one ordinary operation hxScript and hscript-iris are level at the front, two
+percent apart and inside this machine's noise, while on the cost of one function call hxScript is
+first, 1.8 times ahead of hscript-insanity and more than three times ahead of the other five. Both
+are in the summary below, and neither is the summary on its own.
 
-The call gap has one cause, and it is not cleverness. Every other library unwinds `return`, `break`
-and `continue` by **throwing an exception**, and a thrown exception costs microseconds on a static
-target. hxScript signals them with flags. That is also why the corpus total flatters it: totals are
-dominated by the call cases, so quote the per-operation and per-call averages instead.
+Most of the call gap has one cause, and it is not cleverness. Five of the seven libraries unwind
+`return`, `break` and `continue` by **throwing an exception**, and a thrown exception costs
+microseconds on a static target. hxScript signals them with flags, and so does hscript-insanity,
+which switched between the last run and this one: its per-call cost fell to less than 40% of what
+it was, and it went from last on calls to second. That is also why the corpus total flatters both:
+totals are dominated by the call cases, so quote the per-operation and per-call averages instead.
 
 `callCap20` is `call1` with twenty more variables in the enclosing scope and nothing else changed, so
 the pair isolates a second design difference: whether building a call frame copies the captured
-scope, and so costs something per captured variable. Five of the seven pay about half again for it.
-hxScript and hscript-improved pay nothing.
+scope, and so costs something per captured variable. Five of the seven pay for it, and pay about the
+same 2 to 3 microseconds. That is half again on a call that throws, and nearly three times over on
+hscript-insanity's, which no longer does. hxScript and hscript-improved pay nothing.
 
 The same applies to features. hscript is small and fast and has no scripted classes.
 hscript-improved has them, and hxScript both instantiates one and calls its methods several times
@@ -152,49 +155,49 @@ iteration and would describe themselves rather than the interpreter.
 
 | case | kind | **hxScript** | insanity | SScript | hscript | improved | iris | rulescript |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `noCall` | op | 0.435 | 0.966 | 0.495 | 0.418 | 0.613 | 0.400 | 0.533 |
-| `loopPlain` | op | 0.486 | 1.102 | 0.500 | 0.451 | 0.614 | 0.424 | 0.568 |
-| `loopCont` | unwind | 0.632 | 3.565 | 2.771 | 2.556 | 2.828 | 2.492 | 3.242 |
-| `postIncr` | op | 0.435 | 0.974 | 0.433 | 0.387 | 0.507 | 0.371 | 0.477 |
-| `arith` | op | 0.585 | 1.316 | 0.659 | 0.550 | 0.752 | 0.507 | 0.711 |
-| `locals` | op | 0.532 | 1.245 | 0.606 | 0.503 | 0.749 | 0.492 | 0.641 |
-| `blocks` | op | 0.622 | 1.250 | 0.697 | 0.579 | 0.949 | 0.547 | 0.755 |
-| `field` | op | 0.568 | 1.110 | 0.558 | 0.464 | 0.726 | 0.444 | 0.616 |
-| `fieldSet` | op | 0.599 | 1.092 | 0.518 | 0.454 | 0.744 | 0.450 | 0.588 |
-| `method` | op | 1.048 | 1.538 | 0.843 | 0.739 | 1.081 | 0.700 | 0.936 |
-| `index` | op | 0.494 | 1.057 | 2.875 | 0.487 | 0.698 | 0.469 | 0.615 |
-| `indexSet` | op | 0.505 | 1.039 | 8.116 | 0.489 | 0.709 | 0.488 | 0.599 |
-| `not` | op | 0.505 | 1.076 | 0.593 | 0.512 | 0.733 | 0.474 | 0.663 |
-| `neg` | op | 0.484 | 1.045 | 0.545 | 0.455 | 0.674 | 0.438 | 0.585 |
-| `call0` | call | 0.817 | 4.696 | 3.975 | 3.688 | 4.054 | 3.608 | 4.243 |
-| `call1` | call | 1.253 | 5.232 | 4.337 | 3.963 | 4.395 | 3.908 | 4.532 |
-| `call3` | call | 1.818 | 6.270 | 4.820 | 4.325 | 4.885 | 4.238 | 4.981 |
-| `callCap20` | call | 1.239 | 8.017 | 6.638 | 6.160 | 4.403 | 6.002 | 6.705 |
-| `forRange` | op | 0.170 | 0.305 | 0.217 | 0.176 | 0.244 | 0.157 | 0.225 |
-| `forArray` | op | 0.188 | 0.312 | 0.259 | 0.204 | 0.277 | 0.176 | 0.251 |
-| `arrayDecl` | op | 0.992 | 1.566 | 0.860 | 0.753 | 1.205 | 0.668 | 0.956 |
-| `strConcat` | op | 0.774 | 1.708 | 1.056 | 0.941 | 1.173 | 0.926 | 1.103 |
-| `ternary` | op | 0.645 | 1.426 | 0.754 | 0.624 | 0.859 | 0.582 | 0.800 |
-| `anonField` | op | 0.835 | 1.470 | 0.742 | 0.631 | 1.014 | 0.627 | 0.861 |
-| `closureCall` | op | 1.201 | 5.678 | 4.840 | 4.422 | 4.968 | 4.310 | 5.335 |
-| `hostMethod` | op | 0.982 | 1.505 | 0.807 | 0.682 | 1.061 | 0.670 | 0.909 |
-| `hostStatic` | op | 1.356 | 1.771 | 1.012 | not supported | not supported | 0.819 | 1.065 |
-| `arrayPush` | op | 0.974 | 1.421 | 3.137 | 0.663 | 0.995 | 0.646 | 0.827 |
-| `boolLogic` | op | 0.697 | 1.761 | 0.836 | 0.723 | 0.982 | 0.685 | 0.892 |
-| `modArith` | op | 0.657 | 1.512 | 0.756 | 0.659 | 0.889 | 0.591 | 0.835 |
-| `switch` | op | 0.792 | 1.455 | 0.806 | 0.619 | 0.847 | 0.563 | 0.793 |
-| `tryCatch` | unwind | 3.518 | 4.881 | 4.408 | 4.171 | 4.558 | 3.874 | 5.037 |
-| `strInterp` | op | 0.967 | 1.608 | 3.928 | WRONG (v$n) | WRONG (v$n) | 0.701 | 0.825 |
-| `mapLiteral` | op | 1.344 | 2.019 | 3.277 | 1.193 | 1.514 | 1.047 | 1.409 |
-| `arrayCompr` | compound | 2.893 | 4.470 | 4.007 | 3.521 | 5.217 | 6.204 | 7.085 |
-| `varTyped` | op | 0.448 | 0.954 | 0.499 | 0.420 | 0.618 | 0.399 | not supported |
-| `fnTyped` | call | 1.671 | 5.403 | 4.345 | 3.986 | 4.389 | 3.899 | not supported |
-| `classNew` | compound | 2.798 | 66.374 | not supported | not supported | 4.857 | not supported | not supported |
-| `classCall` | call | 1.555 | 5.387 | not supported | not supported | 4.586 | not supported | not supported |
-| `classField` | op | 0.665 | 1.249 | not supported | not supported | 0.831 | not supported | not supported |
-| `stringSwitch` | op | 0.769 | 1.381 | 0.790 | 0.608 | 0.849 | 0.543 | 0.808 |
-| `nullCoal` | op | 0.463 | 1.206 | 0.541 | 0.472 | 0.684 | 0.454 | 0.594 |
-| `abstractOp` | op | 5.430 | 10.179 | not supported | not supported | not supported | not supported | not supported |
+| `noCall` | op | 0.479 | 0.833 | 0.682 | 0.428 | 0.617 | 0.484 | 0.565 |
+| `loopPlain` | op | 0.487 | 1.056 | 0.637 | 0.450 | 0.643 | 0.440 | 0.605 |
+| `loopCont` | unwind | 0.637 | 1.288 | 2.741 | 2.503 | 2.720 | 2.460 | 3.181 |
+| `postIncr` | op | 0.442 | 0.854 | 0.504 | 0.388 | 0.579 | 0.427 | 0.567 |
+| `arith` | op | 0.574 | 1.206 | 0.866 | 0.566 | 0.754 | 0.511 | 0.707 |
+| `locals` | op | 0.523 | 1.056 | 0.785 | 0.498 | 0.743 | 0.486 | 0.765 |
+| `blocks` | op | 0.617 | 1.040 | 0.901 | 0.599 | 0.944 | 0.560 | 0.754 |
+| `field` | op | 0.544 | 0.949 | 0.755 | 0.473 | 0.781 | 0.529 | 0.623 |
+| `fieldSet` | op | 0.600 | 1.048 | 0.727 | 0.473 | 0.735 | 0.460 | 0.588 |
+| `method` | op | 1.024 | 1.480 | 1.085 | 0.731 | 1.173 | 0.746 | 0.952 |
+| `index` | op | 0.508 | 0.965 | 0.754 | 0.481 | 0.760 | 0.466 | 0.613 |
+| `indexSet` | op | 0.510 | 0.920 | 0.723 | 0.476 | 0.688 | 0.477 | 0.605 |
+| `not` | op | 0.510 | 0.961 | 0.750 | 0.509 | 0.787 | 0.471 | 0.656 |
+| `neg` | op | 0.476 | 0.906 | 0.759 | 0.460 | 0.660 | 0.440 | 0.689 |
+| `call0` | call | 0.804 | 1.252 | 3.895 | 3.631 | 3.982 | 3.480 | 4.109 |
+| `call1` | call | 1.248 | 1.589 | 4.290 | 3.905 | 4.294 | 3.784 | 4.607 |
+| `call3` | call | 1.826 | 2.280 | 4.650 | 4.231 | 4.833 | 4.192 | 5.079 |
+| `callCap20` | call | 1.267 | 4.353 | 7.026 | 6.075 | 4.338 | 5.964 | 6.901 |
+| `forRange` | op | 0.185 | 0.211 | 0.320 | 0.179 | 0.241 | 0.157 | 0.222 |
+| `forArray` | op | 0.193 | 0.223 | 0.354 | 0.205 | 0.274 | 0.173 | 0.258 |
+| `arrayDecl` | op | 0.993 | 1.539 | 1.085 | 0.752 | 1.189 | 0.693 | 0.941 |
+| `strConcat` | op | 0.795 | 1.576 | 0.930 | 0.936 | 1.164 | 0.942 | 1.121 |
+| `ternary` | op | 0.629 | 1.284 | 0.936 | 0.631 | 0.836 | 0.592 | 0.826 |
+| `anonField` | op | 0.836 | 1.341 | 1.075 | 0.638 | 1.021 | 0.627 | 0.861 |
+| `closureCall` | op | 1.256 | 1.607 | 5.009 | 4.359 | 4.800 | 4.248 | 5.444 |
+| `hostMethod` | op | 0.994 | 1.389 | 1.026 | 0.777 | 1.096 | 0.826 | 0.943 |
+| `hostStatic` | op | 1.368 | 1.677 | 1.250 | not supported | not supported | 0.809 | 1.087 |
+| `arrayPush` | op | 1.116 | 1.394 | 0.843 | 0.659 | 1.058 | 0.772 | 0.847 |
+| `boolLogic` | op | 0.699 | 1.574 | 1.061 | 0.756 | 0.974 | 0.737 | 0.932 |
+| `modArith` | op | 0.643 | 1.367 | 0.935 | 0.664 | 0.933 | 0.594 | 0.920 |
+| `switch` | op | 0.793 | 1.454 | 1.000 | 0.612 | 0.841 | 0.562 | 0.814 |
+| `tryCatch` | unwind | 3.438 | 4.655 | 4.640 | 3.947 | 4.379 | 3.765 | 5.019 |
+| `strInterp` | op | 0.993 | 1.483 | 0.921 | WRONG (v$n) | WRONG (v$n) | 0.685 | 0.846 |
+| `mapLiteral` | op | 1.372 | 1.876 | 1.570 | 1.210 | 1.509 | 1.052 | 1.403 |
+| `arrayCompr` | compound | 2.928 | 4.076 | 4.381 | 3.653 | 5.442 | 6.046 | 7.260 |
+| `varTyped` | op | 0.459 | 0.883 | 0.681 | 0.417 | 0.685 | 0.459 | not supported |
+| `fnTyped` | call | 1.679 | 1.809 | 4.334 | 3.818 | 4.284 | 3.822 | not supported |
+| `classNew` | compound | 2.963 | 8.300 | not supported | not supported | 4.963 | not supported | not supported |
+| `classCall` | call | 1.567 | 1.815 | not supported | not supported | 4.528 | not supported | not supported |
+| `classField` | op | 0.751 | 1.067 | not supported | not supported | 0.868 | not supported | not supported |
+| `stringSwitch` | op | 0.782 | 1.273 | 1.038 | 0.651 | 0.884 | 0.561 | 0.960 |
+| `nullCoal` | op | 0.497 | 1.045 | 0.711 | 0.496 | 0.671 | 0.456 | 0.716 |
+| `abstractOp` | op | 5.519 | 5.246 | not supported | not supported | not supported | not supported | not supported |
 
 </details>
 
@@ -202,26 +205,26 @@ iteration and would describe themselves rather than the interpreter.
 
 | | **hxScript** | insanity | SScript | hscript | improved | iris | rulescript |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| us per operation (28 cases), lower is faster | 0.671 | 1.412 | 1.326 | 0.709 | 0.968 | 0.673 | 0.889 |
-| us per call (4 cases), lower is faster | 1.282 | 6.054 | 4.943 | 4.534 | 4.434 | 4.439 | 5.115 |
-| parse, ms, lower is faster | 0.833 | 1.019 | 2.464 | 1.115 | 3.244 | 0.77 | 1.223 |
-| corpus total, ms, lower is faster | 3095 | 7667 | 6807 | 4824 | 5745 | 4917 | 6071 |
-| total relative to hxScript, higher is slower | 1.00x | 2.48x | 2.20x | 1.56x | 1.86x | 1.59x | 1.96x |
+| us per operation (28 cases), lower is faster | 0.681 | 1.158 | 0.994 | 0.716 | 0.977 | 0.696 | 0.925 |
+| us per call (4 cases), lower is faster | 1.287 | 2.369 | 4.965 | 4.461 | 4.362 | 4.355 | 5.174 |
+| parse, ms, lower is faster | 0.835 | 1.342 | 3.07 | 1.11 | 3.52 | 0.794 | 1.272 |
+| corpus total, ms, lower is faster | 3123 | 5192 | 5944 | 4800 | 5734 | 4918 | 6205 |
+| total relative to hxScript, higher is slower | 1.00x | 1.66x | 1.90x | 1.54x | 1.84x | 1.57x | 1.99x |
 
 ```mermaid
 xychart-beta
     title "Cost of one operation at 100,000 iterations"
     x-axis ["hxScript", "iris", "hscript", "rulescript", "improved", "SScript", "insanity"]
-    y-axis "microseconds" 0 --> 1.624
-    bar [0.671, 0.673, 0.709, 0.889, 0.968, 1.326, 1.412]
+    y-axis "microseconds" 0 --> 1.332
+    bar [0.681, 0.696, 0.716, 0.925, 0.977, 0.994, 1.158]
 ```
 
 ```mermaid
 xychart-beta
     title "Cost of one call at 100,000 iterations"
-    x-axis ["hxScript", "improved", "iris", "hscript", "SScript", "rulescript", "insanity"]
-    y-axis "microseconds" 0 --> 6.962
-    bar [1.282, 4.434, 4.439, 4.534, 4.943, 5.115, 6.054]
+    x-axis ["hxScript", "insanity", "iris", "improved", "hscript", "SScript", "rulescript"]
+    y-axis "microseconds" 0 --> 5.95
+    bar [1.287, 2.369, 4.355, 4.362, 4.461, 4.965, 5.174]
 ```
 
 ### How much script fits in one frame
@@ -244,10 +247,10 @@ per-call us  x  calls per frame  x  60  =  us per second spent in script
 
 | | **hxScript** | insanity | SScript | hscript | improved | iris | rulescript |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| operations per 60Hz frame | 24,847 | 11,803 | 12,573 | 23,498 | 17,213 | 24,759 | 18,752 |
-| calls per 60Hz frame | 13,003 | 2,753 | 3,372 | 3,675 | 3,758 | 3,754 | 3,258 |
-| operations per 2ms slice | 2,981 | 1,416 | 1,508 | 2,819 | 2,065 | 2,971 | 2,250 |
-| calls per 2ms slice | 1,560 | 330 | 404 | 441 | 451 | 450 | 390 |
+| operations per 60Hz frame | 24,461 | 14,391 | 16,774 | 23,267 | 17,059 | 23,945 | 18,020 |
+| calls per 60Hz frame | 12,954 | 7,036 | 3,356 | 3,736 | 3,820 | 3,826 | 3,221 |
+| operations per 2ms slice | 2,935 | 1,726 | 2,012 | 2,792 | 2,047 | 2,873 | 2,162 |
+| calls per 2ms slice | 1,554 | 844 | 402 | 448 | 458 | 459 | 386 |
 
 ### What position tracking costs the libraries that can switch it off
 
@@ -256,11 +259,11 @@ with them on everywhere; this is what that decision costs the others. At 100,000
 
 | | hscript | improved | iris | rulescript |
 | --- | --- | --- | --- | --- |
-| us per operation, with | 0.709 | 0.968 | 0.673 | 0.889 |
-| us per operation, without | 0.620 | 0.859 | 0.658 | 0.734 |
-| cost | 14.4% | 12.8% | 2.3% | 21.2% |
-| parse with, ms | 1.115 | 3.244 | 0.77 | 1.223 |
-| parse without, ms | 0.575 | 2.521 | 0.549 | 0.587 |
+| us per operation, with | 0.716 | 0.977 | 0.696 | 0.925 |
+| us per operation, without | 0.622 | 0.886 | 0.688 | 0.771 |
+| cost | 15.2% | 10.3% | 1.1% | 20.0% |
+| parse with, ms | 1.11 | 3.52 | 0.794 | 1.272 |
+| parse without, ms | 0.582 | 2.729 | 0.71 | 0.642 |
 
 ### The same corpus through each library's own front door, at 1,000
 
@@ -274,16 +277,16 @@ hundred thousand times.
 
 | | **hxScript** | insanity | SScript | hscript | improved | iris | rulescript |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| corpus through the front door, ms, lower is faster | 36.2 | 86.1 | 148.2 | 53.1 | 63.4 | 55.8 | 66.6 |
-| relative to hxScript, higher is slower | 1.00x | 2.38x | 4.09x | 1.46x | 1.75x | 1.54x | 1.84x |
-| parse alone, ms, from the table above | 0.833 | 1.019 | 2.464 | 1.115 | 3.244 | 0.77 | 1.223 |
+| corpus through the front door, ms, lower is faster | 37.3 | 63.9 | 132.1 | 54.0 | 64.0 | 55.0 | 68.5 |
+| relative to hxScript, higher is slower | 1.00x | 1.71x | 3.54x | 1.45x | 1.72x | 1.48x | 1.84x |
+| parse alone, ms, from the table above | 0.835 | 1.342 | 3.07 | 1.11 | 3.52 | 0.794 | 1.272 |
 
 ```mermaid
 xychart-beta
     title "Whole corpus through the front door (lower is better)"
-    x-axis ["hxScript", "hscript", "iris", "improved", "rulescript", "insanity", "SScript"]
-    y-axis "ms" 0 --> 170
-    bar [36.2, 53.1, 55.8, 63.4, 66.6, 86.1, 148.2]
+    x-axis ["hxScript", "hscript", "iris", "insanity", "improved", "rulescript", "SScript"]
+    y-axis "ms" 0 --> 151
+    bar [37.3, 54.0, 55.0, 63.9, 64.0, 68.5, 132.1]
 ```
 
 Left out of the totals, since not every library completed them this way: `hostStatic`, `strInterp`, `varTyped`, `fnTyped`, `classNew`, `classCall`, `classField`, `abstractOp`.
@@ -326,8 +329,8 @@ Haxe 4.3.7, hxcpp, `-dce no`, Windows, single machine, one sitting, 24-thread bu
 | library | version | notes |
 | --- | --- | --- |
 | hxScript | working tree | always tracks positions |
-| [hscript-insanity](https://github.com/inky03/hscript-insanity) ("insanity") | `ad67b16` (**pinned**) | always tracks positions |
-| [SScript](https://github.com/ThomasDarkson/SScript) | `9102af3` (main, 22.4.1) | always tracks positions |
+| [hscript-insanity](https://github.com/inky03/hscript-insanity) ("insanity") | `f2a3584` (main) | always tracks positions |
+| [SScript](https://github.com/ThomasDarkson/SScript) | `bd91590` (main, 23.0.0) | always tracks positions |
 | [hscript](https://github.com/HaxeFoundation/hscript) | `7d5eacc` (master, post-2.7.0) | built both ways |
 | [hscript-improved](https://github.com/CodenameCrew/hscript-improved) | `48ec0f4` (master) | built both ways |
 | [hscript-iris](https://github.com/pisayesiwsi/hscript-iris) | `62d828b` (**dev**) | built both ways |
@@ -341,37 +344,60 @@ and two things about measuring it are worth stating rather than leaving in the r
 timed section where every other library has only execution there; its `parser` and `interp` are
 both public, so the runner parses once and runs the tree, which is what the RuleScript runner does
 for the same reason. And its `Expr` carries `pmin`, `pmax` and `line` unconditionally, so like
-hxScript and insanity it is built once rather than both ways.
+hxScript and insanity it is built once rather than both ways. Version 23 added two interpreter
+options, compiling a function's body on its first call and caching locals in that compiled code (the
+second on C++ only), and turned both on by default. The runner leaves them there, so what is measured
+is the library as it ships.
 
-**No library moved this run.** Every one of them is at the commit the table above names, and the
-corpus is unchanged, so this table and the previous one can be read against each other. That makes
-the whole row of them a control, and the answer is that nothing here moved beyond noise:
+**Two libraries moved this run, and the other five are the control.** hscript-insanity went from its
+pinned commit to the tip of `main`, and SScript from 22.4.1 to 23.0.0. Everything else is at the
+commit it was measured at last time, the corpus is unchanged, and the shared set is the same 35
+cases, so those five can be read against the previous table:
 
 | lower is faster | previous | this run | change |
 | --- | --- | --- | --- |
-| hscript, us per operation | 0.704 | 0.709 | +1% |
-| hscript-improved | 0.977 | 0.968 | -1% |
-| hscript-iris | 0.711 | 0.673 | -5% |
-| RuleScript | 0.917 | 0.889 | -3% |
-| SScript | 1.328 | 1.326 | 0% |
-| insanity | 1.402 | 1.412 | +1% |
-| **hxScript** | **0.662** | **0.671** | **+1%** |
+| hscript, us per operation | 0.709 | 0.716 | +1% |
+| hscript-improved | 0.968 | 0.977 | +1% |
+| hscript-iris | 0.673 | 0.696 | +3% |
+| RuleScript | 0.889 | 0.925 | +4% |
+| **hxScript** | **0.671** | **0.681** | **+1%** |
 
-Seven libraries at the same commits as before, four of them within a percent and none further out
-than the 5% hscript-iris moved. That is drift in the machine rather than in any of the code, and it
-is why the caveats below say to read the ratios and not the microseconds. hxScript is in the same
-band as the rest despite having a changed working tree: nothing in this release was aimed at the
-interpreter's hot path. The rule still stands: read a column against the others in ITS OWN table,
-never against a number from an earlier run.
+All five moved the same way, by 1% to 4%. That is drift in the machine rather than in any of the
+code, inside the 5% noise floor, and it is why the caveats below say to read the ratios and not the
+microseconds. hxScript's one source change since the last run is in `setup/Autowire.hx`, which runs
+at compile time and not in the interpreter. The two libraries that did move, moved by far more than
+that:
 
-**insanity is pinned rather than current, and that is deliberate.** Its `main` is 46 commits further
-on and runs the ordinary cases about 11% faster, but a script that declares a class no longer runs
-there at all: `classNew`, `classCall` and `classField` fail with `Null Function Pointer` out of the
-library, reproduced outside the harness on a three-line script. `Script` is meant to take a class
-declaration, since `Interp.startDecl` handles `DClass` and the scripted class's `module` parameter
-is optional, so this reads as a regression rather than a change of API. Measuring the tip would have
-published three `not supported` cells for something the library supports and intends to, so this
-table stays on the last commit where the whole corpus runs. It moves once the fix lands.
+| lower is faster | previous | this run | change |
+| --- | --- | --- | --- |
+| insanity, us per operation | 1.412 | 1.158 | -18% |
+| insanity, us per call | 6.054 | 2.369 | -61% |
+| insanity, parse, ms | 1.019 | 1.342 | +32% |
+| SScript, us per operation | 1.326 | 0.994 | -25% |
+| SScript, us per call | 4.943 | 4.965 | 0% |
+| SScript, parse, ms | 2.464 | 3.07 | +25% |
+
+The rule still stands: read a column against the others in ITS OWN table, never against a number
+from an earlier run. The table above does not break that rule: it compares each library only with
+itself, and it means something only because the five that did not move show the machine held still.
+
+**insanity is measured at its tip again.** It had been pinned to `ad67b16` because on its `main` a
+script that declares a class failed with `Null Function Pointer`. That is fixed: `classNew`,
+`classCall` and `classField` all run and return the expected values. They are also where the library
+changed most. `classNew` is eight times cheaper than at the pinned commit and `classCall` three
+times. The call cases are between 1.8 and 3.8 times cheaper, and `loopCont`, one `continue` per
+iteration, costs about a third of what it did, because commit `21b3469` replaced the exception it
+threw to unwind `return`, `break` and `continue` with flags. Ordinary operations are a median 10%
+cheaper. `abstractOp` halved and is now 5% under hxScript's, which is at this suite's noise floor
+rather than a result. Parsing is the one thing that got slower, by about a third.
+
+**SScript 23 went two ways at once, and its average hides it.** The per-operation average fell by a
+quarter, but that is four cases that had been far out of line with the rest of SScript's own column
+coming back into it: `indexSet` is 11 times cheaper than on 22.4.1, `index` and `arrayPush` nearly 4
+times, and `mapLiteral` twice. `strInterp`, outside the shared set, is 4 times cheaper as well. The
+other 24 cases in that average got a median 29% dearer, up to 47% on `forRange`, and only `strConcat`
+got cheaper. The call cases did not move, which is consistent with the new compiled functions still
+unwinding `return` by throwing. Parsing is a quarter slower.
 
 **hscript-improved is built with its own macros now, and was not before.** `-cp` does not read a
 library's `extraParams.hxml`, and hscript-improved's carries `UsingHandler.init()` and
