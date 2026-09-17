@@ -58,7 +58,14 @@ Only same-session pairs appear as verified deltas below.
 
 ## Changes
 
+Each entry opens with the commits that made the change, followed by any later commit that fixed,
+finished or reworked it, so the cause of a number can be read in full rather than inferred from the
+diff. Every hash links to the commit on GitHub, where most messages carry the measurements behind
+the change in more detail than this page does.
+
 ### The constructor no longer seeds defaults nothing was going to read
+
+- [`9f22bc7c`][9f22bc7c] stops `Interp.new` seeding defaults every construction site seeds again.
 
 The entry below made the default wildcard import cheap to resolve. This one stops resolving it twice.
 
@@ -111,6 +118,8 @@ fields on a generated bridge, which is also why it loses 6x on method calls.
 
 ### Identifiers sliced out of the source instead of grown a character at a time
 
+- [`9c72f844`][9c72f844] slices identifiers, `@metadata` names and `#if` directives.
+
 The lexer built every identifier with `id += String.fromCharCode(char)`: an allocation per character
 plus a copy of everything read so far, so lexing one was quadratic in its length, on the most
 common token in any source. `readPos` already indexes the input, so the whole identifier comes out in
@@ -123,6 +132,13 @@ Worth keeping in proportion: a 200KB mod parses in about 8ms either way, so pars
 bottleneck and this does not make it one.
 
 ### A closure no longer copies its captured scope on every call
+
+- [`5e5425b8`][5e5425b8] reuses one frame per closure, and fixes the `inTry` unwinding bug described
+  at the end of this entry.
+- [`95637f93`][95637f93] adds `callCap20` to the cross-library suite, validated against this fork
+  before and after the change.
+- [`f40e950d`][f40e950d] records the per-library table below, as measured at the time. The current
+  figures are in [`benchmarks.md`](benchmarks.md).
 
 `buildFunction` built the call frame with `duplicate(capturedLocals)` per invocation, so a script call
 cost O(size of the enclosing scope). A closure now keeps one frame map and reuses it; only re-entry
@@ -158,6 +174,12 @@ but not its declarations, leaving them on `declared` for an enclosing `restore` 
 `locals` was the CALLER's scope, so it wrote a callee's parameters into its caller.
 
 ### The default wildcard import, resolved once per world instead of once per interpreter
+
+- [`141006bb`][141006bb] caches a wildcard import's bindings on the world.
+- Later, [`be646edc`][be646edc] fixed the filter whose result that cache holds. It compared a whole
+  module path against a bare type name, so `import pack.*` brought in nothing for any packaged type.
+  The bug is older than the cache, which is why the root-package wildcard measured here looked
+  healthy: an unpackaged module was the only kind that could pass.
 
 Constructing an interpreter cost **44.2us**, and **42.7us of it was `setDefaults`** seeding
 `Config.globalImports`, which is `'' => IAll`: a wildcard import of the root package. `setDefaults`
@@ -201,6 +223,10 @@ parse-error traces).
 
 ### Core types kept off the type-resolution path
 
+- [`00cd8111`][00cd8111] checks a core type directly once the `imports` lookup misses.
+- Later, [`1e2cd54e`][1e2cd54e] removed the `imports` lookup this entry ends on as what is left; see
+  *A typed write remembers how its annotation is enforced*.
+
 A type annotation was costing far more than the check it stands for. `tryCast` runs on every write to
 an annotated variable, every annotated argument and every annotated return, and it re-resolved the
 annotation from scratch each time: `p.join('.')` (a string allocation, for a path that is one element
@@ -230,6 +256,16 @@ What is left is one `imports` lookup plus the check itself, about 0.2us per type
 needs the resolved type cached on the slot or on the closure, which is a bigger change than this one.
 
 ### Block entry, and dead control-flow handlers
+
+- [`a40947bb`][a40947bb] drops the `Stop` handlers nothing throws to any more.
+- [`f2a037d3`][f2a037d3] looks a loop counter up once per increment instead of five times.
+- [`79c8a96a`][79c8a96a] scopes a block without allocating an iterator. The guard it removes was
+  [`af48eebc`][af48eebc]'s replacement for `Lambda.count`, which tested for one entry instead of
+  counting them all but still allocated to do it.
+- [`1d5d03a8`][1d5d03a8] clears a recycled locals map before it reaches a new scope, the bug fixed on
+  the way below. The pool itself came from upstream hscript-insanity, in [`0002455e`][0002455e].
+- Later, [`f0e7f888`][f0e7f888] rewrote the increment again, onto the `readLocal`/`writeLocal` pair
+  from *Per-operation dispatch*.
 
 Three changes, measured as two steps against same-session controls.
 
@@ -281,7 +317,13 @@ reached fresh interpreters, whose first frame is pushed with no locals: a script
 scope could start out holding another scope's variables. It also made the block guard above
 nondeterministic, since it tested a map that might be dirty.
 
-### Control flow by flag instead of exceptions (`bc537e6`, `934502e`)
+### Control flow by flag instead of exceptions
+
+- [`bc537e63`][bc537e63] propagates `return` by flag.
+- [`934502ea`][934502ea] propagates `break` and `continue` the same way.
+- [`aac5e06e`][aac5e06e] commits the `ReturnTest` and `LoopTest` suites both were verified with.
+- Later, [`a40947bb`][a40947bb] removed the `try/catch` handlers for the `Stop` these two stopped
+  throwing; see *Block entry, and dead control-flow handlers*.
 
 The big one. `return`, `break` and `continue` unwound by throwing `Stop`, and a thrown exception costs
 microseconds on static targets. `return` alone was about **94% of the cost of every script call**.
@@ -312,7 +354,15 @@ Verified deltas (same session):
 | `loopPlain` | 69 | 72 | unchanged |
 | `arith` / `locals` / `blocks` / `field` / `method` | | unchanged | |
 
-### Hot-path types as `@:structInit` classes (`168596d`)
+### Hot-path types as `@:structInit` classes
+
+- [`168596d8`][168596d8] turns `Variable`, `StackFrame`, `Expr` and `Position` into classes.
+- Later, [`a001dec4`][a001dec4] gave the lexer's pushback entries the same treatment, and
+  [`af87d5b9`][af87d5b9] found where it does not pay: a type written once and read once. See
+  *Cold code out of `expr()`*.
+- Later still, [`91a66c5b`][91a66c5b] gave `Variable` an unboxed numeric lane behind `r`, for the
+  HashLink backend, which is why construction reads `{ref: value}` now. The interpreter measured
+  identical with it, since the accessors inline away.
 
 `Variable`, `StackFrame`, `Expr` and `Position` were anonymous structures, which resolve fields **by
 name at runtime** on static targets where a class field is a direct offset. All four are read on
@@ -331,7 +381,12 @@ essentially every interpreter step.
 needed a type annotation. Worth applying to any remaining hot anonymous structure. (`r` later became a
 property over `Variable`'s unboxed numeric lane, so construction reads `{ref: value}` now.)
 
-### Hot-path fixes (`af48eeb`)
+### Hot-path fixes
+
+- [`af48eebc`][af48eebc] makes all three fixes below.
+- Later, [`79c8a96a`][79c8a96a] removed the block-entry test entirely. The single-entry test this
+  commit put in place of `Lambda.count` still allocated a map iterator; see *Block entry, and dead
+  control-flow handlers*.
 
 Three separate issues, measured together (not same-session controlled, so treat as indicative):
 `blocks` -15%, `locals` -15%, `arith` -11%, `field` -11%, `method` -6%.
@@ -344,19 +399,32 @@ Three separate issues, measured together (not same-session controlled, so treat 
   `args?.length ?? (0 != params.length)` because `??` binds looser than `!=`, so the condition was
   `args.length` itself and every call passing arguments ran the argument-fixup path.
 
-### Decomposition (`b837263`, `8d9924f`)
+### Decomposition
+
+- [`b8372633`][b8372633] splits `Parser` into `Lexer` and `Parser`.
+- [`8d9924f7`][8d9924f7] lifts the comprehension and `switch` arms out of `Interp.expr()`.
 
 Behaviour-preserving refactors, both verified performance-neutral: splitting `Parser` into `Lexer`
 plus `Parser`, and lifting the two largest arms of `Interp.expr()` (the comprehension machinery and
 the `switch` evaluator) into their own methods. `Interp` deliberately stays a single class; extracting
 collaborator objects would add a cross-object indirection to operations that run on every AST node.
 
-### Restructure (`ad39d36`)
+### Restructure
+
+- [`ad39d368`][ad39d368] reorganizes the packages, one type per file.
+- [`c4ab7b2e`][c4ab7b2e] drops the 46 imports the mechanical split left behind.
 
 Package reorganization, verified **performance-neutral** against a same-session control (442/384/314/
 1164/310/156 before versus 435/378/306/1118/301/155 after).
 
 ### Abstract operators and typed writes (`@:op`)
+
+- [`357914ad`][357914ad] dispatches binary `@:op` operators and checks typed writes.
+- [`4135de6a`][4135de6a] also consults the right-hand operand, for `+` and `*`.
+- [`f834fa62`][f834fa62] extends dispatch to unary operators and `@:arrayAccess`, the change measured
+  at the end of this entry.
+- Later, [`c195efd6`][c195efd6] rewrote the binary dispatch these checks sit in; see *Operator
+  dispatch by jump table*.
 
 The one change so far that cost time rather than saving it, kept because it buys correctness:
 dispatching `@:op` operators on abstracts, and enforcing a variable's declared type on every write
@@ -391,6 +459,9 @@ from the relational-operator result.
 
 ### Measured and left alone: `strictAccess` and the blacklist
 
+- [`d64a3e2a`][d64a3e2a] adds the guard cases and records the result.
+- [`141006bb`][141006bb] is the change that silenced the blacklist traces described below.
+
 Both are on in a shipping host, and both looked like they belonged on this list: `checkAccess` runs on
 every field read and write, and the blacklist walk (four `EnumValueMap` lookups and a linear scan
 each) sits behind every type resolution. The `fieldGuard` / `methodGuard` / `instFieldGuard` /
@@ -416,12 +487,20 @@ it.
 
 ### Per-operation dispatch: one hash per name, one field test per accessor
 
+- [`f0e7f888`][f0e7f888] makes all four changes below.
+- Later, [`50f88d7c`][50f88d7c] took out an `exists`-then-`get` pair left in the `value.field` fast
+  path, which hashed every qualified name four times; see *what a qualified call costs*.
+- Later, [`c3f9c4ba`][c3f9c4ba] fixed that fast path skipping a host enum's constructor. A short name
+  already in scope, such as `BlendMode.Add` after an import, was answered by reflection and read as
+  null, while the qualified `h2d.BlendMode.Add` took the long path and built the constructor. The fast
+  path now asks the same question the long one does.
+
 Prompted by [`benchmarks.md`](benchmarks.md), which put plain hscript at roughly **half** this fork's
 time on per-operation work while this fork stayed 5x ahead on calls. The gap was not in the operators
 themselves: `not`, `neg`, `index` and `indexSet` have bodies here that are within one type check of
 hscript's and still cost 1.8x, which puts the cost before the case body, in what every node pays.
 
-Four things, all of them named as "remaining known costs" in the list below before this pass:
+Four things:
 
 **Names were hashed two to four times per access.** Reading an identifier ran `captures.exists` then
 `captures.get`, then `locals.exists` then a `getLocal` that looked the slot up again. Writing ran
@@ -467,6 +546,10 @@ because a single pair put `neg` at -18% on one run and +6% on the next. All elev
 `--interp` and hxcpp.
 
 ### Parsing: most of the "4x slower" was position tracking
+
+- [`a001dec4`][a001dec4] replaces the pushback `List` of anonymous structures and the reflective
+  `Type.enumEq` in `maybe`.
+- [`9c72f844`][9c72f844], identifier slicing, is the other parser change, in its own entry above.
 
 [`benchmarks.md`](benchmarks.md) put this fork's parser at roughly **4x** hscript's. That number is
 real but it is not a like-for-like comparison, and it took a controlled experiment to see why.
@@ -516,7 +599,74 @@ is worth knowing: allocation during parse is paid for again during execution.
 > attribution, because parsing happens outside the benchmark's timer. Re-running both binaries interleaved
 > at the same moment gave -1.6%, and showed the machine had drifted nearly 9% faster in between.
 
+### Cold code out of `expr()`, and a binding without a pair object
+
+- [`af87d5b9`][af87d5b9] makes both changes.
+- Later, [`f8289416`][f8289416] ran into the same layout effect from the other side, described at the
+  end of this entry.
+
+Two changes aimed at what hxcpp generates rather than at what the interpreter does.
+
+**`expr()` is size-bound.** It is one enormous switch, and every line inside it competes for
+registers and instruction cache with the handful of node kinds that actually run in a loop. `ETry`
+was the largest cold body still inline, at 44 lines and declaring a closure, and `EMeta` was
+another 22 lines. Both moved to `@:noinline` methods. Hot node kinds stay inline, since extracting
+one would add a call to something evaluated constantly.
+
+**`declared` is two parallel arrays** instead of an array of `{n, old}` pairs. An entry is pushed for
+every variable declaration, every function parameter and every caught exception, so the pair object
+was an allocation on one of the most frequently written paths in the interpreter.
+
+Two attempts were measured and dropped, and both are worth knowing:
+
+- A `@:structInit` class for the pair measured 3.1% slower than the anonymous structure. Each entry
+  is written once and read once, so there is no repeated field access to win back the allocation.
+  The rule in *Hot-path types as `@:structInit` classes* applies to types read many times per
+  evaluation, and does not generalise.
+- Hoisting `params[i]` into a local and precomputing the rest-argument index in the argument-binding
+  loop also measured slower.
+
+The gain is small and not settled: interleaved A/B pairs at x5 gave -1.5%, -3.1%, -5.0% and +0.9%, a
+mean near -2% with about 3% of noise per pair either way. Both changes are strictly less work than
+what they replace.
+
+The layout effect showed up again in [`f8289416`][f8289416], from the other direction. Adding one
+small method to `Interp`, for a conversion no hot path performs, moved every hot path's code around
+and cost the whole micro-benchmark 3 to 9%, measured against two builds of the unchanged source that
+agreed within 1.5%. The helper went to `AbstractTools` instead. A new method on `Interp` is not free
+even when nothing hot calls it.
+
+### Measured and left alone: what a qualified call costs
+
+- [`50f88d7c`][50f88d7c] commits the probe, the measurements, and two tidies on the path.
+
+A qualified call cost about 385ns more than a bare one: over 200k calls, `bump(a)` ran in 438ms and
+`Caller.bump(a)` in 515ms. [`test/cpp/SwitchProbe.hx`](../test/cpp/SwitchProbe.hx) reproduces it and
+rules out each explanation that looked likely:
+
+- **Not interpreter switching.** Every scripted class builds its own `Interp`, and `expr` keeps a
+  static pointing at whichever is evaluating, so a call into another class rewrites it going in and
+  coming back. The probe counts exactly two writes per call. Tracking is now skipped unless something
+  declares a `null` property accessor, the only thing that reads the static, and the gap moved from
+  19% to 18%.
+- **Not crossing classes.** Calling a static in the caller's own class through a qualified name cost
+  515ms against 517ms for another class's, while the bare call cost 438ms. Qualification is the whole
+  difference, and one interpreter per world would not have addressed it.
+- **Not reflection.** A direct field read is 1ns, `Reflect.field` and `Reflect.getProperty` are both
+  16ns, and a compiled switch over field names, which is what a generated accessor would emit, is
+  15ns. That is sixteen of the 385, and no macro can do better than the reflection it would replace.
+
+Two things on the path were tidied anyway, both strictly less work and neither measurable: the
+`value.field` fast path from *Per-operation dispatch* asked `exists` of two maps and then `get` of the
+same two, and the interpreter tracking above. Most of the 385ns is still unattributed, and finding it
+wants a sampling profiler rather than more probes.
+
 ### Operator dispatch by jump table instead of a closure table
+
+- [`c195efd6`][c195efd6] replaces the per-interpreter `binops` map with two integer switches.
+- [`edd3924a`][edd3924a] drops the doc comment the removed map left behind.
+- Later, [`45f7eea0`][45f7eea0] reworked `combine`, the compound-assignment half of this dispatch; see
+  the next entry.
 
 `binops` was a `Map<String, Expr->Expr->Dynamic>` built per interpreter, so every operator a script
 evaluated cost a string hash, a null test and a call through a closure field, and every interpreter
@@ -547,7 +697,44 @@ Interpreter-wide that is 16 to 23%. The instantiation rows are the closures no l
 that half of the gain is paid to every scripted class and every scripted instance, whether or not it
 ever evaluates an operator.
 
+### Int or Float: whether a sum widens is asked only when it carries
+
+- [`7f450741`][7f450741] stops a `Float` total wrapping into a negative number.
+- [`f6b1a03b`][f6b1a03b] makes `Int` overflow wrap as compiled code does, and gives `numAdd`, `numSub`
+  and compound assignment the question of whether an operand is meant to widen.
+- [`45f7eea0`][45f7eea0] promotes a total accumulated through a host field, and moves that question
+  to the carry, which is the speedup below.
+
+A correctness fix first, with a speedup that came with it. On hxcpp a `Dynamic` cannot tell a whole
+`Float` from an `Int`: `2.0` answers true to `is Int` and `TInt` to `Type.typeof`, so only a declared
+type can say whether a sum is allowed to leave `Int` range. The first commit had addition and
+subtraction work a sum out both ways and keep the narrow answer only when it agrees, which measured
+inside the noise on the interpreter's own arithmetic loop. The second made them take whether an operand
+is meant to widen, so a declared `Int` wraps and a declared `Float` does not.
+
+The third found a field of a host object that the question always answered wrongly, since Haxe keeps
+no field types at runtime, so a total accumulated through one wrapped. A field nothing declares now
+promotes. In the same change the question moved: compound assignment worked out whether either side
+widens before doing anything, while only an addition that carries past `Int` cares. `combine` now
+takes the operand expressions and asks on the carry, and `addExpr` and `subExpr` split into an
+evaluating half and a value half that the compound path shares.
+
+| lower is faster | before | after |
+| --- | --- | --- |
+| `field` | 118 | 111 |
+| `fieldGuard` | 120 | 114 |
+| `instFieldGuard` | 82 | 68 |
+
+Multiplication deliberately keeps wrapping. Every hash and seeded generator is built on it, and
+promoting would break them for good: a `Float` carries 53 bits of mantissa, so a product past that
+has already lost the low bits the following mask wanted.
+
 ### A scripted instance stands on its class's names instead of copying them
+
+- [`7baeca6a`][7baeca6a] stands an instance on its class's variable table.
+- [`f57b183d`][f57b183d] does the same for its import table, the second half of this entry.
+- Both rest on `Bindings`, which [`b634970b`][b634970b] introduced so compiled globals could see every
+  write to `Interp.variables`. The fallback itself is new in `7baeca6a`.
 
 Constructing one used to copy the class's whole variable table into the new instance's interpreter,
 so a host's script API cost something per object spawned and the cost grew with the API. Measured by
@@ -588,6 +775,9 @@ Against the numbers this page recorded before any of it, `newInstBare` is 145 to
 `newInstGuard` 197 to 104.
 
 ### A typed write remembers how its annotation is enforced
+
+- [`1e2cd54e`][1e2cd54e] caches the plan on the slot, packed into one field. It finishes what
+  [`00cd8111`][00cd8111] named as left over in *Core types kept off the type-resolution path*.
 
 `tryCast` resolved the written type name against `imports` on every store, to see whether an import
 shadows it, and for `Int` or `String` that is a map miss every time. Then `castCoreType` decided which
@@ -645,40 +835,45 @@ gain:
 
 Interpreter-wide that is 8 to 23%, and 8 to 10x on instantiation.
 
-Remaining known costs, none currently urgent:
-
-- Every variable access is still one string hash into a `Map`. The duplicate hashes are gone;
-  removing the remaining one means slot-resolving identifiers at parse time, which is a real redesign.
-- A typed write still costs one `imports` lookup, about 0.2us. Caching the resolved type on the slot
-  or on the closure would remove it.
-- `resolveField` still allocates an array and an enum instance for a **chained** access (`a.b.c`), and
-  for any base that is not a plain value. Single-hop `value.field` no longer does.
-- **Every AST node is three objects**: an `Expr`, its `ExprDef`, and a `Position` allocated fresh
-  per node in `getPos`. hscript compiled without `-D hscriptPos` has one: the enum itself is the
-  expression. That is three times the parse allocation and an extra indirection on every evaluation,
-  and it is the whole of the 4x parse gap in [`benchmarks.md`](benchmarks.md). Folding the position
-  fields into `Expr` and tracking the current node rather than the current `Position` would remove
-  one object per node; it touches four files, and `ModuleDecl` carries a `Position` too, so it is
-  the largest remaining item and the one most likely to need care.
-- `expr` takes four parameters where hscript's takes one, so every recursive call pushes three extra.
-  Splitting a one-argument hot path from a context-carrying cold one is possible but `EBlock` passes
-  its context to every child, so most nodes would still take the wide path.
-- Every generated bridge override tests `__interp.locals.exists(name)` and then reads it, so a native
-  method the engine calls per frame pays two map hashes whether or not the script overrides it. The
-  method set is known at macro time and could be a per-instance slot.
-- A native method call into a scripted subclass costs 11.3ns where the same call on a plain host
-  object costs 1.3, because the generated override tests `__interp.locals.exists(name)` before
-  finding out the script did not override it. Paid per bridged method per instance per frame. The
-  method set is known at macro time and could be a per-instance slot.
-- A scripted instance is about 6us to construct, and an overridden method called from native code is
-  about 1.17us, which is the general script-call cost rather than anything the bridge adds.
-- `Environment.resolve` iterates every module and hashes into each one's table; `rebuildTypes` could
-  build one flat index.
-- `Reflect.makeVarArgs` plus `Reflect.callMethod` remain in the call path. Measurement says they are
-  not dominant (a native method call goes through the same dispatch at about 1.25us), so this is not
-  the next thing to chase.
-- Parsing, not setup, is what script load costs: an 11KB script parses in about 714us, against ~44us
-  of interpreter setup. The two obvious targets there, the token pushback `List` and the reflective
-  `Type.enumEq` in `Lexer.maybe`, have both since been taken (see *most of the "4x slower" was
-  position tracking* above), so what is left of parse cost is the three-objects-per-AST-node item
-  listed further up.
+[0002455e]: https://github.com/MeguminBOT/hxscript/commit/0002455e
+[af48eebc]: https://github.com/MeguminBOT/hxscript/commit/af48eebc
+[ad39d368]: https://github.com/MeguminBOT/hxscript/commit/ad39d368
+[c4ab7b2e]: https://github.com/MeguminBOT/hxscript/commit/c4ab7b2e
+[168596d8]: https://github.com/MeguminBOT/hxscript/commit/168596d8
+[bc537e63]: https://github.com/MeguminBOT/hxscript/commit/bc537e63
+[934502ea]: https://github.com/MeguminBOT/hxscript/commit/934502ea
+[b8372633]: https://github.com/MeguminBOT/hxscript/commit/b8372633
+[8d9924f7]: https://github.com/MeguminBOT/hxscript/commit/8d9924f7
+[aac5e06e]: https://github.com/MeguminBOT/hxscript/commit/aac5e06e
+[357914ad]: https://github.com/MeguminBOT/hxscript/commit/357914ad
+[4135de6a]: https://github.com/MeguminBOT/hxscript/commit/4135de6a
+[f834fa62]: https://github.com/MeguminBOT/hxscript/commit/f834fa62
+[1d5d03a8]: https://github.com/MeguminBOT/hxscript/commit/1d5d03a8
+[141006bb]: https://github.com/MeguminBOT/hxscript/commit/141006bb
+[a40947bb]: https://github.com/MeguminBOT/hxscript/commit/a40947bb
+[f2a037d3]: https://github.com/MeguminBOT/hxscript/commit/f2a037d3
+[79c8a96a]: https://github.com/MeguminBOT/hxscript/commit/79c8a96a
+[00cd8111]: https://github.com/MeguminBOT/hxscript/commit/00cd8111
+[d64a3e2a]: https://github.com/MeguminBOT/hxscript/commit/d64a3e2a
+[f0e7f888]: https://github.com/MeguminBOT/hxscript/commit/f0e7f888
+[a001dec4]: https://github.com/MeguminBOT/hxscript/commit/a001dec4
+[5e5425b8]: https://github.com/MeguminBOT/hxscript/commit/5e5425b8
+[9c72f844]: https://github.com/MeguminBOT/hxscript/commit/9c72f844
+[95637f93]: https://github.com/MeguminBOT/hxscript/commit/95637f93
+[9f22bc7c]: https://github.com/MeguminBOT/hxscript/commit/9f22bc7c
+[f40e950d]: https://github.com/MeguminBOT/hxscript/commit/f40e950d
+[af87d5b9]: https://github.com/MeguminBOT/hxscript/commit/af87d5b9
+[50f88d7c]: https://github.com/MeguminBOT/hxscript/commit/50f88d7c
+[7f450741]: https://github.com/MeguminBOT/hxscript/commit/7f450741
+[f8289416]: https://github.com/MeguminBOT/hxscript/commit/f8289416
+[f6b1a03b]: https://github.com/MeguminBOT/hxscript/commit/f6b1a03b
+[be646edc]: https://github.com/MeguminBOT/hxscript/commit/be646edc
+[91a66c5b]: https://github.com/MeguminBOT/hxscript/commit/91a66c5b
+[c3f9c4ba]: https://github.com/MeguminBOT/hxscript/commit/c3f9c4ba
+[b634970b]: https://github.com/MeguminBOT/hxscript/commit/b634970b
+[c195efd6]: https://github.com/MeguminBOT/hxscript/commit/c195efd6
+[45f7eea0]: https://github.com/MeguminBOT/hxscript/commit/45f7eea0
+[7baeca6a]: https://github.com/MeguminBOT/hxscript/commit/7baeca6a
+[f57b183d]: https://github.com/MeguminBOT/hxscript/commit/f57b183d
+[1e2cd54e]: https://github.com/MeguminBOT/hxscript/commit/1e2cd54e
+[edd3924a]: https://github.com/MeguminBOT/hxscript/commit/edd3924a
