@@ -989,6 +989,14 @@ class Scripted {
 
 				switch (field.kind) {
 					case FMethod(kind):
+						/**
+						 * Inline `toString` is skipped below (it cannot be overridden) but it is
+						 * still inherited. If we then emit our own `toString` without `override`,
+						 * Haxe errors (`lime.math.Vector4`). Count it before that skip.
+						 */
+						if (field.name == 'toString')
+							hasToString = true;
+
 						if (omittedFields.contains(field.name))
 							continue;
 
