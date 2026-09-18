@@ -14,13 +14,15 @@ import sys.io.File;
  * not a limitation of this library: a native base's methods can only be overridden by a subclass
  * that existed when the host was built, and a script does not exist then. The bridge is that
  * subclass, generated ahead of time, overriding what the base offers and forwarding into the
- * interpreter. So "any class can be extended" means "any class you bridged", and what follows is the
- * three ways of deciding which.
+ * interpreter. So "any class can be extended" means "any class you bridged", and what follows is how
+ * that set is chosen.
  *
  * - by default, the curated `bases` list of each active library, which is small and costs little;
  * - `-D hxscript_bridge_types=StringBuf,game.Actor`, exactly those classes;
  * - `-D hxscript_bridge_packages=flixel,openfl.display`, every eligible class under those roots;
- * - `-D hxscript_bridge_all`, every eligible class under every active library's roots.
+ * - `-D hxscript_bridge_all`, every eligible class under every active library's roots;
+ * - `-D hxscript_bridge_exclude=<paths>`, prefixes dropped from a package / all scan (not from
+ *   `bridge_types` or a preset `bases` list).
  *
  * The last two are compile-time decisions about binary size, and they are not free: a bridge carries
  * one generated override per inherited non-`inline`, non-`final` method. `-D hxscript_verbose`
@@ -208,10 +210,25 @@ class Bridges {
 		if (roots.length == 0)
 			return found;
 
+		var exclude:Array<String> = [];
+		var excluded:Null<String> = Context.definedValue('hxscript_bridge_exclude');
+		if (excluded != null) {
+			for (raw in excluded.split(',')) {
+				var one:String = StringTools.trim(raw);
+				if (one.length > 0)
+					exclude.push(one);
+			}
+		}
+
 		var seen:Map<String, Bool> = [];
 
 		for (root in roots) {
-			for (path in modulesUnder(root)) {
+			if (isExcluded(root, exclude)) {
+				passed.set(root, 'excluded');
+				continue;
+			}
+
+			for (path in modulesUnder(root, exclude)) {
 				if (seen.exists(path))
 					continue;
 
@@ -232,9 +249,10 @@ class Bridges {
 	 * already typed and a class nobody referenced is exactly the kind a script wants to extend.
 	 *
 	 * @param root The package.
+	 * @param exclude Prefixes not to walk.
 	 * @return Fully-qualified module paths.
 	 */
-	static function modulesUnder(root:String):Array<String> {
+	static function modulesUnder(root:String, exclude:Array<String>):Array<String> {
 		var found:Array<String> = [];
 		var relative:String = root.split('.').join('/');
 
@@ -243,7 +261,7 @@ class Bridges {
 			if (!FileSystem.exists(at) || !FileSystem.isDirectory(at))
 				continue;
 
-			walk(at, root, found);
+			walk(at, root, found, exclude);
 		}
 
 		return found;
@@ -253,13 +271,19 @@ class Bridges {
 	 * @param dir The directory to read.
 	 * @param pack The package it holds.
 	 * @param into Filled with what is found.
+	 * @param exclude Prefixes not to walk.
 	 */
-	static function walk(dir:String, pack:String, into:Array<String>):Void {
+	static function walk(dir:String, pack:String, into:Array<String>, exclude:Array<String>):Void {
 		for (entry in FileSystem.readDirectory(dir)) {
 			var at:String = dir + '/' + entry;
 
 			if (FileSystem.isDirectory(at)) {
-				walk(at, pack + '.' + entry, into);
+				var child:String = pack + '.' + entry;
+				if (isExcluded(child, exclude)) {
+					passed.set(child, 'excluded');
+					continue;
+				}
+				walk(at, child, into, exclude);
 				continue;
 			}
 
@@ -267,9 +291,23 @@ class Bridges {
 			if (entry == 'import.hx')
 				continue;
 
-			if (StringTools.endsWith(entry, '.hx'))
-				into.push(pack + '.' + entry.substr(0, entry.length - 3));
+			if (StringTools.endsWith(entry, '.hx')) {
+				var path:String = pack + '.' + entry.substr(0, entry.length - 3);
+				if (isExcluded(path, exclude)) {
+					passed.set(path, 'excluded');
+					continue;
+				}
+				into.push(path);
+			}
 		}
+	}
+
+	/** @return Whether `path` is `one` or under `one`. */
+	static function isExcluded(path:String, exclude:Array<String>):Bool {
+		for (one in exclude)
+			if (path == one || StringTools.startsWith(path, one + '.'))
+				return true;
+		return false;
 	}
 
 	/**
