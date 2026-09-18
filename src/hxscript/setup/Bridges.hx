@@ -291,6 +291,10 @@ class Bridges {
 			if (entry == 'import.hx')
 				continue;
 
+			/** `Foo.macro.hx` is a companion module; stripping `.hx` yields `Foo.macro`, which resolves to nothing. */
+			if (StringTools.endsWith(entry, '.macro.hx'))
+				continue;
+
 			if (StringTools.endsWith(entry, '.hx')) {
 				var path:String = pack + '.' + entry.substr(0, entry.length - 3);
 				if (isExcluded(path, exclude)) {
