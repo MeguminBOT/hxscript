@@ -838,41 +838,42 @@ class Scripted {
 					}
 
 					/**
-					 * Rewrites a `super(...)` call for the bridge, dropping trailing nulls so an optional argument
-					 * keeps its default instead of being overwritten.
+					 * Rewrites a `super(...)` call for the bridge, dropping trailing nulls so an optional
+					 * argument keeps its default instead of being overwritten.
+					 *
+					 * Only `super(...)` is stripped, and only trailing nulls. Every other call keeps
+					 * explicit `null`: `LoaderInfo.create(null)` is a required argument, and dropping it
+					 * becomes `create()` (`Not enough arguments, expected loader:…`).
 					 *
 					 * @param e The expression to rewrite.
 					 * @return The rewritten expression.
 					 */
+					function dropTrailingNulls(params:Array<Expr>):Array<Expr> {
+						var out:Array<Expr> = params.copy();
+						while (out.length > 0) {
+							switch (out[out.length - 1].expr) {
+								case EConst(CIdent('null')):
+									out.pop();
+								default:
+									break;
+							}
+						}
+						return out;
+					}
+
 					function mapSuper(e:Expr) {
 						return switch (e.expr) {
 							case ENew(t, params):
-								var newParams:Array<Expr> = [];
-								for (param in params) {
-									switch (param.expr) {
-										case EConst(CIdent('null')):
-										default:
-											newParams.push(param);
-									}
-								}
-
 								if (StringTools.endsWith(t.name, '_Impl_'))
 									t.name = t.name.replace('_Impl_', '');
 
 								{
 									pos: pos,
-									expr: ENew(t, [for (param in newParams) param.map(mapSuper)])
+									expr: ENew(t, [for (param in params) param.map(mapSuper)])
 								}
 
 							case ECall(e, params):
-								var newParams:Array<Expr> = [];
-								for (param in params) {
-									switch (param.expr) {
-										case EConst(CIdent('null')):
-										default:
-											newParams.push(param);
-									}
-								}
+								var mapped:Array<Expr> = [for (param in params) param.map(mapSuper)];
 
 								{
 									pos: pos,
@@ -881,7 +882,12 @@ class Scripted {
 											mapConstructor(type.superClass.t.get(), type.superClass.params);
 										default:
 											e.map(mapSuper);
-									}, [for (param in newParams) param.map(mapSuper)])
+									}, switch (e.expr) {
+										case EConst(CIdent('super')):
+											dropTrailingNulls(mapped);
+										default:
+											mapped;
+									})
 								}
 
 							case EConst(CIdent('super')):
