@@ -5,6 +5,7 @@ import haxe.macro.Context;
 import haxe.macro.Expr;
 import haxe.macro.Type;
 import sys.FileSystem;
+import sys.io.File;
 
 /**
  * Generates one bridge per base scripts may extend, which is `Autowire`'s bridging step.
@@ -282,6 +283,17 @@ class Bridges {
 	 * @return Whether to bridge it.
 	 */
 	static function eligible(path:String):Bool {
+		/**
+		 * Same skip as `cls.params.length > 0` below, decided from source so we never
+		 * call `getType`. On a `@:generic` class (`lime.app.Promise`) that call is a
+		 * compiler error ("Could not determine type for parameter T"), not a thrown
+		 * miss `resolve` can catch, and the rest of the package is not scanned.
+		 */
+		if (looksParameterized(path)) {
+			passed.set(path, 'has type parameters, which erase and cannot be substituted');
+			return false;
+		}
+
 		var found:Null<Type> = Autowire.resolve(path);
 
 		if (found == null) {
@@ -329,6 +341,21 @@ class Bridges {
 				passed.set(path, 'not a class');
 				return false;
 		}
+	}
+
+	static var parameterizedDecl = ~/\b(?:class|abstract)\s+\w+\s*</;
+
+	static function looksParameterized(path:String):Bool {
+		var relative:String = path.split('.').join('/') + '.hx';
+
+		for (dir in Context.getClassPath()) {
+			var at:String = dir + relative;
+			if (!FileSystem.exists(at) || FileSystem.isDirectory(at))
+				continue;
+			return parameterizedDecl.match(File.getContent(at));
+		}
+
+		return false;
 	}
 }
 #end
