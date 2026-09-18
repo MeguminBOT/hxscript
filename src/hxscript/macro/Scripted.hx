@@ -166,6 +166,19 @@ class Scripted {
 			}
 		}
 
+		/** `haxe.Rest<T>` is varargs: it cannot be forwarded as a single super argument. */
+		function isRest(t:Type):Bool {
+			return switch (t) {
+				case TAbstract(r, _):
+					var a = r.get();
+					a.module == 'haxe.Rest' && a.name == 'Rest';
+				case TLazy(f):
+					isRest(f());
+				default:
+					false;
+			}
+		}
+
 		var constructorExpr:Expr = null;
 		var hasConstructor:Bool = false;
 
@@ -1035,6 +1048,16 @@ class Scripted {
 											ret = rret;
 									}
 							}
+							if (args == null || args.exists(function(a) return isRest(a.t))) {
+								if (args != null) {
+									omittedFields.push(field.name);
+									if (Context.defined('hxscript_verbose'))
+										Context.info('Skipping ${field.name} of ${cls.name}: signature uses haxe.Rest',
+											pos);
+								}
+								continue;
+							}
+
 							var argsArray:Array<Expr> = new Array<Expr>();
 							for (arg in args)
 								argsArray.push(macro cast $i{arg.name});
