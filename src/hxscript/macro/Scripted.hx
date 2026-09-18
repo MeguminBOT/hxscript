@@ -138,7 +138,12 @@ class Scripted {
 				case TFun(fargs, fret):
 					TFunction([for (a in fargs) a.opt ? TOptional(toCT(a.t)) : toCT(a.t)], toCT(fret));
 				default:
-					t.toComplexType();
+					/**
+					 * Untyped parameters (`onUpdate(_):Void`) have no `ComplexType`.
+					 * `toComplexType()` returns null and `mapGeneric` then throws.
+					 */
+					var ct:Null<ComplexType> = t.toComplexType();
+					ct != null ? ct : macro :Dynamic;
 			}
 		}
 
@@ -1161,6 +1166,9 @@ class Scripted {
 								 * @return The type with parameters resolved.
 								 */
 								function mapGeneric(t:ComplexType) {
+									if (t == null)
+										return macro :Dynamic;
+
 									switch (t) {
 										case TPath(p):
 											var short:String = p.name.substr(p.name.lastIndexOf('.') + 1);
