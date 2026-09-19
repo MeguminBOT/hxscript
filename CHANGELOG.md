@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- **Rebuilt constructors failed on cpp with `null can't be used as basic type Float`.**
+  `Context.getTypedExpr` fills optional arguments with `null`. Interp accepts that; a static
+  target does not. `new extra.Widget()` came back as `new Widget(null, null)`, and
+  `listen("tick", fn)` as `listen("tick", fn, null, null)`. Trailing `null`s are dropped again
+  for `new` and for ordinary calls, while a lone `null` is kept so `Factory.create(null)` does
+  not become `create()`.
+
 - **A host's own `Presets.custom` record never reached the build, and nothing said so.** A record
   pushed from an init macro was pushed successfully and then ignored. The build wired the shipped
   presets, generated no bridge for any class the record named, and reported the libraries it did

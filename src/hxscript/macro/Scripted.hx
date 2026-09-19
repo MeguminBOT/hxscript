@@ -904,15 +904,17 @@ class Scripted {
 					}
 
 					/**
-					 * Rewrites a `super(...)` call for the bridge, dropping trailing nulls so an optional
-					 * argument keeps its default instead of being overwritten.
+					 * Drops trailing `null`s that `Context.getTypedExpr` inserted for optional defaults.
 					 *
-					 * Only `super(...)` is stripped, and only trailing nulls. Every other call keeps
-					 * explicit `null`: `LoaderInfo.create(null)` is a required argument, and dropping it
-					 * becomes `create()` (`Not enough arguments, expected loader:…`).
+					 * On a static target those `null`s are `null can't be used as basic type Float`
+					 * (or Bool, Int). `new extra.Widget()` comes back as `new Widget(null, null)`,
+					 * and `listen("tick", fn)` as `listen("tick", fn, null, null)`.
 					 *
-					 * @param e The expression to rewrite.
-					 * @return The rewritten expression.
+					 * A sole remaining `null` is kept: `Factory.create(null)` is a required argument,
+					 * and dropping it becomes `create()` (`Not enough arguments`).
+					 *
+					 * @param params The arguments after mapping.
+					 * @return Arguments with expanded optional `null`s removed.
 					 */
 					function dropTrailingNulls(params:Array<Expr>):Array<Expr> {
 						var out:Array<Expr> = params.copy();
@@ -927,6 +929,19 @@ class Scripted {
 						return out;
 					}
 
+					/**
+					 * Trailing-null drop that still keeps a lone explicit `null`.
+					 *
+					 * @param params The arguments after mapping.
+					 * @return Arguments safe to re-emit on a static target.
+					 */
+					function dropExpandedNulls(params:Array<Expr>):Array<Expr> {
+						var dropped:Array<Expr> = dropTrailingNulls(params);
+						if (dropped.length == 0 && params.length == 1)
+							return params;
+						return dropped;
+					}
+
 					function mapSuper(e:Expr) {
 						return switch (e.expr) {
 							case ENew(t, params):
@@ -935,7 +950,7 @@ class Scripted {
 
 								{
 									pos: pos,
-									expr: ENew(t, [for (param in params) param.map(mapSuper)])
+									expr: ENew(t, dropExpandedNulls([for (param in params) param.map(mapSuper)]))
 								}
 
 							case ECall(e, params):
@@ -952,7 +967,7 @@ class Scripted {
 										case EConst(CIdent('super')):
 											dropTrailingNulls(mapped);
 										default:
-											mapped;
+											dropExpandedNulls(mapped);
 									})
 								}
 
