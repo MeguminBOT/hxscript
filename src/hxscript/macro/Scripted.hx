@@ -593,17 +593,35 @@ class Scripted {
 								reason = 'it inlines an abstract\'s constructor, which assigns to `this`';
 
 							/**
-							 * The same loss in the form it takes once the compiler has reduced it further: a
-							 * write whose value no longer carries the abstract its field is declared as.
+							 * Extern `(get, set)` properties are already `n.set_value(0)` in the typed
+							 * AST (`FDynamic`). getTypedExpr keeps that call, and the extern has no
+							 * `set_value` field (`sys.thread.Tls`, `WorkOutput.workIterations.value = 0`).
 							 */
-							case TBinop(OpAssign | OpAssignOp(_), {expr: TField(_, FInstance(_, _, cf))},
-								{expr: TCast(_, _)}):
-								switch (cf.get().type) {
-									case TAbstract(declared, _) if (!declared.get().meta.has(':coreType')
-										&& declared.get().name != 'Null'):
-										reason = 'it writes ${cf.get().name} through a cast the compiler put there '
-											+ 'in place of ${declared.toString()}, which no source may write';
+							case TCall({expr: TField(_, FDynamic(name))}, _) if (StringTools.startsWith(name, 'set_')):
+								reason = 'it writes a property through $name, which is not a source-level field';
+
+							/**
+							 * `n.value = 0` on a `(get, set)` property. getTypedExpr emits `n.set_value(0)`,
+							 * which externs such as `sys.thread.Tls` do not expose (`has no field set_value`).
+							 * `lime.system.WorkOutput` (`workIterations.value = 0`) is this shape.
+							 */
+							case TBinop(OpAssign | OpAssignOp(_), {expr: TField(_, FInstance(_, _, cf))}, rhs):
+								var field = cf.get();
+								switch (field.kind) {
+									case FVar(_, AccCall):
+										reason = 'it writes ${field.name} through a setter, which getTypedExpr emits as set_${field.name}';
 									default:
+										switch (rhs.expr) {
+											case TCast(_, _):
+												switch (field.type) {
+													case TAbstract(declared, _) if (!declared.get().meta.has(':coreType')
+														&& declared.get().name != 'Null'):
+														reason = 'it writes ${field.name} through a cast the compiler put there '
+															+ 'in place of ${declared.toString()}, which no source may write';
+													default:
+												}
+											default:
+										}
 								}
 
 							default:
