@@ -825,41 +825,57 @@ class Scripted {
 					}
 
 					/**
-					 * Rewrites a `super(...)` call for the bridge, dropping trailing nulls so an optional argument
-					 * keeps its default instead of being overwritten.
+					 * Drops trailing `null`s that `Context.getTypedExpr` inserted for optional defaults.
 					 *
-					 * @param e The expression to rewrite.
-					 * @return The rewritten expression.
+					 * On a static target those `null`s are `null can't be used as basic type Float`
+					 * (or Bool, Int). `new extra.Widget()` comes back as `new Widget(null, null)`,
+					 * and `listen("tick", fn)` as `listen("tick", fn, null, null)`.
+					 *
+					 * A sole remaining `null` is kept: `Factory.create(null)` is a required argument,
+					 * and dropping it becomes `create()` (`Not enough arguments`).
+					 *
+					 * @param params The arguments after mapping.
+					 * @return Arguments with expanded optional `null`s removed.
 					 */
+					function dropTrailingNulls(params:Array<Expr>):Array<Expr> {
+						var out:Array<Expr> = params.copy();
+						while (out.length > 0) {
+							switch (out[out.length - 1].expr) {
+								case EConst(CIdent('null')):
+									out.pop();
+								default:
+									break;
+							}
+						}
+						return out;
+					}
+
+					/**
+					 * Trailing-null drop that still keeps a lone explicit `null`.
+					 *
+					 * @param params The arguments after mapping.
+					 * @return Arguments safe to re-emit on a static target.
+					 */
+					function dropExpandedNulls(params:Array<Expr>):Array<Expr> {
+						var dropped:Array<Expr> = dropTrailingNulls(params);
+						if (dropped.length == 0 && params.length == 1)
+							return params;
+						return dropped;
+					}
+
 					function mapSuper(e:Expr) {
 						return switch (e.expr) {
 							case ENew(t, params):
-								var newParams:Array<Expr> = [];
-								for (param in params) {
-									switch (param.expr) {
-										case EConst(CIdent('null')):
-										default:
-											newParams.push(param);
-									}
-								}
-
 								if (StringTools.endsWith(t.name, '_Impl_'))
 									t.name = t.name.replace('_Impl_', '');
 
 								{
 									pos: pos,
-									expr: ENew(t, [for (param in newParams) param.map(mapSuper)])
+									expr: ENew(t, dropExpandedNulls([for (param in params) param.map(mapSuper)]))
 								}
 
 							case ECall(e, params):
-								var newParams:Array<Expr> = [];
-								for (param in params) {
-									switch (param.expr) {
-										case EConst(CIdent('null')):
-										default:
-											newParams.push(param);
-									}
-								}
+								var mapped:Array<Expr> = [for (param in params) param.map(mapSuper)];
 
 								{
 									pos: pos,
@@ -868,7 +884,12 @@ class Scripted {
 											mapConstructor(type.superClass.t.get(), type.superClass.params);
 										default:
 											e.map(mapSuper);
-									}, [for (param in newParams) param.map(mapSuper)])
+									}, switch (e.expr) {
+										case EConst(CIdent('super')):
+											dropTrailingNulls(mapped);
+										default:
+											dropExpandedNulls(mapped);
+									})
 								}
 
 							case EConst(CIdent('super')):
