@@ -581,13 +581,26 @@ class Scripted {
 								var cls:ClassType = c.get();
 
 								if (cls.name.endsWith('_Impl_')) {
-									if (cf.get().meta.has(':impl'))
-										reason = 'it calls ${cf.get().name} on abstract ${cls.module}, which has no form reachable from outside';
-
+									/**
+									 * `@:impl` instance methods and `@:to` conversions both live as
+									 * statics on `_Impl_`. The latter has no `:impl` meta, and
+									 * getTypedExpr emits `Buf.toBytes()` as a static access of an
+									 * instance method (`Cannot access non-static abstract field
+									 * statically`). Refuse every `_Impl_` field, not only `:impl`.
+									 */
+									reason = 'it uses abstract ${cls.module} (${cf.get().name}), which getTypedExpr cannot re-emit as source';
 									return;
 								}
 
 								reason = why(cls, 'reads a static of');
+
+							case TField(_, FInstance(c, _, cf)):
+								var cls:ClassType = c.get();
+
+								if (cls.name.endsWith('_Impl_')) {
+									reason = 'it reads ${cf.get().name} on abstract ${cls.module}, which getTypedExpr cannot re-emit as source';
+									return;
+								}
 
 							case TBinop(OpAssign | OpAssignOp(_), {expr: TLocal(v)}, _) if (v.name == 'this'):
 								reason = 'it inlines an abstract\'s constructor, which assigns to `this`';
