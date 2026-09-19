@@ -128,6 +128,16 @@ class Bridges {
 					}
 				]);
 
+				/**
+				 * `@:autoBuild` on `IScripted` runs when the compiler types the class. Defining
+				 * every module first, then typing them together from `Manifest.bridges`, nests
+				 * `Scripted.build` one frame per class and overflows around two hundred empty
+				 * bases. `getType` alone does not build the class; `typeExpr` of a reference
+				 * does, and doing it here, before the next `defineModule`, lets autoBuild
+				 * finish and return.
+				 */
+				Context.typeExpr(macro $p{pack.concat([name])});
+
 				refs.push(macro $p{pack.concat([name])});
 			}
 		}
