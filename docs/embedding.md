@@ -135,7 +135,8 @@ Everything the library reads. Only the first group is likely to concern you.
 | `-D hxscript_host=<packages>` | comma-separated packages to scan for `@:scriptable` and `@:scriptAmbient` |
 | `-D hxscript_bridge_types=<types>` | comma-separated classes to bridge, beside whatever the presets already bridge |
 | `-D hxscript_bridge_packages=<roots>` | comma-separated roots; every eligible class under them is bridged |
-| `-D hxscript_bridge_exclude=<paths>` | comma-separated prefixes dropped from a package / all scan. Does not remove a preset base or a `-D hxscript_bridge_types` entry. See [what gets bridged](#choosing-what-gets-bridged) |
+| `-D hxscript_bridge_classpath=<dirs>` | comma-separated `-cp` entries walked with an empty package. See [what gets bridged](#choosing-what-gets-bridged) |
+| `-D hxscript_bridge_exclude=<paths>` | comma-separated prefixes dropped from a package / classpath / all scan. Does not remove a preset base or a `-D hxscript_bridge_types` entry. See [what gets bridged](#choosing-what-gets-bridged) |
 | `-D hxscript_bridge_all` | every eligible class under every active library's roots. See [what gets bridged](#choosing-what-gets-bridged) |
 | `-D hxscript_verbose` | print every type, bridge and abstract the setup touched, under the block it already prints |
 | `-D hxscript_no_banner` | print nothing at all. `HXSCRIPT_NO_BANNER=1` does the same from the environment |
@@ -386,7 +387,7 @@ Two constraints either way:
 
 ### Choosing what gets bridged
 
-By default the bridged set is each active library's curated list, which is small. Three defines add
+By default the bridged set is each active library's curated list, which is small. Four defines add
 to it and one cuts the scan, and every one of them is a decision about binary size rather than about
 what is possible:
 
@@ -394,14 +395,23 @@ what is possible:
 | --- | --- |
 | `-D hxscript_bridge_types=StringBuf,game.Actor` | exactly those classes |
 | `-D hxscript_bridge_packages=flixel,openfl.display` | every eligible class under those roots |
-| `-D hxscript_bridge_exclude=flixel.system,openfl._internal` | those prefixes omitted from a package / all scan |
+| `-D hxscript_bridge_classpath=src,extra` | every eligible class under those `-cp` directories |
+| `-D hxscript_bridge_exclude=flixel.system,openfl._internal` | those prefixes omitted from a package / classpath / all scan |
 | `-D hxscript_bridge_all` | every eligible class under every active library's roots |
 
 They add rather than replace, so the presets keep bridging what they bridged. Exclude is a cut in
 the scan, not in an explicit list: a type named in `-D hxscript_bridge_types` or in a preset `bases`
 list is still bridged. A prefix matches the path and everything under it (`openfl._internal` drops
-`openfl._internal.CairoGraphics` too). `-D hxscript_verbose` lists what came out, and
-`-D hxscript_no_bridges` turns the whole step off.
+`openfl._internal.CairoGraphics` too).
+
+A package scan of `src` looks for `src/src/` and emits `src.game.Actor`. Walking every classpath
+root would include the standard library. `-D hxscript_bridge_classpath` names the `-cp` entries
+themselves and walks each with an empty package, so `extra/Widget.hx` is `Widget` and
+`src/game/Actor.hx` is `game.Actor`. The name is matched from the working directory (`-cp src` →
+`$cwd/src`), not by last path segment, so a haxelib's own `src/` is not taken with the host's. A
+name that matches nothing warns and is skipped.
+
+`-D hxscript_verbose` lists what came out, and `-D hxscript_no_bridges` turns the whole step off.
 
 [`advanced.md`](advanced.md#1-generating-bridges) generates bridges from a list with a macro, for a
 host that wants neither the scan nor the hand-written files.
