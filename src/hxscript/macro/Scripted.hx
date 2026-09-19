@@ -696,6 +696,33 @@ class Scripted {
 				}
 
 				/**
+				 * Whether every member initialiser can be named from the bridge module.
+				 *
+				 * `var jobs:Jobs = new Jobs()` where `Jobs` is `private` in the native module cannot
+				 * be lifted into `hxscript.wired` (`Cannot access private type Jobs`).
+				 * `lime.system.ThreadPool`'s `JobArray` fields are this shape.
+				 */
+				function fieldInitsAccessible(type:ClassType):Bool {
+					if (type == cls)
+						return true;
+
+					for (field in type.fields.get()) {
+						switch (field.kind) {
+							case FVar(_, write):
+								switch (write) {
+									case AccNormal, AccCall, AccInline, AccNo:
+										if (field.expr() != null && !typeAccessible(field.type))
+											return false;
+									default:
+								}
+							default:
+						}
+					}
+
+					return true;
+				}
+
+				/**
 				 * Rebuilds a class's constructor as an anonymous function, walking up the superclass chain.
 				 *
 				 * @param type The class whose constructor is rebuilt.
@@ -755,6 +782,9 @@ class Scripted {
 					var typedConstr:TypedExpr = constr.expr();
 
 					var refusal:Null<String> = reemittableConstructor(typedConstr);
+
+					if (refusal == null && !fieldInitsAccessible(type))
+						refusal = 'it initialises a field whose type is not reachable from generated code';
 
 					if (refusal != null) {
 						/**
