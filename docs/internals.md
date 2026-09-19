@@ -632,10 +632,16 @@ twenty; [`examples/battle/bridges/ScriptedEntity.hx`](../examples/battle/bridges
 is the hand form if you want to see it. Everything here is generated instead, because the list is
 data: a [`Library`](../src/hxscript/setup/Library.hx) record names its bases and this turns them into classes.
 
-Two details are load-bearing and neither is obvious:
+Three details are load-bearing and none of them is obvious:
 
 **One module per bridge.** A type defined as a sub-type of another module can only ever be named
 through that module, which would make every reference read `hxscript.wired.Manifest.ScriptedFlxSprite`.
+
+**Each bridge is typed before the next is defined.** `IScripted`'s `@:autoBuild` runs when the
+compiler types the class. Defining every module first, then typing them together from
+`Manifest.bridges`, nests `Scripted.build` one frame per class and overflows around two hundred
+empty bases. `Context.typeExpr` of a reference after each `defineModule` lets autoBuild finish
+and return (`getType` alone does not build the class).
 
 **Something has to reference them.** Bridges are only ever instantiated reflectively, so nothing
 in the program refers to one and dead code elimination removes them. `@:keep` alone does not save
