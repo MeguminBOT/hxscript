@@ -43,10 +43,19 @@ runs() {
   esac
 }
 
+# hxcpp appends .exe on Windows only. Prefer the file that was actually linked.
+cpp_bin() {
+  if [ -x "$1.exe" ]; then
+    echo "$1.exe"
+  else
+    echo "$1"
+  fi
+}
+
 # The command that runs a built target, empty when there is nothing to run.
 runner() {
   case "$1" in
-    cpp) echo "$BIN/cpp/common/AllCommon.exe" ;;
+    cpp) cpp_bin "$BIN/cpp/common/AllCommon" ;;
     neko) echo "neko $BIN/neko/all.n" ;;
     python) echo "python $BIN/python/all.py" ;;
     hl) echo "hl $BIN/hl/all.hl" ;;
@@ -114,9 +123,10 @@ done
 # The cppia suite, hxcpp only, and only when cpp was asked for.
 case " $TARGETS " in
   *" cpp "*)
-    if [ -x "$BIN/cpp/cppia/AllCpp.exe" ]; then
+    cppia=$(cpp_bin "$BIN/cpp/cppia/AllCpp")
+    if [ -x "$cppia" ]; then
       out="$BIN/cppia.out"
-      if "$BIN/cpp/cppia/AllCpp.exe" >"$out" 2>&1; then
+      if "$cppia" >"$out" 2>&1; then
         line=$(grep -E 'passed, [0-9]+ failed' "$out" | tail -1)
         results="$results\n$(printf '%-8s %s' 'cppia' "ok          ${line:-ran}")"
       else
