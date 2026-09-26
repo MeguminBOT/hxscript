@@ -612,6 +612,14 @@ class Scripted {
 
 								reason = why(cls, 'reads a static of');
 
+							/**
+							 * The rebuilt constructor is a method of the subclass. A `final` field can
+							 * only be written by the class that declares it, so `kept = 1` becomes
+							 * "cannot be accessed for writing".
+							 */
+							case TBinop(OpAssign | OpAssignOp(_), {expr: TField(_, FInstance(_, _, cf))}, _) if (cf.get().isFinal):
+								reason = 'it assigns ${cf.get().name}, which is final';
+
 							case TBinop(OpAssign | OpAssignOp(_), {expr: TLocal(v)}, _) if (v.name == 'this'):
 								reason = 'it inlines an abstract\'s constructor, which assigns to `this`';
 
