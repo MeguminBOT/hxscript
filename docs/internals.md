@@ -632,7 +632,7 @@ twenty; [`examples/battle/bridges/ScriptedEntity.hx`](../examples/battle/bridges
 is the hand form if you want to see it. Everything here is generated instead, because the list is
 data: a [`Library`](../src/hxscript/setup/Library.hx) record names its bases and this turns them into classes.
 
-Two details are load-bearing and neither is obvious:
+Three details are load-bearing and none of them is obvious:
 
 **One module per bridge.** A type defined as a sub-type of another module can only ever be named
 through that module, which would make every reference read `hxscript.wired.Manifest.ScriptedFlxSprite`.
@@ -641,6 +641,14 @@ through that module, which would make every reference read `hxscript.wired.Manif
 in the program refers to one and dead code elimination removes them. `@:keep` alone does not save
 a module nothing pulled in. `Manifest.bridges` is a real reference, and it doubles as what the
 setup report reads to say which bridges this build actually has.
+
+**A classpath scan walks with an empty package.** Host code often lives in `-cp src` with types
+both in packages (`game.Actor`) and at the root (`extra/Widget.hx` with no `package` line). A
+package scan of `src` looks for `src/src/` and emits `src.game.Actor`. Joining `pack + '.' + name`
+when `pack` is empty emits `.Widget`, which resolves to nothing. The walk therefore treats an empty
+package as the root, and `-D hxscript_bridge_classpath` names the `-cp` directories themselves
+rather than walking every classpath root (the standard library is one of those). The name is
+matched from the working directory so a haxelib's `src/` is not taken with the host's.
 
 `-D hxscript_no_bridges` turns the step off. It is the expensive one, costing a generated
 override per inherited non-`inline`, non-`final` method, per base, so a host minimising binary

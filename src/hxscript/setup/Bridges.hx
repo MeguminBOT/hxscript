@@ -19,11 +19,13 @@ import sys.FileSystem;
  * - by default, the curated `bases` list of each active library, which is small and costs little;
  * - `-D hxscript_bridge_types=StringBuf,game.Actor`, exactly those classes;
  * - `-D hxscript_bridge_packages=flixel,openfl.display`, every eligible class under those roots;
+ * - `-D hxscript_bridge_classpath=src,extra`, every eligible class under those `-cp` directories,
+ *   walked with an empty package so a root-level `extra/Widget.hx` is `Widget` rather than `.Widget`;
  * - `-D hxscript_bridge_all`, every eligible class under every active library's roots;
- * - `-D hxscript_bridge_exclude=<paths>`, prefixes dropped from a package / all scan (not from
- *   `bridge_types` or a preset `bases` list).
+ * - `-D hxscript_bridge_exclude=<paths>`, prefixes dropped from a package / classpath / all scan
+ *   (not from `bridge_types` or a preset `bases` list).
  *
- * The last two are compile-time decisions about binary size, and they are not free: a bridge carries
+ * The scans are compile-time decisions about binary size, and they are not free: a bridge carries
  * one generated override per inherited non-`inline`, non-`final` method. `-D hxscript_verbose`
  * reports what was bridged and what was passed over, so the cost and the coverage are both visible
  * rather than guessed at.
@@ -206,7 +208,34 @@ class Bridges {
 				for (root in lib.roots)
 					roots.push(root);
 
-		if (roots.length == 0)
+		/**
+		 * Named classpath entries, walked with an empty package. A package scan of `src` looks for
+		 * `src/src/` and emits `src.game.Actor`; walking every classpath root would include the
+		 * standard library. These names are the `-cp` directories themselves (`src`, `extra`),
+		 * matched from the working directory so a haxelib's own `src/` is not taken with them.
+		 */
+		var dirs:Array<String> = [];
+		var classpath:Null<String> = Context.definedValue('hxscript_bridge_classpath');
+
+		if (classpath != null) {
+			for (raw in classpath.split(',')) {
+				var one:String = StringTools.trim(raw);
+				if (one.length == 0)
+					continue;
+
+				var hits:Array<String> = classPathDirsNamed(one);
+				if (hits.length == 0) {
+					Context.warning('hxscript: no classpath entry named $one; -D hxscript_bridge_classpath did not scan it',
+						Context.currentPos());
+					continue;
+				}
+
+				for (dir in hits)
+					dirs.push(dir);
+			}
+		}
+
+		if (roots.length == 0 && dirs.length == 0)
 			return found;
 
 		var exclude:Array<String> = [];
@@ -238,7 +267,74 @@ class Bridges {
 			}
 		}
 
+		for (dir in dirs) {
+			if (!FileSystem.exists(dir) || !FileSystem.isDirectory(dir))
+				continue;
+
+			var extra:Array<String> = [];
+			walk(dir, '', extra, exclude);
+
+			for (path in extra) {
+				if (seen.exists(path))
+					continue;
+
+				seen.set(path, true);
+
+				if (eligible(path))
+					found.push(path);
+			}
+		}
+
 		return found;
+	}
+
+	/**
+	 * @param path A classpath directory as `Context.getClassPath` returned it.
+	 * @return The same path with backslashes folded and a trailing slash stripped.
+	 */
+	static function slash(path:String):String {
+		var out:String = path.split('\\').join('/');
+
+		while (out.length > 1 && StringTools.endsWith(out, '/'))
+			out = out.substr(0, out.length - 1);
+
+		if (StringTools.startsWith(out, './'))
+			out = out.substr(2);
+
+		return out;
+	}
+
+	/**
+	 * Classpath directories whose path is `name` or `$cwd/name`.
+	 *
+	 * Matching the last path segment alone would take every haxelib's `src/` with `-D
+	 * hxscript_bridge_classpath=src`. The working directory is what `-cp src` meant.
+	 *
+	 * @param name A classpath entry as written in the define (`src`, `extra`).
+	 * @return Matching directories, each once.
+	 */
+	static function classPathDirsNamed(name:String):Array<String> {
+		var want:String = slash(name);
+		if (want.length == 0)
+			return [];
+
+		var cwd:String = slash(Sys.getCwd());
+		var hits:Array<String> = [];
+		var seen:Map<String, Bool> = [];
+
+		for (dir in Context.getClassPath()) {
+			var n:String = slash(dir);
+			if (n.length == 0 || seen.exists(n))
+				continue;
+
+			if (n != want && n != cwd + '/' + want)
+				continue;
+
+			seen.set(n, true);
+			hits.push(dir);
+		}
+
+		return hits;
 	}
 
 	/**
@@ -267,8 +363,17 @@ class Bridges {
 	}
 
 	/**
+	 * @param pack A package, which is empty when walking a classpath entry from its root.
+	 * @param name The next segment, a directory or a type.
+	 * @return `name` in the root package, otherwise `pack.name`. A leading dot does not resolve.
+	 */
+	static function qualify(pack:String, name:String):String {
+		return pack.length == 0 ? name : pack + '.' + name;
+	}
+
+	/**
 	 * @param dir The directory to read.
-	 * @param pack The package it holds.
+	 * @param pack The package it holds, empty at a classpath root.
 	 * @param into Filled with what is found.
 	 * @param exclude Prefixes not to walk.
 	 */
@@ -277,7 +382,7 @@ class Bridges {
 			var at:String = dir + '/' + entry;
 
 			if (FileSystem.isDirectory(at)) {
-				var child:String = pack + '.' + entry;
+				var child:String = qualify(pack, entry);
 				if (isExcluded(child, exclude)) {
 					passed.set(child, 'excluded');
 					continue;
@@ -291,7 +396,7 @@ class Bridges {
 				continue;
 
 			if (StringTools.endsWith(entry, '.hx')) {
-				var path:String = pack + '.' + entry.substr(0, entry.length - 3);
+				var path:String = qualify(pack, entry.substr(0, entry.length - 3));
 				if (isExcluded(path, exclude)) {
 					passed.set(path, 'excluded');
 					continue;
