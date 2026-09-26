@@ -1210,7 +1210,7 @@ class Scripted {
 							if (args == null || args.exists(function(a) return isRest(a.t))) {
 								if (args != null) {
 									omittedFields.push(field.name);
-									if (Context.defined('hxscript_verbose'))
+									if (traceBuild)
 										Context.info('Skipping ${field.name} of ${cls.name}: signature uses haxe.Rest',
 											pos);
 								}
