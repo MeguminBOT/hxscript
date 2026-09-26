@@ -919,6 +919,73 @@ class Scripted {
 					body = fieldInits(type).concat(body);
 					constrExpr = macro $b{body};
 
+					/**
+					 * An argument whose name is also a package hides that package in the rebuilt body.
+					 *
+					 * `getTypedExpr` writes a static call as `demo.Service.ping()`. Inside
+					 * `new(demo:Service)` that path is a field read of the argument, and the compile
+					 * stops on `demo.Service has no field Service`. The argument is renamed. The
+					 * package path is left as it is.
+					 */
+					var argNames:Map<String, Bool> = [for (a in args) a.name => true];
+					var shadowed:Map<String, String> = [];
+
+					function identChain(e:Expr):Null<Array<String>> {
+						return switch (e.expr) {
+							case EConst(CIdent(name)): [name];
+							case EField(owner, name, _):
+								var rest:Null<Array<String>> = identChain(owner);
+								if (rest == null)
+									null;
+								else {
+									rest.push(name);
+									rest;
+								}
+							default: null;
+						}
+					}
+
+					function chainIsType(parts:Array<String>):Bool {
+						if (parts.length < 2)
+							return false;
+						var acc:String = parts[0];
+						for (i in 1...parts.length) {
+							acc += "." + parts[i];
+							try {
+								Context.getType(acc);
+								return true;
+							} catch (_:Dynamic) {}
+						}
+						return false;
+					}
+
+					function findShadow(e:Expr):Expr {
+						var parts:Null<Array<String>> = identChain(e);
+						if (parts != null && argNames.exists(parts[0]) && chainIsType(parts))
+							shadowed.set(parts[0], '__hxscript_' + parts[0]);
+						return e.map(findShadow);
+					}
+
+					findShadow(constrExpr);
+
+					function unshadow(e:Expr):Expr {
+						return switch (e.expr) {
+							case EField(_, _, _):
+								var parts:Null<Array<String>> = identChain(e);
+								if (parts != null && chainIsType(parts))
+									e;
+								else
+									e.map(unshadow);
+							case EConst(CIdent(name)) if (shadowed.exists(name)):
+								{pos: e.pos, expr: EConst(CIdent(shadowed.get(name)))};
+							default:
+								e.map(unshadow);
+						}
+					}
+
+					if (!Lambda.empty(shadowed))
+						constrExpr = unshadow(constrExpr);
+
 					var defaults:Array<Expr> = [];
 					switch (constr.expr().expr) {
 						default:
@@ -940,8 +1007,8 @@ class Scripted {
 									var defaultValue:Expr = defaults[i];
 
 									{
-										name: arg.name,
-										value: defaultValue,
+										name: shadowed.exists(arg.name) ? shadowed.get(arg.name) : arg.name,
+										value: defaultValue == null ? null : unshadow(defaultValue),
 										opt: (defaultValue == null ? arg.opt : null),
 										type: (defaultValue == null ? toCT(arg.t) : null)
 									}
