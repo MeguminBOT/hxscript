@@ -1243,7 +1243,20 @@ class Scripted {
 										}
 									}
 								];
-								var ret = mapGeneric(toCT(ret));
+								/**
+								 * A call through `Dynamic` leaves the return as an unbound monomorph.
+								 * Printing that as `Dynamic` makes the override disagree with the parent
+								 * (`Dynamic should be Unknown`). Leaving the return off lets it stay open.
+								 */
+								var ret = switch (ret) {
+									case TMono(r) if (r.get() == null): null;
+									case TLazy(f):
+										switch (f()) {
+											case TMono(r) if (r.get() == null): null;
+											default: mapGeneric(toCT(ret));
+										}
+									default: mapGeneric(toCT(ret));
+								};
 
 								if (cantInfer) {
 									omittedFields.push(f);
