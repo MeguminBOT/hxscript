@@ -64,7 +64,12 @@ class Scripted {
 		var cls = Context.getLocalClass().get();
 		var fields:Array<Field> = Context.getBuildFields();
 
-		if (Context.defined('hxscript_verbose'))
+		/**
+		 * The placeholder is the one hand-written implementor, so this info lands on a real file.
+		 * A positioned info is what the Haxe IntelliJ plugin reports as an error.
+		 */
+		var traceBuild = Context.defined('hxscript_verbose') && cls.module != 'hxscript.types.ScriptedObject';
+		if (traceBuild)
 			Context.info('Preparing ${cls.name}', pos);
 
 		cls.meta.add(':access', [macro hxscript.Module], pos);
@@ -1166,7 +1171,7 @@ class Scripted {
 										accessible = false;
 								if (!accessible) {
 									omittedFields.push(f);
-									if (Context.defined('hxscript_verbose'))
+									if (traceBuild)
 										Context.info('Skipping $f of ${cls.name}: signature uses an inaccessible type',
 											pos);
 									continue;
@@ -1203,7 +1208,7 @@ class Scripted {
 
 								if (cantInfer) {
 									omittedFields.push(f);
-									if (Context.defined('hxscript_verbose'))
+									if (traceBuild)
 										Context.info('Couldn\'t override field $f of ${cls.name}', pos);
 									continue;
 								}
