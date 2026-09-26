@@ -727,6 +727,40 @@ class Scripted {
 				}
 
 				/**
+				 * A field initializer that would be lifted, but cannot be written from the bridge.
+				 *
+				 * `var box:Box = new Box(new Hidden())` is not part of the constructor expression the
+				 * body check sees, and the field's own type is public. The lifted `new Hidden()` still
+				 * names a private type (`Cannot access private type`).
+				 *
+				 * @param type The class whose initializers are considered.
+				 * @return Why one cannot be re-emitted, or null.
+				 */
+				function fieldInitProblem(type:ClassType):Null<String> {
+					if (type == cls)
+						return null;
+
+					for (field in type.fields.get()) {
+						switch (field.kind) {
+							case FVar(_, write):
+								switch (write) {
+									case AccNormal, AccCall, AccInline, AccNo:
+										var e:TypedExpr = field.expr();
+										if (e == null || !reemittable(e))
+											continue;
+										var problem:Null<String> = reemittableConstructor(e);
+										if (problem != null)
+											return problem;
+									default:
+								}
+							default:
+						}
+					}
+
+					return null;
+				}
+
+				/**
 				 * Rebuilds a class's constructor as an anonymous function, walking up the superclass chain.
 				 *
 				 * @param type The class whose constructor is rebuilt.
@@ -746,6 +780,21 @@ class Scripted {
 								generics.set(type.params[i].name, bindType(toCT(given)));
 
 					if (type.constructor == null) {
+						var initProblem:Null<String> = fieldInitProblem(type);
+						if (initProblem != null) {
+							nativeSuper = true;
+							nativeSuperArgs = [];
+							return {
+								pos: pos,
+								expr: EFunction(FAnonymous, {
+									args: [],
+									expr: macro throw $v{typePath(type.module, type.name)}
+										+ ' is constructed by Haxe, so its rebuilt constructor must not be called',
+									ret: macro :Void
+								})
+							};
+						}
+
 						var inits:Array<Expr> = fieldInits(type);
 
 						if (type.superClass != null) {
@@ -786,6 +835,8 @@ class Scripted {
 					var typedConstr:TypedExpr = constr.expr();
 
 					var refusal:Null<String> = reemittableConstructor(typedConstr);
+					if (refusal == null)
+						refusal = fieldInitProblem(type);
 
 					if (refusal != null) {
 						/**
