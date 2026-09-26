@@ -637,6 +637,21 @@ class Scripted {
 									default:
 								}
 
+							/**
+							 * A `for` over an array is two temps whose name is a backtick. `getTypedExpr`
+							 * prints both as `_`, so `while (_ < _.length)` compares the array to an `Int`.
+							 */
+							case TBlock(el):
+								var temps:Int = 0;
+								for (s in el)
+									switch (s.expr) {
+										case TVar(v, _) if (v.name == '`' || v.name == '_' || ~/^[.]?_g\d*$/.match(v.name)):
+											temps++;
+										default:
+									}
+								if (temps > 1)
+									reason = 'it repeats a for-loop temp, which getTypedExpr prints as one name';
+
 							default:
 						}
 
