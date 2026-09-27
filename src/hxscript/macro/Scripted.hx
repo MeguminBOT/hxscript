@@ -374,6 +374,11 @@ class Scripted {
 								pathOfType(t.follow());
 							case TInst(c, _):
 								var cls:ClassType = c.get();
+								switch (cls.kind) {
+									case KTypeParameter(_):
+										return null;
+									default:
+								}
 								var parts:Array<String> = cls.module.split('.');
 								var moduleName:String = parts.pop();
 								{pack: parts, name: moduleName, sub: (moduleName == cls.name ? null : cls.name)};
@@ -453,6 +458,13 @@ class Scripted {
 					 */
 					function qualifyType(t:ComplexType):ComplexType {
 						return switch (t) {
+							/**
+							 * A type parameter is replaced later by `bindType`. Qualifying it first
+							 * turns `T` into a member of the module that declared it, which does not
+							 * define that member.
+							 */
+							case TPath(p) if (p.pack.length == 0 && p.sub == null && p.params.length == 0 && boundFor(p.name) != null):
+								t;
 							case TPath(p) if (p.pack.length == 0 && p.sub == null && qualified.exists(p.name)):
 								var q:TypePath = qualified.get(p.name);
 								TPath({
@@ -497,15 +509,17 @@ class Scripted {
 						switch (t.expr) {
 							case TNew(c, _, _):
 								var cls:ClassType = c.get();
-								var parts:Array<String> = cls.module.split('.');
-								var moduleName:String = parts.pop();
+								switch (cls.kind) {
+									case KTypeParameter(_):
+									default:
+										var parts:Array<String> = cls.module.split('.');
+										var moduleName:String = parts.pop();
+										var name:String = cls.name.endsWith('_Impl_') ? cls.name.substr(0, cls.name.length - 6) : cls.name;
 
-								var name:String = cls.name.endsWith('_Impl_') ? cls.name.substr(0,
-									cls.name.length - 6) : cls.name;
-
-								if (!qualified.exists(cls.name))
-									qualified.set(cls.name,
-										{pack: parts, name: moduleName, sub: (moduleName == name ? null : name)});
+										if (!qualified.exists(cls.name))
+											qualified.set(cls.name,
+												{pack: parts, name: moduleName, sub: (moduleName == name ? null : name)});
+								}
 
 							case TVar(v, _):
 								rememberType(v.t);
