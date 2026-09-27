@@ -897,8 +897,19 @@ class Scripted {
 									defaults.push(null);
 									continue;
 								}
-								var expr = Context.getTypedExpr(arg.value);
-								defaults.push(macro cast $expr);
+
+								/**
+								 * A string literal is reprinted as the source declared it (`options:String = ""`).
+								 * Every other default stays `cast <expr>` with no type: writing `Null<Float>`
+								 * makes hxcpp compile the argument as `Dynamic`.
+								 */
+								switch (arg.value.expr) {
+									case TConst(TString(s)):
+										defaults.push(macro $v{s});
+									default:
+										var expr = Context.getTypedExpr(arg.value);
+										defaults.push(macro cast $expr);
+								}
 							}
 					}
 					return {
@@ -907,19 +918,20 @@ class Scripted {
 							args: [
 								for (i => arg in args) {
 									var defaultValue:Expr = defaults[i];
+									var typed:Null<ComplexType> = defaultValue == null ? toCT(arg.t) : null;
 
-									/**
-									 * The type stays even when a default is written. The default is
-									 * re-emitted as `cast <expr>`, which does not say what the argument
-									 * is. Without the type, `options = ""` is inferred from
-									 * `options.indexOf("g")` as a structure, and `String` is not that
-									 * structure: its `indexOf` has an optional second argument.
-									 */
+									if (defaultValue != null)
+										switch (defaultValue.expr) {
+											case EConst(CString(_)):
+												typed = macro :String;
+											default:
+										}
+
 									{
 										name: arg.name,
 										value: defaultValue,
 										opt: (defaultValue == null ? arg.opt : null),
-										type: toCT(arg.t)
+										type: typed
 									}
 								}
 							],
@@ -1188,24 +1200,33 @@ class Scripted {
 												defaults.push(null);
 												continue;
 											}
-											var expr = Context.getTypedExpr(arg.value);
-											defaults.push(macro cast $expr);
+
+											/** Same rule as a rebuilt constructor: only a string literal keeps its type. */
+											switch (arg.value.expr) {
+												case TConst(TString(s)):
+													defaults.push(macro $v{s});
+												default:
+													var expr = Context.getTypedExpr(arg.value);
+													defaults.push(macro cast $expr);
+											}
 										}
 								}
 								var args = [
 									for (i => arg in args) {
 										var defaultValue:Expr = defaults[i];
+										var typed:Null<ComplexType> = defaultValue == null ? mapGeneric(toCT(arg.t)) : null;
 
-										var t = mapGeneric(toCT(arg.t));
+										if (defaultValue != null)
+											switch (defaultValue.expr) {
+												case EConst(CString(_)):
+													typed = macro :String;
+												default:
+											}
 
-										/**
-										 * Same as a rebuilt constructor: a default does not erase the
-										 * declared type.
-										 */
 										{
 											name: arg.name,
 											value: defaultValue,
-											type: t,
+											type: typed,
 											opt: (defaultValue == null ? arg.opt : null)
 										}
 									}
