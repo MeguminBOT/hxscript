@@ -561,6 +561,19 @@ class Scripted {
 						return null;
 					}
 
+					/**
+					 * Whether an `_Impl_` static is an instance member in disguise.
+					 *
+					 * Its first parameter is the receiver, named `this`. A plain static such as
+					 * `Meters.parse` has no such parameter and is rebuilt by `requalify`.
+					 */
+					function takesValue(field:ClassField):Bool {
+						return switch (field.type.follow()) {
+							case TFun(args, _): args.length > 0 && args[0].name == 'this';
+							default: false;
+						}
+					}
+
 					function look(t:TypedExpr):Void {
 						if (t == null || reason != null)
 							return;
@@ -582,25 +595,20 @@ class Scripted {
 
 								if (cls.name.endsWith('_Impl_')) {
 									/**
-									 * `@:impl` instance methods and `@:to` conversions both live as
-									 * statics on `_Impl_`. The latter has no `:impl` meta, and
-									 * getTypedExpr emits `Buf.toBytes()` as a static access of an
-									 * instance method (`Cannot access non-static abstract field
-									 * statically`). Refuse every `_Impl_` field, not only `:impl`.
+									 * A plain static of an abstract is rebuilt by `requalify`. What has no
+									 * form reachable from outside is an instance member stored as a static
+									 * on `_Impl_`: an `:impl` method, a `@:to` conversion (no `:impl` meta;
+									 * `ByteArray.toBytes` prints as a static access of an instance field),
+									 * a member whose first parameter is `this`, and `_new`.
 									 */
-									reason = 'it uses abstract ${cls.module} (${cf.get().name}), which getTypedExpr cannot re-emit as source';
+									if (cf.get().meta.has(':impl') || cf.get().meta.has(':to') || cf.get().name == '_new'
+										|| takesValue(cf.get()))
+										reason = 'it calls ${cf.get().name} on abstract ${cls.module}, which has no form reachable from outside';
+
 									return;
 								}
 
 								reason = why(cls, 'reads a static of');
-
-							case TField(_, FInstance(c, _, cf)):
-								var cls:ClassType = c.get();
-
-								if (cls.name.endsWith('_Impl_')) {
-									reason = 'it reads ${cf.get().name} on abstract ${cls.module}, which getTypedExpr cannot re-emit as source';
-									return;
-								}
 
 							case TBinop(OpAssign | OpAssignOp(_), {expr: TLocal(v)}, _) if (v.name == 'this'):
 								reason = 'it inlines an abstract\'s constructor, which assigns to `this`';
