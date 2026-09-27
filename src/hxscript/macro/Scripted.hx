@@ -688,7 +688,7 @@ class Scripted {
 									continue;
 
 								var value:Expr = mapTyped(e);
-								inits.push(macro Reflect.setField(this, $v{field.name}, @:privateAccess $value));
+								inits.push(macro std.Reflect.setField(this, $v{field.name}, @:privateAccess $value));
 						}
 					}
 
@@ -1064,14 +1064,14 @@ class Scripted {
 									if (__safe) {
 										__interp.inTry = true;
 										try {
-											__result = Reflect.callMethod(__interp, __interp.getLocal(__name),
+											__result = std.Reflect.callMethod(__interp, __interp.getLocal(__name),
 												$a{argsArray});
 										} catch (__e:Dynamic) {
 											__base.onInstanceError(__e, __name, this);
 											__result = null;
 										}
 									} else {
-										__result = Reflect.callMethod(__interp, __interp.getLocal(__name),
+										__result = std.Reflect.callMethod(__interp, __interp.getLocal(__name),
 											$a{argsArray});
 									}
 									__func = __previous;
@@ -1266,7 +1266,7 @@ class Scripted {
 
 			__base = base;
 			__safe = base.safe;
-			__interp = hxscript.runtime.StdType.createInstance(hxscript.Config.interpClass, [base.interp.environment, this]);
+			__interp = std.Type.createInstance(hxscript.Config.interpClass, [base.interp.environment, this]);
 			__interp.ownerClass = base;
 			__interp.pushStack(hxscript.runtime.ScriptStack.StackItem.SModule(base.module?.path ?? base.name));
 
@@ -1316,15 +1316,15 @@ class Scripted {
 					if (!__interp.variables.exists(field))
 						__interp.variables.set(field, hxscript.runtime.Reference.RProperty(this, field));
 
-					var f = Reflect.field(this, field);
-					if (Reflect.isFunction(f))
+					var f = std.Reflect.field(this, field);
+					if (std.Reflect.isFunction(f))
 						superLocals.set(field, {ref: f});
 				}
 
 				/** Kept in `__vars` too, since a compiled body asks from outside any frame of the interpreter's. */
 				var __superRef:hxscript.runtime.Variable = {
 					ref: hxscript.runtime.Reference.RSuper(superLocals, __constructSuper,
-						hxscript.runtime.StdType.getSuperClass(hxscript.runtime.StdType.getClass(this)))
+						std.Type.getSuperClass(std.Type.getClass(this)))
 				};
 				__interp.locals.set('super', __superRef);
 				__vars.set('super', __superRef);
@@ -1357,7 +1357,7 @@ class Scripted {
 
 						case KVar(v):
 							if (instanceFields.contains(f)) {
-								Reflect.setField(this, f, __interp.exprReturn(v.expr));
+								std.Reflect.setField(this, f, __interp.exprReturn(v.expr));
 							} else {
 								var l:hxscript.runtime.Variable = {
 									ref: null,
@@ -1388,8 +1388,8 @@ class Scripted {
 						if (!__interp.variables.exists(field))
 							__interp.variables.set(field, hxscript.runtime.Reference.RProperty(this, field));
 
-						var f = Reflect.field(this, field);
-						if (Reflect.isFunction(f))
+						var f = std.Reflect.field(this, field);
+						if (std.Reflect.isFunction(f))
 							superLocals.set(field, {ref: f});
 					}
 				}
@@ -1410,7 +1410,7 @@ class Scripted {
 								 * so the arguments it passes are evaluated once rather than twice. They
 								 * were evaluated before the instance existed, to make it.
 								 */
-								var body:hxscript.syntax.Expr = Reflect.field(hxscript.runtime.StdType.getClass(this),
+								var body:hxscript.syntax.Expr = std.Reflect.field(std.Type.getClass(this),
 									'__nativeSuper') == true ? hxscript.types.ScriptedTools.withoutSuper(fun.expr) : fun.expr;
 
 								constructor = __interp.buildFunction(f, fun.args, body, fun.ret, superLocals, true);
@@ -1445,7 +1445,7 @@ class Scripted {
 					 */
 					var __superRef:hxscript.runtime.Variable = {
 						ref: hxscript.runtime.Reference.RSuper(superLocals, constructor ?? __constructSuper,
-							constructor != null ? null : hxscript.runtime.StdType.getSuperClass(hxscript.runtime.StdType.getClass(this)))
+							constructor != null ? null : std.Type.getSuperClass(std.Type.getClass(this)))
 					};
 					__interp.locals.set('super', __superRef);
 					__vars.set('super', __superRef);
@@ -1482,12 +1482,12 @@ class Scripted {
 
 			if (__safe) {
 				try {
-					Reflect.callMethod(this, entry, arguments);
+					std.Reflect.callMethod(this, entry, arguments);
 				} catch (e:Dynamic) {
 					base.onInstanceError(e, 'new', this);
 				}
 			} else {
-				Reflect.callMethod(this, entry, arguments);
+				std.Reflect.callMethod(this, entry, arguments);
 			}
 		};
 		fields.push({
@@ -1587,7 +1587,7 @@ class Scripted {
 					expr: macro {
 						if (hxscript.macro.Scripted.ignoreFields.contains(field))
 							return false;
-						return (instanceFields.contains(field) || Reflect.hasField(this,
+						return (instanceFields.contains(field) || std.Reflect.hasField(this,
 							field) || __vars.exists(field));
 					},
 					ret: macro :Bool
@@ -1602,8 +1602,8 @@ class Scripted {
 					expr: macro {
 						if (hxscript.macro.Scripted.ignoreFields.contains(field))
 							return null;
-						if (instanceFields.contains(field) || Reflect.hasField(this, field)) {
-							return Reflect.field(this, field);
+						if (instanceFields.contains(field) || std.Reflect.hasField(this, field)) {
+							return std.Reflect.field(this, field);
 						} else if (__vars.exists(field)) {
 							return __vars.get(field).r;
 						}
@@ -1621,9 +1621,9 @@ class Scripted {
 					expr: macro {
 						if (hxscript.macro.Scripted.ignoreFields.contains(field))
 							return null;
-						if (instanceFields.contains(field) || Reflect.hasField(this, field)) {
-							Reflect.setField(this, field, value);
-							return Reflect.field(this, field);
+						if (instanceFields.contains(field) || std.Reflect.hasField(this, field)) {
+							std.Reflect.setField(this, field, value);
+							return std.Reflect.field(this, field);
 						} else if (__vars.exists(field)) {
 							return __vars.get(field).r = value;
 						}
@@ -1641,8 +1641,8 @@ class Scripted {
 					expr: macro {
 						if (hxscript.macro.Scripted.ignoreFields.contains(property))
 							return null;
-						if (instanceFields.contains(property) || Reflect.hasField(this, property)) {
-							return Reflect.getProperty(this, property);
+						if (instanceFields.contains(property) || std.Reflect.hasField(this, property)) {
+							return std.Reflect.getProperty(this, property);
 						} else if (__vars.exists(property)) {
 							return __interp.getLocal(property, __vars);
 						}
@@ -1660,9 +1660,9 @@ class Scripted {
 					expr: macro {
 						if (hxscript.macro.Scripted.ignoreFields.contains(property))
 							return null;
-						if (instanceFields.contains(property) || Reflect.hasField(this, property)) {
-							Reflect.setProperty(this, property, value);
-							return Reflect.field(this, property);
+						if (instanceFields.contains(property) || std.Reflect.hasField(this, property)) {
+							std.Reflect.setProperty(this, property, value);
+							return std.Reflect.field(this, property);
 						} else if (__vars.exists(property)) {
 							return __interp.setLocal(property, value, __vars);
 						}
@@ -1686,7 +1686,7 @@ class Scripted {
 					**/
 					expr: macro {
 						var fields = [
-							for (f in Reflect.fields(this))
+							for (f in std.Reflect.fields(this))
 								if (!hxscript.macro.Scripted.ignoreFields.contains(f)) f
 						];
 						for (f in __vars.keys()) {
@@ -1792,7 +1792,7 @@ class Scripted {
 			var map:Map<String, Dynamic> = [];
 
 			for (cls in meta) {
-				var scripted:Dynamic = Type.resolveClass(cls);
+				var scripted:Dynamic = std.Type.resolveClass(cls);
 				map.set(scripted.getBaseClass(), cast scripted);
 			}
 
