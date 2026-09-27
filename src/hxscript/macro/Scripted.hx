@@ -825,147 +825,33 @@ class Scripted {
 					}
 
 					/**
-					 * How many arguments each call and `new` require, in the order `mapSuper` visits them.
+					 * Drops the `null`s `getTypedExpr` appended for omitted optional arguments.
 					 *
-					 * `getTypedExpr` appends `null` for every optional parameter that was left out, and the
-					 * typed call already contains those `null`s. `take(null)` comes back as `take(null, null)`.
-					 * Dropping every trailing `null` then leaves `take()`, and the required argument is gone.
-					 * Optional padding can still be dropped. Arguments below the required count stay, even
-					 * when one of them is an explicit `null`.
+					 * The typer marks those `null`s with the call's own position. A `null` written in
+					 * the source carries its own, so it stays, including one in the middle of a call.
+					 * A basic-type parameter cannot take the ones the typer inserted.
 					 *
-					 * `-1` means the callee type is not a function, so the old trailing-null drop is used.
+					 * @param call The call or `new`, whose position the inserted `null`s share.
+					 * @param params Its printed arguments.
+					 * @return The arguments that were written.
 					 */
-					var requiredArgs:Array<Int> = [];
-
-					function requiredCount(t:Type):Int {
-						if (t == null)
-							return -1;
-
-						return switch (t) {
-							case TFun(args, _):
-								var n:Int = 0;
-								for (i => a in args)
-									if (!a.opt)
-										n = i + 1;
-								n;
-							case TLazy(f):
-								requiredCount(f());
-							default:
-								-1;
-						}
-					}
-
-					function collectWritten(t:TypedExpr):Void {
-						if (t == null)
-							return;
-
-						switch (t.expr) {
-							case TCall(callee, args):
-								requiredArgs.push(requiredCount(callee.t));
-								collectWritten(callee);
-								for (a in args)
-									collectWritten(a);
-							case TNew(c, _, args):
-								var ctor:Type = null;
-								var ctr = c.get().constructor;
-								if (ctr != null)
-									ctor = ctr.get().type;
-								var rn:Int = requiredCount(ctor);
-								requiredArgs.push(rn);
-								for (a in args)
-									collectWritten(a);
-							default:
-								haxe.macro.TypedExprTools.iter(t, collectWritten);
-						}
-					}
-
-					switch (typedConstr.expr) {
-						case TFunction(f):
-							collectWritten(f.expr);
-						default:
-							collectWritten(typedConstr);
-					}
-
-					var requiredAt:Int = 0;
-
-					/**
-					 * Drops trailing `null`s that `Context.getTypedExpr` inserted for optional defaults.
-					 *
-					 * On a static target those `null`s are `null can't be used as basic type Float`
-					 * (or Bool, Int). `new extra.Widget()` comes back as `new Widget(null, null)`,
-					 * and `listen("tick", fn)` as `listen("tick", fn, null, null)`.
-					 *
-					 * A sole remaining `null` is kept: `Factory.create(null)` is a required argument,
-					 * and dropping it becomes `create()` (`Not enough arguments`).
-					 *
-					 * @param params The arguments after mapping.
-					 * @return Arguments with expanded optional `null`s removed.
-					 */
-					function isPaddingNull(e:Expr):Bool {
-						return switch (e.expr) {
-							case EConst(CIdent('null')): true;
-							case EParenthesis(inner) | ECheckType(inner, _) | ECast(inner, _) | EMeta(_, inner):
-								isPaddingNull(inner);
-							default: false;
-						}
-					}
-
-					function dropTrailingNulls(params:Array<Expr>):Array<Expr> {
+					function written(call:Expr, params:Array<Expr>):Array<Expr> {
+						var at = Context.getPosInfos(call.pos);
 						var out:Array<Expr> = params.copy();
+
 						while (out.length > 0) {
-							if (isPaddingNull(out[out.length - 1]))
-								out.pop();
-							else
-								break;
+							var last:Expr = out[out.length - 1];
+							var p = Context.getPosInfos(last.pos);
+
+							switch (last.expr) {
+								case EConst(CIdent('null')) if (p.min == at.min && p.max == at.max && p.file == at.file):
+									out.pop();
+								default:
+									break;
+							}
 						}
+
 						return out;
-					}
-
-					/**
-					 * Trailing-null drop that still keeps a lone explicit `null`.
-					 *
-					 * @param params The arguments after mapping.
-					 * @return Arguments safe to re-emit on a static target.
-					 */
-					function dropExpandedNulls(params:Array<Expr>):Array<Expr> {
-						var dropped:Array<Expr> = dropTrailingNulls(params);
-						if (dropped.length == 0 && params.length == 1)
-							return params;
-						return dropped;
-					}
-
-					/**
-					 * The arguments that were written, without the optional `null`s `getTypedExpr` appended.
-					 *
-					 * @param params The printed arguments.
-					 * @return The written prefix, or the old trailing-null drop when the typed count is missing.
-					 */
-					function writtenParams(params:Array<Expr>):Array<Expr> {
-						if (requiredAt >= requiredArgs.length)
-							return dropExpandedNulls(params);
-
-						var n:Int = requiredArgs[requiredAt++];
-						if (n < 0)
-							return dropExpandedNulls(params);
-
-						var dropped:Array<Expr> = dropTrailingNulls(params);
-						if (n == 0 && dropped.length == 0 && params.length == 1)
-							return params;
-						if (dropped.length >= n)
-							return dropped;
-
-						/**
-						 * A high required count must not put the optional padding back.
-						 * `new Key("a", null, null)` stays `new Key("a")`. An explicit `null`
-						 * that is itself required (`take(null)`) is the one argument kept.
-						 */
-						if (n > params.length)
-							n = params.length;
-						var kept:Array<Expr> = [for (i in 0...n) params[i]];
-						var trimmed:Array<Expr> = dropTrailingNulls(kept);
-						if (trimmed.length == 0 && params.length > 0)
-							return [params[0]];
-						return trimmed;
 					}
 
 					function mapSuper(e:Expr) {
@@ -976,28 +862,18 @@ class Scripted {
 
 								{
 									pos: pos,
-									expr: ENew(t, [for (param in writtenParams(params)) mapSuper(param)])
+									expr: ENew(t, [for (param in written(e, params)) mapSuper(param)])
 								}
 
-							case ECall(e, params):
-								var isSuper:Bool = switch (e.expr) {
-									case EConst(CIdent('super')): true;
-									default: false;
-								};
-								var kept:Array<Expr> = writtenParams(params);
-								if (isSuper)
-									kept = dropTrailingNulls(kept);
-
-								/**
-								 * The callee is walked before the arguments, which is the order
-								 * `collectWritten` recorded.
-								 */
-								var callee:Expr = isSuper ? mapConstructor(type.superClass.t.get(), type.superClass.params) : e.map(mapSuper);
-								var mapped:Array<Expr> = [for (param in kept) mapSuper(param)];
-
+							case ECall(callee, params):
 								{
 									pos: pos,
-									expr: ECall(callee, mapped)
+									expr: ECall(switch (callee.expr) {
+										case EConst(CIdent('super')):
+											mapConstructor(type.superClass.t.get(), type.superClass.params);
+										default:
+											mapSuper(callee);
+									}, [for (param in written(e, params)) mapSuper(param)])
 								}
 
 							case EConst(CIdent('super')):
