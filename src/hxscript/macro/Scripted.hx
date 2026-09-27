@@ -355,12 +355,21 @@ class Scripted {
 				function requalify(typed:TypedExpr, e:Expr):Expr {
 					var qualified:Map<String, TypePath> = [];
 					var abstractOf:Map<String, Array<String>> = [];
+					/** Names the constructor declares. A field of one is not a static of that name. */
+					var declared:Map<String, Bool> = [];
 
 					function collect(t:TypedExpr):Void {
 						if (t == null)
 							return;
 
 						switch (t.expr) {
+							case TVar(v, _):
+								declared.set(v.name, true);
+
+							case TFunction(f):
+								for (a in f.args)
+									declared.set(a.v.name, true);
+
 							case TNew(c, _, _):
 								var cls:ClassType = c.get();
 								var parts:Array<String> = cls.module.split('.');
@@ -460,7 +469,8 @@ class Scripted {
 							 * A switch subject is reprinted from the source, so `Elsewhere.context.type`
 							 * keeps the imported short name. The bridge module does not have that import.
 							 */
-							case EField({expr: EConst(CIdent(name))}, member, kind) if (qualified.exists(name)):
+							case EField({expr: EConst(CIdent(name))}, member, kind)
+								if (qualified.exists(name) && !declared.exists(name)):
 								var q:TypePath = qualified.get(name);
 								var parts:Array<String> = q.pack.concat([q.name]);
 								if (q.sub != null)
