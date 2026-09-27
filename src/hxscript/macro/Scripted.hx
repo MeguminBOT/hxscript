@@ -137,7 +137,11 @@ class Scripted {
 					 * An `import pack.Foo as Foo` is a private typedef stored on the importing
 					 * module. Naming it `Importer.Foo` does not resolve. The underlying type does.
 					 */
-					if (r.get().isPrivate) toCT(t.follow()) else fromModule(r.get().pack, r.get().module, r.get().name, params);
+					var c = r.get();
+					if (c.isPrivate)
+						toCT(t.follow());
+					else
+						fromModule(c.pack, c.module, c.name, params);
 				case TFun(fargs, fret):
 					TFunction([for (a in fargs) a.opt ? TOptional(toCT(a.t)) : toCT(a.t)], toCT(fret));
 				default:
@@ -162,12 +166,7 @@ class Scripted {
 				case TInst(r, params): !r.get().isPrivate && !params.exists(function(p) return !typeAccessible(p));
 				case TEnum(r, params): !r.get().isPrivate && !params.exists(function(p) return !typeAccessible(p));
 				case TAbstract(r, params): !r.get().isPrivate && !params.exists(function(p) return !typeAccessible(p));
-				case TType(r, params):
-					/**
-					 * A private typedef is an import alias or a hidden name. The underlying type
-					 * decides whether generated code can name the signature.
-					 */
-					r.get().isPrivate ? typeAccessible(t.follow()) : !params.exists(function(p) return !typeAccessible(p));
+				case TType(r, params): !r.get().isPrivate && !params.exists(function(p) return !typeAccessible(p));
 				case TFun(fargs, fret): typeAccessible(fret) && !fargs.exists(function(a) return !typeAccessible(a.t));
 				case TLazy(f): typeAccessible(f());
 				default: true;
