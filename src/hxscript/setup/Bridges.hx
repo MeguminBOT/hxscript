@@ -132,8 +132,13 @@ class Bridges {
 				 * bases. `getType` alone does not build the class; `typeExpr` of a reference
 				 * does, and doing it here, before the next `defineModule`, lets autoBuild
 				 * finish and return.
+				 *
+				 * Off unless `-D hxscript_bridge_eager` is set. Typing a bridge this early also
+				 * drops `@:generic` method instances that do not exist yet, which changes builds
+				 * that do not overflow.
 				 */
-				Context.typeExpr(macro $p{pack.concat([name])});
+				if (Context.defined('hxscript_bridge_eager'))
+					Context.typeExpr(macro $p{pack.concat([name])});
 
 				refs.push(macro $p{pack.concat([name])});
 			}

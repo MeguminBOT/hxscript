@@ -136,6 +136,7 @@ Everything the library reads. Only the first group is likely to concern you.
 | `-D hxscript_bridge_types=<types>` | comma-separated classes to bridge, beside whatever the presets already bridge |
 | `-D hxscript_bridge_packages=<roots>` | comma-separated roots; every eligible class under them is bridged |
 | `-D hxscript_bridge_all` | every eligible class under every active library's roots. See [what gets bridged](#choosing-what-gets-bridged) |
+| `-D hxscript_bridge_eager` | type each generated bridge before defining the next, so a few hundred bases do not overflow the compiler. Off unless set |
 | `-D hxscript_verbose` | print every type, bridge and abstract the setup touched, under the block it already prints |
 | `-D hxscript_no_banner` | print nothing at all. `HXSCRIPT_NO_BANNER=1` does the same from the environment |
 | `-D hxscript_keep=<types>` | comma-separated standard-library types to keep beyond the default set. See [dead code elimination](#dead-code-elimination) |
