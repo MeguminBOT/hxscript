@@ -363,9 +363,136 @@ class Scripted {
 					var qualified:Map<String, TypePath> = [];
 					var abstractOf:Map<String, Array<String>> = [];
 
+					function pathOfType(t:Type):Null<TypePath> {
+						if (t == null)
+							return null;
+
+						return switch (t) {
+							case TLazy(f):
+								pathOfType(f());
+							case TType(_, _):
+								pathOfType(t.follow());
+							case TInst(c, _):
+								var cls:ClassType = c.get();
+								var parts:Array<String> = cls.module.split('.');
+								var moduleName:String = parts.pop();
+								{pack: parts, name: moduleName, sub: (moduleName == cls.name ? null : cls.name)};
+							case TAbstract(a, _):
+								var ab:AbstractType = a.get();
+								var parts:Array<String> = ab.module.split('.');
+								var moduleName:String = parts.pop();
+								{pack: parts, name: moduleName, sub: (moduleName == ab.name ? null : ab.name)};
+							case TEnum(e, _):
+								var en:EnumType = e.get();
+								var parts:Array<String> = en.module.split('.');
+								var moduleName:String = parts.pop();
+								{pack: parts, name: moduleName, sub: (moduleName == en.name ? null : en.name)};
+							default:
+								null;
+						}
+					}
+
+					/**
+					 * Records a type under the short name `getTypedExpr` prints for it.
+					 *
+					 * A private typedef is in scope where the constructor was written and nowhere in the
+					 * bridge. The name has to find the type the typedef stands for.
+					 */
+					function rememberType(t:Type):Void {
+						if (t == null)
+							return;
+
+						switch (t) {
+							case TLazy(f):
+								rememberType(f());
+							case TType(r, params):
+								var def:BaseType = r.get();
+								var path:Null<TypePath> = def.isPrivate ? pathOfType(t.follow()) : pathOfType(t);
+								if (path != null && !qualified.exists(def.name))
+									qualified.set(def.name, path);
+								for (p in params)
+									rememberType(p);
+							case TInst(c, params):
+								var cls:ClassType = c.get();
+								var path:Null<TypePath> = pathOfType(t);
+								if (path != null) {
+									if (!qualified.exists(cls.name))
+										qualified.set(cls.name, path);
+									var short:String = cls.name.endsWith('_Impl_') ? cls.name.substr(0, cls.name.length - 6) : cls.name;
+									if (!qualified.exists(short))
+										qualified.set(short, path);
+								}
+								for (p in params)
+									rememberType(p);
+							case TAbstract(a, params):
+								var ab:AbstractType = a.get();
+								if (ab.name != 'Null') {
+									var path:Null<TypePath> = pathOfType(t);
+									if (path != null && !qualified.exists(ab.name))
+										qualified.set(ab.name, path);
+								}
+								for (p in params)
+									rememberType(p);
+							case TEnum(e, params):
+								var en:EnumType = e.get();
+								var path:Null<TypePath> = pathOfType(t);
+								if (path != null && !qualified.exists(en.name))
+									qualified.set(en.name, path);
+								for (p in params)
+									rememberType(p);
+							case TFun(args, ret):
+								for (a in args)
+									rememberType(a.t);
+								rememberType(ret);
+							default:
+						}
+					}
+
+					/**
+					 * Rewrites an unqualified type `getTypedExpr` printed with the path `rememberType` stored.
+					 */
+					function qualifyType(t:ComplexType):ComplexType {
+						return switch (t) {
+							case TPath(p) if (p.pack.length == 0 && p.sub == null && qualified.exists(p.name)):
+								var q:TypePath = qualified.get(p.name);
+								TPath({
+									pack: q.pack,
+									name: q.name,
+									sub: q.sub,
+									params: [
+										for (param in p.params)
+											switch (param) {
+												case TPType(inner): TPType(qualifyType(inner));
+												default: param;
+											}
+									]
+								});
+							case TPath(p):
+								TPath({
+									pack: p.pack,
+									name: p.name,
+									sub: p.sub,
+									params: [
+										for (param in p.params)
+											switch (param) {
+												case TPType(inner): TPType(qualifyType(inner));
+												default: param;
+											}
+									]
+								});
+							case TOptional(inner): TOptional(qualifyType(inner));
+							case TParent(inner): TParent(qualifyType(inner));
+							case TNamed(n, inner): TNamed(n, qualifyType(inner));
+							case TFunction(args, ret): TFunction([for (a in args) qualifyType(a)], qualifyType(ret));
+							default: t;
+						}
+					}
+
 					function collect(t:TypedExpr):Void {
 						if (t == null)
 							return;
+
+						rememberType(t.t);
 
 						switch (t.expr) {
 							case TNew(c, _, _):
@@ -379,6 +506,9 @@ class Scripted {
 								if (!qualified.exists(cls.name))
 									qualified.set(cls.name,
 										{pack: parts, name: moduleName, sub: (moduleName == name ? null : name)});
+
+							case TVar(v, _):
+								rememberType(v.t);
 
 							case TField(_, FStatic(c, _)) | TTypeExpr(TClassDecl(c)):
 								var cls:ClassType = c.get();
@@ -423,15 +553,21 @@ class Scripted {
 										pack: q.pack,
 										name: q.name,
 										sub: q.sub,
-										params: bindParams(t.params)
+										params: bindParams([
+										for (param in t.params)
+											switch (param) {
+												case TPType(inner): TPType(qualifyType(inner));
+												default: param;
+											}
+									])
 									}, [for (p in params) fix(p)])
 								};
 
 							case ECheckType(inner, t):
-								{pos: x.pos, expr: ECheckType(fix(inner), bindType(t))};
+								{pos: x.pos, expr: ECheckType(fix(inner), bindType(qualifyType(t)))};
 
 							case ECast(inner, t) if (t != null):
-								{pos: x.pos, expr: ECast(fix(inner), bindType(t))};
+								{pos: x.pos, expr: ECast(fix(inner), bindType(qualifyType(t)))};
 
 							case EField(owner, member, kind)
 								if (implName(owner) != null && abstractOf.exists(implName(owner))):
@@ -463,7 +599,7 @@ class Scripted {
 										for (v in vars)
 											{
 												name: v.name.replace('`', '_'),
-												type: v.type == null ? null : bindType(v.type),
+												type: v.type == null ? null : bindType(qualifyType(v.type)),
 												expr: v.expr == null ? null : fix(v.expr),
 												isFinal: v.isFinal,
 												isStatic: v.isStatic,

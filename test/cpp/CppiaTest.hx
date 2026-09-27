@@ -127,6 +127,9 @@ class CppiaTest {
 		check('host typedef of a typedef', 'var v = new AliasTwice(); return v.n;', '7',
 			'', 'import AliasTarget.AliasTwice;');
 
+		check('a private typedef in a host constructor', 'var h = new Sub(); return Std.string(h.n);', '1', '',
+			'import HostBagUser;\nclass Sub extends HostBagUser {\n\tpublic function new() { super(); }\n}');
+
 		TestCase.log('  refused by the emitter: ' + refused);
 	}
 
