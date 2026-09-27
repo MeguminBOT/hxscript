@@ -355,12 +355,41 @@ class Scripted {
 				function requalify(typed:TypedExpr, e:Expr):Expr {
 					var qualified:Map<String, TypePath> = [];
 					var abstractOf:Map<String, Array<String>> = [];
+					/** Bare calls `getTypedExpr` printed for a static, and the owner to put back. */
+					var staticCalls:Map<String, Array<String>> = [];
+					/** Names the constructor declares, which a bare call must not steal. */
+					var declared:Map<String, Bool> = [];
+
+					/**
+					 * @param cls The class that owns the static.
+					 * @param field The static's name.
+					 * @return The path a subclass writes, module then class then field.
+					 */
+					function staticOwnerPath(cls:ClassType, field:String):Array<String> {
+						var parts:Array<String> = cls.module.split('.');
+
+						if (parts[parts.length - 1] != cls.name)
+							parts.push(cls.name);
+
+						parts.push(field);
+						return parts;
+					}
 
 					function collect(t:TypedExpr):Void {
 						if (t == null)
 							return;
 
 						switch (t.expr) {
+							case TCall({expr: TField(_, FStatic(c, cf))}, _) if (!c.get().name.endsWith('_Impl_')):
+								staticCalls.set(cf.get().name, staticOwnerPath(c.get(), cf.get().name));
+
+							case TVar(v, _):
+								declared.set(v.name, true);
+
+							case TFunction(f):
+								for (a in f.args)
+									declared.set(a.v.name, true);
+
 							case TNew(c, _, _):
 								var cls:ClassType = c.get();
 								var parts:Array<String> = cls.module.split('.');
@@ -436,6 +465,16 @@ class Scripted {
 							 * HashLink's `Std.int` is `untyped $int(x)`, and once inlined into a rebuilt
 							 * constructor `$int` is a name no source outside `untyped` may write.
 							 */
+							/**
+							 * `getTypedExpr` prints a static call as a bare name. The owner is still on
+							 * the typed tree. Putting it back lets a private static compile under the
+							 * `@:privateAccess` already on `__constructSuper`, instead of refusing the
+							 * constructor.
+							 */
+							case ECall({expr: EConst(CIdent(name))}, params)
+								if (staticCalls.exists(name) && !declared.exists(name)):
+								{pos: x.pos, expr: ECall(macro $p{staticCalls.get(name)}, [for (p in params) fix(p)])};
+
 							case ECall({expr: EConst(CIdent(name))}, params) if (name.startsWith('$')):
 								{
 									pos: x.pos,
@@ -579,22 +618,11 @@ class Scripted {
 
 							case TField(_, FStatic(c, cf)):
 								var cls:ClassType = c.get();
-								var field:ClassField = cf.get();
 
 								if (cls.name.endsWith('_Impl_')) {
-									if (field.meta.has(':impl'))
-										reason = 'it calls ${field.name} on abstract ${cls.module}, which has no form reachable from outside';
+									if (cf.get().meta.has(':impl'))
+										reason = 'it calls ${cf.get().name} on abstract ${cls.module}, which has no form reachable from outside';
 
-									return;
-								}
-
-								/**
-								 * A private static has no name the subclass can write. A public inline that
-								 * calls one, and that one calls itself, leaves the private call in the
-								 * rebuilt constructor (`Unknown identifier`).
-								 */
-								if (!field.isPublic) {
-									reason = 'it calls ${typePath(cls.module, cls.name)}.${field.name}, which is private';
 									return;
 								}
 
