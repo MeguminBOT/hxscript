@@ -565,8 +565,9 @@ class Scripted {
 					 * A private type nested in `t`, or null when every name in it can be written from
 					 * the bridge module.
 					 *
-					 * `new Box<Secret>()` and `var inner:Secret` never construct `Secret` as a `TNew`,
-					 * so the checks below do not see it. The rebuilt source still has to name it.
+					 * Asked only where a type name is actually printed: a local's type, the parameters
+					 * of a `new`, and an explicit cast. A field whose private type prints as `[]` does
+					 * not name it.
 					 */
 					function privateName(t:Type):Null<String> {
 						if (t == null)
@@ -633,13 +634,20 @@ class Scripted {
 						if (t == null || reason != null)
 							return;
 
-						var named:Null<String> = privateName(t.t);
-						if (named == null)
-							switch (t.expr) {
-								case TVar(v, _):
-									named = privateName(v.t);
-								default:
-							}
+						var named:Null<String> = switch (t.expr) {
+							case TVar(v, _):
+								privateName(v.t);
+							case TNew(_, params, _):
+								var found:Null<String> = null;
+								for (p in params)
+									if (found == null)
+										found = privateName(p);
+								found;
+							case TCast(_, m) if (m != null):
+								privateName(t.t);
+							default:
+								null;
+						};
 						if (named != null) {
 							reason = 'it names $named, which is private';
 							return;
