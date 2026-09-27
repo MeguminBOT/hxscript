@@ -127,6 +127,11 @@ class CppiaTest {
 		check('host typedef of a typedef', 'var v = new AliasTwice(); return v.n;', '7',
 			'', 'import AliasTarget.AliasTwice;');
 
+		check('an abstract default stays its own type', 'var s = new Sub(); return Std.string(s.report());', 'none', '',
+			'import HostMarked;\nclass Sub extends HostMarked {\n\tpublic function new() { super(); }\n}');
+		check('an enum-abstract default stays its own type', 'var h = new Sub(); return Std.string(h.kind);', 'common', '',
+			'import HostKinded;\nclass Sub extends HostKinded {\n\tpublic function new() { super(); }\n}');
+
 		TestCase.log('  refused by the emitter: ' + refused);
 	}
 

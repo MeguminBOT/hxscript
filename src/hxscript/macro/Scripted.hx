@@ -87,6 +87,34 @@ class Scripted {
 		}
 
 		/**
+		 * Whether `t` is the standard `String`, rather than an abstract whose default prints as one.
+		 *
+		 * An abstract default and an enum-abstract constant are string constants in the typed tree.
+		 * Annotating them `:String` makes the bridge override a different signature from its base.
+		 */
+		function isStdString(t:Type):Bool {
+			if (t == null)
+				return false;
+
+			return switch (t) {
+				case TLazy(f):
+					isStdString(f());
+				case TType(_, _):
+					isStdString(t.follow());
+				case TAbstract(a, params) if (a.get().name == 'Null' && params.length == 1):
+					isStdString(params[0]);
+				case TInst(c, _):
+					var cls:ClassType = c.get();
+					cls.name == 'String' && cls.pack.length == 0;
+				case TAbstract(a, _):
+					var ab:AbstractType = a.get();
+					ab.name == 'String' && ab.pack.length == 0;
+				default:
+					false;
+			}
+		}
+
+		/**
 		 * Converts a typed `Type` to the `ComplexType` the bridge declares.
 		 *
 		 * `Type.toComplexType()` renders a sub-module type as `pack.SubType`, dropping the module that
@@ -899,12 +927,13 @@ class Scripted {
 								}
 
 								/**
-								 * A string literal is reprinted as the source declared it (`options:String = ""`).
-								 * Every other default stays `cast <expr>` with no type: writing `Null<Float>`
+								 * A string literal whose argument is `String` is reprinted as the source declared
+								 * it (`options:String = ""`). A string constant of any other type, and every
+								 * other default, stays `cast <expr>` with no type: writing `Null<Float>`
 								 * makes hxcpp compile the argument as `Dynamic`.
 								 */
 								switch (arg.value.expr) {
-									case TConst(TString(s)):
+									case TConst(TString(s)) if (isStdString(arg.v.t)):
 										defaults.push(macro $v{s});
 									default:
 										var expr = Context.getTypedExpr(arg.value);
@@ -1201,9 +1230,9 @@ class Scripted {
 												continue;
 											}
 
-											/** Same rule as a rebuilt constructor: only a string literal keeps its type. */
+											/** Same rule as a rebuilt constructor: only a real `String` keeps its type. */
 											switch (arg.value.expr) {
-												case TConst(TString(s)):
+												case TConst(TString(s)) if (isStdString(arg.v.t)):
 													defaults.push(macro $v{s});
 												default:
 													var expr = Context.getTypedExpr(arg.value);
