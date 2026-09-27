@@ -561,6 +561,33 @@ class Scripted {
 						return null;
 					}
 
+					/**
+					 * Whether `type`'s class declares `name`, walking its superclasses.
+					 *
+					 * Anything that is not a class answers yes. A `get_` or `set_` call is only unsafe
+					 * when a class is the receiver and does not declare that accessor, which is how an
+					 * extern `(get, set)` property prints (`Tls.set_value`).
+					 */
+					function declaresField(type:Type, name:String):Bool {
+						return switch (type.follow()) {
+							case TInst(ref, _):
+								var cls:ClassType = ref.get();
+
+								while (cls != null) {
+									for (field in cls.fields.get())
+										if (field.name == name)
+											return true;
+
+									cls = cls.superClass == null ? null : cls.superClass.t.get();
+								}
+
+								return false;
+
+							default:
+								return true;
+						}
+					}
+
 					function look(t:TypedExpr):Void {
 						if (t == null || reason != null)
 							return;
@@ -593,35 +620,27 @@ class Scripted {
 								reason = 'it inlines an abstract\'s constructor, which assigns to `this`';
 
 							/**
-							 * Extern `(get, set)` properties are already `n.set_value(0)` in the typed
-							 * AST (`FDynamic`). getTypedExpr keeps that call, and the extern has no
-							 * `set_value` field (`sys.thread.Tls`, `WorkOutput.workIterations.value = 0`).
+							 * An extern `(get, set)` property is already `n.set_value(0)` or `n.get_value()`
+							 * in the typed AST (`FDynamic`). getTypedExpr keeps that call, and the extern
+							 * does not declare it (`sys.thread.Tls`). A class that does declare the
+							 * accessor, and a `Dynamic` receiver, still compile.
 							 */
-							case TCall({expr: TField(_, FDynamic(name))}, _) if (StringTools.startsWith(name, 'set_')):
-								reason = 'it writes a property through $name, which is not a source-level field';
+							case TCall({expr: TField(owner, FDynamic(name))}, _)
+								if ((name.startsWith('set_') || name.startsWith('get_')) && !declaresField(owner.t, name)):
+								reason = 'it reaches a property through $name, which its class does not declare';
 
 							/**
-							 * `n.value = 0` on a `(get, set)` property. getTypedExpr emits `n.set_value(0)`,
-							 * which externs such as `sys.thread.Tls` do not expose (`has no field set_value`).
-							 * `lime.system.WorkOutput` (`workIterations.value = 0`) is this shape.
+							 * The same loss in the form it takes once the compiler has reduced it further: a
+							 * write whose value no longer carries the abstract its field is declared as.
 							 */
-							case TBinop(OpAssign | OpAssignOp(_), {expr: TField(_, FInstance(_, _, cf))}, rhs):
-								var field = cf.get();
-								switch (field.kind) {
-									case FVar(_, AccCall):
-										reason = 'it writes ${field.name} through a setter, which getTypedExpr emits as set_${field.name}';
+							case TBinop(OpAssign | OpAssignOp(_), {expr: TField(_, FInstance(_, _, cf))},
+								{expr: TCast(_, _)}):
+								switch (cf.get().type) {
+									case TAbstract(declared, _) if (!declared.get().meta.has(':coreType')
+										&& declared.get().name != 'Null'):
+										reason = 'it writes ${cf.get().name} through a cast the compiler put there '
+											+ 'in place of ${declared.toString()}, which no source may write';
 									default:
-										switch (rhs.expr) {
-											case TCast(_, _):
-												switch (field.type) {
-													case TAbstract(declared, _) if (!declared.get().meta.has(':coreType')
-														&& declared.get().name != 'Null'):
-														reason = 'it writes ${field.name} through a cast the compiler put there '
-															+ 'in place of ${declared.toString()}, which no source may write';
-													default:
-												}
-											default:
-										}
 								}
 
 							default:
