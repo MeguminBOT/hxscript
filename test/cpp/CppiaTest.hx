@@ -127,6 +127,9 @@ class CppiaTest {
 		check('host typedef of a typedef', 'var v = new AliasTwice(); return v.n;', '7',
 			'', 'import AliasTarget.AliasTwice;');
 
+		check('a static field read in a host constructor', 'var h = new Sub(); return Std.string(h.chosen.span);', '8', '',
+			'import HostStaticRead;\nclass Sub extends HostStaticRead {\n\tpublic function new() { super(); }\n}');
+
 		TestCase.log('  refused by the emitter: ' + refused);
 	}
 

@@ -357,6 +357,8 @@ class Scripted {
 					var abstractOf:Map<String, Array<String>> = [];
 					/** Bare calls `getTypedExpr` printed for a static, and the owner to put back. */
 					var staticCalls:Map<String, Array<String>> = [];
+					/** Bare names `getTypedExpr` printed for a static field, and the owner to put back. */
+					var staticFields:Map<String, Array<String>> = [];
 					/** Names the constructor declares, which a bare call must not steal. */
 					var declared:Map<String, Bool> = [];
 
@@ -378,6 +380,22 @@ class Scripted {
 					function collect(t:TypedExpr):Void {
 						if (t == null)
 							return;
+
+						function noteImpl(cls:ClassType):Void {
+							if (cls.name.endsWith('_Impl_') && !abstractOf.exists(cls.name)) {
+								switch (cls.kind) {
+									case KAbstractImpl(a):
+										var ab:AbstractType = a.get();
+										var parts:Array<String> = ab.module.split('.');
+
+										if (parts[parts.length - 1] != ab.name)
+											parts.push(ab.name);
+
+										abstractOf.set(cls.name, parts);
+									default:
+								}
+							}
+						}
 
 						switch (t.expr) {
 							case TCall({expr: TField(_, FStatic(c, cf))}, _) if (!c.get().name.endsWith('_Impl_')):
@@ -402,22 +420,14 @@ class Scripted {
 									qualified.set(cls.name,
 										{pack: parts, name: moduleName, sub: (moduleName == name ? null : name)});
 
-							case TField(_, FStatic(c, _)) | TTypeExpr(TClassDecl(c)):
+							case TField(_, FStatic(c, cf)):
 								var cls:ClassType = c.get();
+								if (!cls.name.endsWith('_Impl_'))
+									staticFields.set(cf.get().name, staticOwnerPath(cls, cf.get().name));
+								noteImpl(cls);
 
-								if (cls.name.endsWith('_Impl_') && !abstractOf.exists(cls.name)) {
-									switch (cls.kind) {
-										case KAbstractImpl(a):
-											var ab:AbstractType = a.get();
-											var parts:Array<String> = ab.module.split('.');
-
-											if (parts[parts.length - 1] != ab.name)
-												parts.push(ab.name);
-
-											abstractOf.set(cls.name, parts);
-										default:
-									}
-								}
+							case TTypeExpr(TClassDecl(c)):
+								noteImpl(c.get());
 
 							default:
 						}
@@ -484,6 +494,13 @@ class Scripted {
 											[for (p in params) fix(p)])
 									})
 								};
+
+							/**
+							 * A static field of the base prints as a bare name. The subclass does not
+							 * inherit it.
+							 */
+							case EConst(CIdent(name)) if (staticFields.exists(name) && !declared.exists(name)):
+								{pos: x.pos, expr: (macro $p{staticFields.get(name)}).expr};
 
 							case EConst(CIdent(name)) if (name.indexOf('`') >= 0):
 								{pos: x.pos, expr: EConst(CIdent(name.replace('`', '_')))};
