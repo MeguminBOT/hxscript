@@ -5,7 +5,6 @@ import haxe.macro.Context;
 import haxe.macro.Expr;
 import haxe.macro.Type;
 import sys.FileSystem;
-import sys.io.File;
 
 /**
  * Generates one bridge per base scripts may extend, which is `Autowire`'s bridging step.
@@ -284,15 +283,26 @@ class Bridges {
 	 */
 	static function eligible(path:String):Bool {
 		/**
-		 * Same skip as `cls.params.length > 0` below, decided from source so we never
+		 * Same skip as `cls.params.length > 0` below, read from the module so we never
 		 * call `getType`. On a `@:generic` class (`lime.app.Promise`) that call is a
 		 * compiler error ("Could not determine type for parameter T"), not a thrown
 		 * miss `resolve` can catch, and the rest of the package is not scanned.
+		 *
+		 * Only the module's own type counts. Another generic declaration in the file, or a
+		 * docstring that mentions one, is not this class, and a type named in
+		 * `-D hxscript_bridge_types` has to keep its bridge. `getModule` on a sub-type path
+		 * (`Holder.Inner`) is itself an uncatchable error, so it is asked only of a module file.
 		 */
-		if (looksParameterized(path)) {
-			passed.set(path, 'has type parameters, which erase and cannot be substituted');
-			return false;
-		}
+		var main:String = path.substr(path.lastIndexOf('.') + 1);
+		if (isModuleFile(path)) try {
+			for (t in Context.getModule(path))
+				switch (t) {
+					case TInst(ref, _) if (ref.get().name == main && ref.get().params.length > 0):
+						passed.set(path, 'has type parameters, which erase and cannot be substituted');
+						return false;
+					default:
+				}
+		} catch (e:Dynamic) {}
 
 		var found:Null<Type> = Autowire.resolve(path);
 
@@ -343,16 +353,22 @@ class Bridges {
 		}
 	}
 
-	static var parameterizedDecl = ~/\b(?:class|abstract)\s+\w+\s*</;
-
-	static function looksParameterized(path:String):Bool {
+	/**
+	 * Whether `path` names a module file on the classpath, rather than a type nested in one.
+	 *
+	 * `Holder.Inner` is a type path whose file is `Holder.hx`. `Context.getModule` on that path is an
+	 * uncatchable error, so the parameter check asks only when this is true.
+	 *
+	 * @param path The module path.
+	 * @return Whether `path` with dots folded to slashes and `.hx` appended exists on the classpath.
+	 */
+	static function isModuleFile(path:String):Bool {
 		var relative:String = path.split('.').join('/') + '.hx';
 
 		for (dir in Context.getClassPath()) {
 			var at:String = dir + relative;
-			if (!FileSystem.exists(at) || FileSystem.isDirectory(at))
-				continue;
-			return parameterizedDecl.match(File.getContent(at));
+			if (FileSystem.exists(at) && !FileSystem.isDirectory(at))
+				return true;
 		}
 
 		return false;
