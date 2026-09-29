@@ -341,6 +341,8 @@ class Backend {
 			emitter.globalScope(input.name, input.key);
 		}
 
+		emitter.settleImplicitConstructors();
+
 		emitter.world = function(module:String, name:String):Dynamic {
 			var scope:Null<hxscript.runtime.Interp> = scopes.get(module);
 			return scope == null ? null : (try scope.resolve(name) catch (e:Dynamic) null);

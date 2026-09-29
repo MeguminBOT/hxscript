@@ -205,6 +205,18 @@ class Emitter {
 	 */
 	var methodArity:StringMap<Int> = new StringMap();
 
+	/** Each batch class's superclass path, empty for none, for walking a constructor chain. */
+	var batchSupers:StringMap<String> = new StringMap();
+
+	/** Batch classes that initialise a member field but declare no constructor to run it in. */
+	var needsImplicitNew:Array<String> = [];
+
+	/**
+	 * The arity of the constructor written for each class in `needsImplicitNew`, or -1 when its
+	 * base's constructor shape is unknown.
+	 */
+	var implicitNew:StringMap<Int> = new StringMap();
+
 	/**
 	 * How many arguments the current class's host superclass constructor declares, or -1 when the
 	 * superclass is in this batch and needs no padding.
@@ -510,6 +522,26 @@ class Emitter {
 						}
 					}
 					classVars.set(full, vars);
+
+					if (decl.d.match(DClass(_))) {
+						batchSupers.set(full, c.extend == null ? '' : typeName(c.extend));
+
+						var ownsNew:Bool = false;
+						var initialises:Bool = false;
+						for (f in c.fields) {
+							if (f.name == 'new' && f.kind.match(KFunction(_)))
+								ownsNew = true;
+							if (!hasAccess(f, AStatic)) {
+								switch (f.kind) {
+									case KVar(v) if (v.expr != null):
+										initialises = true;
+									case _:
+								}
+							}
+						}
+						if (initialises && !ownsNew)
+							needsImplicitNew.push(full);
+					}
 
 					var rets:StringMap<String> = new StringMap();
 					for (f in c.fields) {
@@ -859,6 +891,11 @@ class Emitter {
 			}
 		}
 
+		var implicitArity:Null<Int> = isInterface ? null : implicitNew.get(full);
+		if (implicitArity != null && implicitArity < 0)
+			throw new Unsupported('member initialisers without a constructor, over ' + currentSuper
+				+ ', whose constructor shape is unknown', pos);
+
 		w.newline();
 		w.token(isInterface ? 'INTERFACE' : 'CLASS');
 		w.type(full);
@@ -866,13 +903,78 @@ class Emitter {
 		w.int(c.implement.length);
 		for (i in c.implement)
 			w.type(typeName(i));
-		w.int(c.fields.length);
+		w.int(c.fields.length + (implicitArity == null ? 0 : 1));
 		w.newline();
 
 		for (f in c.fields)
 			emitField(f, isInterface, pos);
 
+		if (implicitArity != null)
+			emitImplicitConstructor(implicitArity, pos);
+
 		classCount++;
+	}
+
+	/**
+	 * Gives every class in `needsImplicitNew` the constructor Haxe would have generated: it takes the
+	 * base constructor's arguments, passes them to `super`, and runs the member initialisers.
+	 *
+	 * Without it the class inherits its base's constructor and every `var x = value` starts zeroed.
+	 * Settled after the whole batch is declared, since a base may be declared after its subclass, and
+	 * before anything is emitted, since a `new` call site is padded to the arity recorded here.
+	 */
+	public function settleImplicitConstructors():Void {
+		for (full in needsImplicitNew) {
+			var arity:Int = constructorArity(batchSupers.get(full), 0);
+			implicitNew.set(full, arity);
+			if (arity >= 0)
+				methodArity.set(full + ' new', arity);
+		}
+	}
+
+	/**
+	 * @param path A class path, empty for none.
+	 * @param depth How far up the chain this is, to stop on a cycle.
+	 * @return How many arguments its constructor takes, or -1 when that is unknown.
+	 */
+	function constructorArity(path:String, depth:Int):Int {
+		if (path == null || path == '')
+			return 0;
+		if (depth > 64)
+			return -1;
+
+		var batch:Null<String> = declaredClass(path);
+		if (batch == null)
+			return hostConstructorArity(path);
+
+		var own:Null<Int> = methodArity.get(batch + ' new');
+		if (own != null)
+			return own;
+
+		return constructorArity(batchSupers.get(batch), depth + 1);
+	}
+
+	/**
+	 * Writes the constructor `settleImplicitConstructors` decided on for the class being emitted.
+	 *
+	 * @param arity How many arguments it takes and hands to `super`.
+	 * @param pos Where the class is declared.
+	 */
+	function emitImplicitConstructor(arity:Int, pos:Position):Void {
+		var args:Array<Argument> = [for (i in 0...arity) {name: '_hxsBase' + i, opt: true}];
+		var body:Array<Expr> = [];
+
+		if (currentSuper != '') {
+			var passed:Array<Expr> = [for (a in args) {e: EIdent(a.name), pos: pos}];
+			body.push({e: ECall({e: EIdent('super'), pos: pos}, passed), pos: pos});
+		}
+
+		emitField({
+			name: 'new',
+			meta: [],
+			kind: KFunction({args: args, expr: {e: EBlock(body), pos: pos}, ret: null}),
+			access: [APublic]
+		}, false, pos);
 	}
 
 	/**
