@@ -3089,6 +3089,13 @@ class Interp {
 			namedHolder:Dynamic = null,
 			unknown:Null<String> = null;
 
+		/**
+		 * Whether `got` holds a value rather than a path still being resolved. A null value is then an
+		 * object with no fields, not a prefix of a longer type name: `h.kept` with `h` null was looked
+		 * up as a type called `h.kept`, found nothing, and read as null instead of raising.
+		 */
+		var valued:Bool = false;
+
 		var fullProp:String = '';
 		for (i => prop in __tempResolveFields) {
 			var field:String, maybe:Bool;
@@ -3102,7 +3109,14 @@ class Interp {
 					maybe = true;
 				case RExpr(e):
 					got = expr(e);
+					valued = true;
 					continue;
+			}
+
+			if (got == null && valued) {
+				if (maybe)
+					return null;
+				error(EInvalidAccess(field));
 			}
 
 			if (got == null) {
@@ -3111,15 +3125,18 @@ class Interp {
 				if (i == 0) {
 					if (captures.exists(field)) {
 						got = captures.get(field);
+						valued = true;
 					} else if (locals.exists(field)) {
 						got = getLocal(field);
+						valued = true;
 					} else if (isResolvable(field)) {
 						got = resolve(field);
+						valued = true;
 					} else {
 						unknown = field;
 					}
 
-					if (got != null)
+					if (valued)
 						continue;
 				}
 
@@ -3134,8 +3151,10 @@ class Interp {
 				} else if (gotType != null) {
 					var t = gotType.resolve(environment);
 					got = fromType(t, field, maybe);
+					valued = true;
 				} else if (namedHolder != null) {
 					got = fromType(namedHolder, field, maybe);
+					valued = true;
 				} else {
 					/**
 					 * A fully-qualified path the index does not carry, resolved by name.

@@ -1719,8 +1719,8 @@ class Emitter {
 				w.int(3);
 				w.pos(line);
 				w.token('FSTATIC');
-				w.type('Reflect');
-				w.str('setProperty');
+				w.type('hxscript.runtime.Fields');
+				w.str('set');
 				expr(target);
 				w.pos(line);
 				w.token('s');
@@ -2372,7 +2372,7 @@ class Emitter {
 		/**
 		 * An accessor the host's own abstract declares, which is a static taking the value first.
 		 *
-		 * Reading one had no spelling at all and fell to `Reflect.getProperty` below, which is handed
+		 * Reading one had no spelling at all and fell to `Fields.get` below (`Reflect.getProperty`), which is handed
 		 * the UNDERLYING value: `colour.red` asked an `Int` for a field of that name and answered null,
 		 * silently and with nothing refused. Reading only, since an abstract's setter assigns to `this`
 		 * and only the host's own inlining makes that reach the variable holding the value.
@@ -2393,8 +2393,8 @@ class Emitter {
 		w.int(2);
 		w.pos(line);
 		w.token('FSTATIC');
-		w.type('Reflect');
-		w.str('getProperty');
+		w.type('hxscript.runtime.Fields');
+		w.str('get');
 		expr(obj);
 		w.pos(line);
 		w.token('s');

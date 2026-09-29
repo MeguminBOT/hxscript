@@ -289,6 +289,18 @@ class Corpus {
 		check('host plain field beside a property',
 			'var h = new HostBase(); h.kept = 2; h.scaled = 3; return h.kept + h.scaled;', '8', null, host);
 
+		// A null host object has no field to read or write. The interpreter raises; compiled code read
+		// null and carried on past the line, or wrote nowhere.
+		check('host field of a null object raises',
+			'var h:HostBase = null; try { return Std.string(h.kept); } catch (e:Dynamic) { return Std.string(e); }',
+			'Invalid access to field kept', null, host);
+		check('host property of a null object raises',
+			'var h:HostBase = null; try { return Std.string(h.scaled); } catch (e:Dynamic) { return Std.string(e); }',
+			'Invalid access to field scaled', null, host);
+		check('host field write on a null object raises',
+			'var h:HostBase = null; try { h.kept = 1; return "wrote"; } catch (e:Dynamic) { return Std.string(e); }',
+			'Invalid access to field kept', null, host);
+
 		// An array literal has nothing in it to say what it holds, so it used to be built loose while an
 		// annotation promised a specific kind. Reading it back through that annotation reinterprets the
 		// memory, which crashes rather than misbehaves, so these index one after the round trip.
