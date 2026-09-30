@@ -92,6 +92,34 @@ class Scripted {
 		}
 
 		/**
+		 * Whether `t` is the standard `String`, rather than an abstract whose default prints as one.
+		 *
+		 * An abstract default and an enum-abstract constant are string constants in the typed tree.
+		 * Annotating them `:String` makes the bridge override a different signature from its base.
+		 */
+		function isStdString(t:Type):Bool {
+			if (t == null)
+				return false;
+
+			return switch (t) {
+				case TLazy(f):
+					isStdString(f());
+				case TType(_, _):
+					isStdString(t.follow());
+				case TAbstract(a, params) if (a.get().name == 'Null' && params.length == 1):
+					isStdString(params[0]);
+				case TInst(c, _):
+					var cls:ClassType = c.get();
+					cls.name == 'String' && cls.pack.length == 0;
+				case TAbstract(a, _):
+					var ab:AbstractType = a.get();
+					ab.name == 'String' && ab.pack.length == 0;
+				default:
+					false;
+			}
+		}
+
+		/**
 		 * Converts a typed `Type` to the `ComplexType` the bridge declares.
 		 *
 		 * `Type.toComplexType()` renders a sub-module type as `pack.SubType`, dropping the module that
@@ -1207,8 +1235,20 @@ class Scripted {
 									defaults.push(null);
 									continue;
 								}
-								var expr = Context.getTypedExpr(arg.value);
-								defaults.push(macro cast $expr);
+
+								/**
+								 * A string literal whose argument is `String` is reprinted as the source declared
+								 * it (`options:String = ""`). A string constant of any other type, and every
+								 * other default, stays `cast <expr>` with no type: writing `Null<Float>`
+								 * makes hxcpp compile the argument as `Dynamic`.
+								 */
+								switch (arg.value.expr) {
+									case TConst(TString(s)) if (isStdString(arg.v.t)):
+										defaults.push(macro $v{s});
+									default:
+										var expr = Context.getTypedExpr(arg.value);
+										defaults.push(macro cast $expr);
+								}
 							}
 					}
 					return {
@@ -1217,12 +1257,20 @@ class Scripted {
 							args: [
 								for (i => arg in args) {
 									var defaultValue:Expr = defaults[i];
+									var typed:Null<ComplexType> = defaultValue == null ? toCT(arg.t) : null;
+
+									if (defaultValue != null)
+										switch (defaultValue.expr) {
+											case EConst(CString(_)):
+												typed = macro :String;
+											default:
+										}
 
 									{
 										name: shadowed.exists(arg.name) ? shadowed.get(arg.name) : arg.name,
 										value: defaultValue == null ? null : unshadow(defaultValue),
 										opt: (defaultValue == null ? arg.opt : null),
-										type: (defaultValue == null ? toCT(arg.t) : null)
+										type: typed
 									}
 								}
 							],
@@ -1512,20 +1560,33 @@ class Scripted {
 												defaults.push(null);
 												continue;
 											}
-											var expr = Context.getTypedExpr(arg.value);
-											defaults.push(macro cast $expr);
+
+											/** Same rule as a rebuilt constructor: only a real `String` keeps its type. */
+											switch (arg.value.expr) {
+												case TConst(TString(s)) if (isStdString(arg.v.t)):
+													defaults.push(macro $v{s});
+												default:
+													var expr = Context.getTypedExpr(arg.value);
+													defaults.push(macro cast $expr);
+											}
 										}
 								}
 								var args = [
 									for (i => arg in args) {
 										var defaultValue:Expr = defaults[i];
+										var typed:Null<ComplexType> = defaultValue == null ? mapGeneric(toCT(arg.t)) : null;
 
-										var t = mapGeneric(toCT(arg.t));
+										if (defaultValue != null)
+											switch (defaultValue.expr) {
+												case EConst(CString(_)):
+													typed = macro :String;
+												default:
+											}
 
 										{
 											name: arg.name,
 											value: defaultValue,
-											type: (defaultValue == null ? t : null),
+											type: typed,
 											opt: (defaultValue == null ? arg.opt : null)
 										}
 									}
