@@ -1088,7 +1088,59 @@ class Scripted {
 						};
 					}
 
-					var expr = requalify(typedConstr, Context.getTypedExpr(typedConstr));
+					/**
+					 * An inlined abstract method prints its receiver as `var this = ...`, and every
+					 * later `this` in that block means the receiver. Left as `this`, it is the instance,
+					 * so `scrollFactor.set` writes the sprite. Renaming the local, and the `this` after
+					 * it until the block ends, keeps the constructor rebuilt.
+					 */
+					var receivers:Int = 0;
+
+					function renameReceiver(e:Expr, to:Null<String>):Expr {
+						return switch (e.expr) {
+							case EConst(CIdent('this')) if (to != null):
+								{pos: e.pos, expr: EConst(CIdent(to))};
+
+							case EBlock(exprs):
+								var current:Null<String> = to;
+								var out:Array<Expr> = [];
+
+								for (statement in exprs) {
+									switch (statement.expr) {
+										case EVars(vars):
+											var renamed:Array<Var> = [];
+
+											for (v in vars) {
+												var value:Null<Expr> = v.expr == null ? null : renameReceiver(v.expr, current);
+
+												if (v.name == 'this')
+													current = '__receiver' + (receivers++);
+
+												renamed.push({
+													name: v.name == 'this' ? current : v.name,
+													type: v.type,
+													expr: value,
+													isFinal: v.isFinal,
+													isStatic: v.isStatic,
+													meta: v.meta
+												});
+											}
+
+											out.push({pos: statement.pos, expr: EVars(renamed)});
+
+										default:
+											out.push(renameReceiver(statement, current));
+									}
+								}
+
+								{pos: e.pos, expr: EBlock(out)};
+
+							default:
+								e.map(function(sub:Expr):Expr return renameReceiver(sub, to));
+						}
+					}
+
+					var expr = renameReceiver(requalify(typedConstr, Context.getTypedExpr(typedConstr)), null);
 					switch (expr.expr) {
 						default:
 						case EFunction(_, fun):
