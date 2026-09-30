@@ -138,6 +138,7 @@ Everything the library reads. Only the first group is likely to concern you.
 | `-D hxscript_bridge_classpath=<dirs>` | comma-separated `-cp` entries walked with an empty package. See [what gets bridged](#choosing-what-gets-bridged) |
 | `-D hxscript_bridge_exclude=<paths>` | comma-separated prefixes dropped from a package / classpath / all scan. Does not remove a preset base or a `-D hxscript_bridge_types` entry. See [what gets bridged](#choosing-what-gets-bridged) |
 | `-D hxscript_bridge_all` | every eligible class under every active library's roots. See [what gets bridged](#choosing-what-gets-bridged) |
+| `-D hxscript_bridge_eager` | type each generated bridge before defining the next, so a few hundred bases do not overflow the compiler. Off unless set |
 | `-D hxscript_verbose` | print every type, bridge and abstract the setup touched, under the block it already prints |
 | `-D hxscript_no_banner` | print nothing at all. `HXSCRIPT_NO_BANNER=1` does the same from the environment |
 | `-D hxscript_keep=<types>` | comma-separated standard-library types to keep beyond the default set. See [dead code elimination](#dead-code-elimination) |
