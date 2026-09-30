@@ -135,6 +135,9 @@ class CppiaTest {
 		check('a private typedef in a host constructor', 'var h = new Sub(); return Std.string(h.n);', '1', '',
 			'import HostBagUser;\nclass Sub extends HostBagUser {\n\tpublic function new() { super(); }\n}');
 
+		check('a root-package class built beside a same-named one', 'var h = new Sub(); return h.made;', 'root', '',
+			'import HostTwinNew;\nclass Sub extends HostTwinNew {\n\tpublic function new() { super(); }\n}');
+
 		TestCase.log('  refused by the emitter: ' + refused);
 	}
 

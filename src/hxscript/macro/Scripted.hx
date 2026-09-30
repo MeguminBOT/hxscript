@@ -448,8 +448,11 @@ class Scripted {
 						}
 					}
 
+					/** Private typedefs by the name `getTypedExpr` prints, with the type each stands for. */
+					var privateAliases:Map<String, TypePath> = [];
+
 					/**
-					 * Records a type under the short name `getTypedExpr` prints for it.
+					 * Records a private typedef under the name `getTypedExpr` prints for it.
 					 *
 					 * A private typedef is in scope where the constructor was written and nowhere in the
 					 * bridge. The name has to find the type the typedef stands for.
@@ -463,37 +466,14 @@ class Scripted {
 								rememberType(f());
 							case TType(r, params):
 								var def:BaseType = r.get();
-								var path:Null<TypePath> = def.isPrivate ? pathOfType(t.follow()) : pathOfType(t);
-								if (path != null && !qualified.exists(def.name))
-									qualified.set(def.name, path);
-								for (p in params)
-									rememberType(p);
-							case TInst(c, params):
-								var cls:ClassType = c.get();
-								var path:Null<TypePath> = pathOfType(t);
-								if (path != null) {
-									if (!qualified.exists(cls.name))
-										qualified.set(cls.name, path);
-									var short:String = cls.name.endsWith('_Impl_') ? cls.name.substr(0, cls.name.length - 6) : cls.name;
-									if (!qualified.exists(short))
-										qualified.set(short, path);
+								if (def.isPrivate) {
+									var path:Null<TypePath> = pathOfType(t.follow());
+									if (path != null && !privateAliases.exists(def.name))
+										privateAliases.set(def.name, path);
 								}
 								for (p in params)
 									rememberType(p);
-							case TAbstract(a, params):
-								var ab:AbstractType = a.get();
-								if (ab.name != 'Null') {
-									var path:Null<TypePath> = pathOfType(t);
-									if (path != null && !qualified.exists(ab.name))
-										qualified.set(ab.name, path);
-								}
-								for (p in params)
-									rememberType(p);
-							case TEnum(e, params):
-								var en:EnumType = e.get();
-								var path:Null<TypePath> = pathOfType(t);
-								if (path != null && !qualified.exists(en.name))
-									qualified.set(en.name, path);
+							case TInst(_, params) | TAbstract(_, params) | TEnum(_, params):
 								for (p in params)
 									rememberType(p);
 							case TFun(args, ret):
@@ -516,8 +496,8 @@ class Scripted {
 							 */
 							case TPath(p) if (p.pack.length == 0 && p.sub == null && p.params.length == 0 && boundFor(p.name) != null):
 								t;
-							case TPath(p) if (p.pack.length == 0 && p.sub == null && qualified.exists(p.name)):
-								var q:TypePath = qualified.get(p.name);
+							case TPath(p) if (p.pack.length == 0 && p.sub == null && privateAliases.exists(p.name)):
+								var q:TypePath = privateAliases.get(p.name);
 								TPath({
 									pack: q.pack,
 									name: q.name,
