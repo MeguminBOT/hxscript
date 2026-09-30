@@ -138,6 +138,27 @@ class CppiaTest {
 		check('a root-package class built beside a same-named one', 'var h = new Sub(); return h.made;', 'root', '',
 			'import HostTwinNew;\nclass Sub extends HostTwinNew {\n\tpublic function new() { super(); }\n}');
 
+		check('a static field read in a host constructor', 'var h = new Sub(); return Std.string(h.chosen.span);', '8', '',
+			'import HostStaticRead;\nclass Sub extends HostStaticRead {\n\tpublic function new() { super(); }\n}');
+
+		check('a field of this in a reprinted switch', 'var h = new Sub(0); return Std.string(h.width);', '10', '',
+			'import HostSwitchField;\nclass Sub extends HostSwitchField {\n\tpublic function new(mode:Int) { super(mode); }\n}');
+
+		check('a method of this in a reprinted switch', 'var h = new Sub(0); return h.a + "," + h.b;', '1,2', '',
+			'import HostSwitchMethod;\nclass Sub extends HostSwitchMethod {\n\tpublic function new(mode:Int) { super(mode); }\n}');
+
+		check('an own static in a reprinted switch', 'var h = new Sub(0); return h.mine + "," + h.theirs;', '5,100', '',
+			'import HostSwitchStatic;\nclass Sub extends HostSwitchStatic {\n\tpublic function new(mode:Int) { super(mode); }\n}');
+
+		check('the root Math in a reprinted switch', 'var h = new Sub(0); return Std.string(h.b);', '3', '',
+			'import HostSwitchRoot;\nclass Sub extends HostSwitchRoot {\n\tpublic function new(mode:Int) { super(mode); }\n}');
+
+		check('a capture named like a static, in a reprinted switch', 'return new Sub(0).x + "," + new Sub(5).x;', '0,1005', '',
+			'import HostSwitchPattern;\nclass Sub extends HostSwitchPattern {\n\tpublic function new(mode:Int) { super(mode); }\n}');
+
+		check('a catch variable named like a static', 'var h = new Sub(); return h.got;', 'static|thrown', '',
+			'import HostCatchName;\nclass Sub extends HostCatchName {\n\tpublic function new() { super(); }\n}');
+
 		TestCase.log('  refused by the emitter: ' + refused);
 	}
 

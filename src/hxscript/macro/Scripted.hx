@@ -414,6 +414,108 @@ class Scripted {
 					var qualified:Map<String, TypePath> = [];
 					var abstractOf:Map<String, Array<String>> = [];
 
+					/**
+					 * The path to write for a bare name in a switch's reprinted source, keyed by where
+					 * the name is written.
+					 *
+					 * `getTypedExpr` prints a switch from its source (`@:ast`), where a name resolves in
+					 * the module that declared it: an own static, an import, a field of `this`, a local.
+					 * The typed switch inside the same meta has already resolved each one, so only a
+					 * name that it resolved to a static or a type is rewritten, and to that owner.
+					 */
+					var sourceNames:Map<String, Array<String>> = [];
+
+					function posKey(p:Position):String {
+						var info = Context.getPosInfos(p);
+						return info.file + ':' + info.min + ':' + info.max;
+					}
+
+					/**
+					 * Reads one `@:ast` switch against the typed switch inside it.
+					 *
+					 * By position first, which is exact for code written in the constructor. Inlined
+					 * code has its typed positions moved to the call site while its source keeps its
+					 * own, so there a name is matched within this one switch, and only when it has a
+					 * single meaning there.
+					 *
+					 * @param src The source the switch is reprinted from.
+					 * @param inner The typed switch.
+					 */
+					function readSource(src:Expr, inner:TypedExpr):Void {
+						var byPos:Map<String, String> = [];
+						var byName:Map<String, Array<String>> = [];
+
+						function note(p:Position, name:String, meaning:String):Void {
+							byPos.set(posKey(p) + '|' + name, meaning);
+
+							var seen:Null<Array<String>> = byName.get(name);
+							if (seen == null)
+								byName.set(name, [meaning]);
+							else if (seen.indexOf(meaning) < 0)
+								seen.push(meaning);
+						}
+
+						function typedWalk(t:TypedExpr):Void {
+							switch (t.expr) {
+								case TField({expr: TTypeExpr(TClassDecl(c))}, FStatic(_, cf)) if (!c.get().name.endsWith('_Impl_')):
+									note(t.pos, cf.get().name, 'S:' + staticOwnerPath(c.get(), cf.get().name).join('.'));
+								case TTypeExpr(TClassDecl(c)) if (!c.get().name.endsWith('_Impl_')):
+									var cls:ClassType = c.get();
+									note(t.pos, cls.name, 'T:' + typePath(cls.module, cls.name));
+								case TTypeExpr(TEnumDecl(en)):
+									var enm:EnumType = en.get();
+									note(t.pos, enm.name, 'T:' + typePath(enm.module, enm.name));
+								case TField({expr: TConst(TThis)}, FInstance(_, _, cf) | FClosure(_, cf)):
+									note(t.pos, cf.get().name, 'M');
+								case TLocal(v):
+									note(t.pos, v.name, 'L');
+								default:
+							}
+
+							haxe.macro.TypedExprTools.iter(t, typedWalk);
+						}
+
+						typedWalk(inner);
+
+						function sourceWalk(x:Expr):Void {
+							switch (x.expr) {
+								case EConst(CIdent(name)):
+									var meaning:Null<String> = byPos.get(posKey(x.pos) + '|' + name);
+
+									if (meaning == null) {
+										var seen:Null<Array<String>> = byName.get(name);
+										if (seen != null && seen.length == 1)
+											meaning = seen[0];
+									}
+
+									if (meaning != null && (meaning.startsWith('S:') || meaning.startsWith('T:')))
+										sourceNames.set(posKey(x.pos), meaning.substr(2).split('.'));
+
+								/**
+								 * A pattern is left as written. A bare name there is an enum constructor the
+								 * subject's type resolves, or a capture that binds a new local.
+								 */
+								case ESwitch(subject, cases, edef):
+									sourceWalk(subject);
+									for (c in cases) {
+										if (c.guard != null)
+											sourceWalk(c.guard);
+										if (c.expr != null)
+											sourceWalk(c.expr);
+									}
+									if (edef != null && edef.expr != null)
+										sourceWalk(edef);
+									return;
+
+								default:
+							}
+
+							x.iter(sourceWalk);
+						}
+
+						sourceWalk(src);
+					}
+
 					function pathOfType(t:Type):Null<TypePath> {
 						if (t == null)
 							return null;
@@ -538,6 +640,9 @@ class Scripted {
 						rememberType(t.t);
 
 						switch (t.expr) {
+							case TMeta({name: ':ast', params: params}, inner) if (params != null && params.length > 0):
+								readSource(params[0], inner);
+
 							case TNew(c, _, _):
 								var cls:ClassType = c.get();
 								switch (cls.kind) {
@@ -633,6 +738,9 @@ class Scripted {
 											[for (p in params) fix(p)])
 									})
 								};
+
+							case EConst(CIdent(_)) if (sourceNames.exists(posKey(x.pos))):
+								{pos: x.pos, expr: (macro $p{sourceNames.get(posKey(x.pos))}).expr};
 
 							case EConst(CIdent(name)) if (name.indexOf('`') >= 0):
 								{pos: x.pos, expr: EConst(CIdent(name.replace('`', '_')))};
