@@ -1096,50 +1096,55 @@ class Scripted {
 					}
 
 					/**
-					 * Rewrites a `super(...)` call for the bridge, dropping trailing nulls so an optional argument
-					 * keeps its default instead of being overwritten.
+					 * Drops the `null`s `getTypedExpr` appended for omitted optional arguments.
 					 *
-					 * @param e The expression to rewrite.
-					 * @return The rewritten expression.
+					 * The typer marks those `null`s with the call's own position. A `null` written in
+					 * the source carries its own, so it stays, including one in the middle of a call.
+					 * A basic-type parameter cannot take the ones the typer inserted.
+					 *
+					 * @param call The call or `new`, whose position the inserted `null`s share.
+					 * @param params Its printed arguments.
+					 * @return The arguments that were written.
 					 */
+					function written(call:Expr, params:Array<Expr>):Array<Expr> {
+						var at = Context.getPosInfos(call.pos);
+						var out:Array<Expr> = params.copy();
+
+						while (out.length > 0) {
+							var last:Expr = out[out.length - 1];
+							var p = Context.getPosInfos(last.pos);
+
+							switch (last.expr) {
+								case EConst(CIdent('null')) if (p.min == at.min && p.max == at.max && p.file == at.file):
+									out.pop();
+								default:
+									break;
+							}
+						}
+
+						return out;
+					}
+
 					function mapSuper(e:Expr) {
 						return switch (e.expr) {
 							case ENew(t, params):
-								var newParams:Array<Expr> = [];
-								for (param in params) {
-									switch (param.expr) {
-										case EConst(CIdent('null')):
-										default:
-											newParams.push(param);
-									}
-								}
-
 								if (StringTools.endsWith(t.name, '_Impl_'))
 									t.name = t.name.replace('_Impl_', '');
 
 								{
 									pos: pos,
-									expr: ENew(t, [for (param in newParams) param.map(mapSuper)])
+									expr: ENew(t, [for (param in written(e, params)) mapSuper(param)])
 								}
 
-							case ECall(e, params):
-								var newParams:Array<Expr> = [];
-								for (param in params) {
-									switch (param.expr) {
-										case EConst(CIdent('null')):
-										default:
-											newParams.push(param);
-									}
-								}
-
+							case ECall(callee, params):
 								{
 									pos: pos,
-									expr: ECall(switch (e.expr) {
+									expr: ECall(switch (callee.expr) {
 										case EConst(CIdent('super')):
 											mapConstructor(type.superClass.t.get(), type.superClass.params);
 										default:
-											e.map(mapSuper);
-									}, [for (param in newParams) param.map(mapSuper)])
+											mapSuper(callee);
+									}, [for (param in written(e, params)) mapSuper(param)])
 								}
 
 							case EConst(CIdent('super')):
