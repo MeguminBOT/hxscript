@@ -114,6 +114,15 @@ hlc() {
 	done
 }
 
+# hxcpp appends .exe on Windows only. Prefer the file that was actually linked in directory $1.
+cpp_bin() {
+	if [ -x "$1/$2.exe" ]; then
+		echo "./$2.exe"
+	else
+		echo "./$2"
+	fi
+}
+
 # The command that runs a mode, and the directory to run it from. Run from beside the binary,
 # because that is where each looks for what it needs.
 where() {
@@ -128,9 +137,9 @@ where() {
 runner() {
 	case "$1" in
 		eval-interp) echo "haxe $CP $KEEP -main ConformanceProbe --interp" ;;
-		hxcpp-interp) echo "./ConformanceProbe.exe" ;;
-		hxcpp-cppia) echo "./ConformanceProbe.exe --nojit" ;;
-		hxcpp-cppia-jit) echo "./ConformanceProbe.exe" ;;
+		hxcpp-interp) echo "$(cpp_bin "$(where "$1")" ConformanceProbe)" ;;
+		hxcpp-cppia) echo "$(cpp_bin "$(where "$1")" ConformanceProbe) --nojit" ;;
+		hxcpp-cppia-jit) echo "$(cpp_bin "$(where "$1")" ConformanceProbe)" ;;
 		hl-interp|hl-bytecode) echo "./main.exe" ;;
 	esac
 }

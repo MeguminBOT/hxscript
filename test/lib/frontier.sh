@@ -18,7 +18,12 @@ set -eu
 LIMIT=${LIMIT:-500}
 
 cd bin_test/cppia
-RUN="./FrontierTest.exe --rows"
+# hxcpp appends .exe on Windows only. Prefer the file that was actually linked.
+if [ -x FrontierTest.exe ]; then
+	RUN="./FrontierTest.exe --rows"
+else
+	RUN="./FrontierTest --rows"
+fi
 
 at=0
 
