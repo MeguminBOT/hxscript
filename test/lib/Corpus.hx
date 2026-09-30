@@ -566,6 +566,22 @@ class Corpus {
 			'class Child extends Base { public function new() { super(); } ' +
 			'public function borrowed():String return super.kept; }');
 
+		// No constructor of its own, so the one Haxe would generate has to be written: without it the
+		// base's constructor is inherited and every initialiser below it starts zeroed.
+		check('member initialiser in a class that inherits its constructor', 'var c = new Child(7); return c.total() + c.extra;',
+			'12', null,
+			'class Base { var n:Int; public function new(n:Int) { this.n = n; } public function total():Int return n; }\n' +
+			'class Child extends Base { public var extra:Int = 5; }');
+
+		check('member initialisers two levels below the constructor',
+			'var g = new Grand(1); return g.total() + g.extra + g.more.length;', '8', null,
+			'class Base { var n:Int; public function new(n:Int) { this.n = n; } public function total():Int return n; }\n' +
+			'class Child extends Base { public var extra:Int = 5; }\n' +
+			'class Grand extends Child { public var more:Array<Int> = [1, 2]; }');
+
+		check('member initialiser over a host base with no constructor of its own', 'return new Sub().extra + new Sub().kept;',
+			'5', null, 'import HostBase;\nclass Sub extends HostBase { public var extra:Int = 5; }');
+
 		at('shapes');
 		check('a do while', 'var i = 0; var n = 0; do { n += i; i++; } while (i < 5); return n;', '10');
 		check('a nested function calling itself', 'return fact(5);', '120',
