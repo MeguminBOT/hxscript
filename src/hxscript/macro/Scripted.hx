@@ -597,6 +597,33 @@ class Scripted {
 						}
 					}
 
+					/**
+					 * Whether `type`'s class declares `name`, walking its superclasses.
+					 *
+					 * Anything that is not a class answers yes. A `get_` or `set_` call is only unsafe
+					 * when a class is the receiver and does not declare that accessor, which is how an
+					 * extern `(get, set)` property prints (`Tls.set_value`).
+					 */
+					function declaresField(type:Type, name:String):Bool {
+						return switch (type.follow()) {
+							case TInst(ref, _):
+								var cls:ClassType = ref.get();
+
+								while (cls != null) {
+									for (field in cls.fields.get())
+										if (field.name == name)
+											return true;
+
+									cls = cls.superClass == null ? null : cls.superClass.t.get();
+								}
+
+								return false;
+
+							default:
+								return true;
+						}
+					}
+
 					function look(t:TypedExpr):Void {
 						if (t == null || reason != null)
 							return;
@@ -643,6 +670,16 @@ class Scripted {
 
 							case TBinop(OpAssign | OpAssignOp(_), {expr: TLocal(v)}, _) if (v.name == 'this'):
 								reason = 'it inlines an abstract\'s constructor, which assigns to `this`';
+
+							/**
+							 * An extern `(get, set)` property is already `n.set_value(0)` or `n.get_value()`
+							 * in the typed AST (`FDynamic`). getTypedExpr keeps that call, and the extern
+							 * does not declare it (`sys.thread.Tls`). A class that does declare the
+							 * accessor, and a `Dynamic` receiver, still compile.
+							 */
+							case TCall({expr: TField(owner, FDynamic(name))}, _)
+								if ((name.startsWith('set_') || name.startsWith('get_')) && !declaresField(owner.t, name)):
+								reason = 'it reaches a property through $name, which its class does not declare';
 
 							/**
 							 * The same loss in the form it takes once the compiler has reduced it further: a
