@@ -132,6 +132,9 @@ class CppiaTest {
 		check('an enum-abstract default stays its own type', 'var h = new Sub(); return Std.string(h.kind);', 'common', '',
 			'import HostKinded;\nclass Sub extends HostKinded {\n\tpublic function new() { super(); }\n}');
 
+		check('a private typedef in a host constructor', 'var h = new Sub(); return Std.string(h.n);', '1', '',
+			'import HostBagUser;\nclass Sub extends HostBagUser {\n\tpublic function new() { super(); }\n}');
+
 		TestCase.log('  refused by the emitter: ' + refused);
 	}
 
