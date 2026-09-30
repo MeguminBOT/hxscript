@@ -624,9 +624,97 @@ class Scripted {
 						}
 					}
 
+					/**
+					 * A private type nested in `t`, or null when every name in it can be written from
+					 * the bridge module.
+					 *
+					 * Asked only where a type name is actually printed: a local's type, the parameters
+					 * of a `new`, and an explicit cast. A field whose private type prints as `[]` does
+					 * not name it.
+					 */
+					function privateName(t:Type):Null<String> {
+						if (t == null)
+							return null;
+
+						return switch (t) {
+							case TInst(r, params):
+								var c = r.get();
+								if (c.isPrivate)
+									typePath(c.module, c.name);
+								else {
+									var found:Null<String> = null;
+									for (p in params)
+										if (found == null)
+											found = privateName(p);
+									found;
+								}
+							case TEnum(r, params):
+								var c = r.get();
+								if (c.isPrivate)
+									typePath(c.module, c.name);
+								else {
+									var found:Null<String> = null;
+									for (p in params)
+										if (found == null)
+											found = privateName(p);
+									found;
+								}
+							case TAbstract(r, params):
+								var c = r.get();
+								if (c.isPrivate)
+									typePath(c.module, c.name);
+								else {
+									var found:Null<String> = null;
+									for (p in params)
+										if (found == null)
+											found = privateName(p);
+									found;
+								}
+							case TType(r, params):
+								if (r.get().isPrivate)
+									privateName(t.follow());
+								else {
+									var found:Null<String> = null;
+									for (p in params)
+										if (found == null)
+											found = privateName(p);
+									found;
+								}
+							case TFun(args, ret):
+								var found:Null<String> = privateName(ret);
+								for (a in args)
+									if (found == null)
+										found = privateName(a.t);
+								found;
+							case TLazy(f):
+								privateName(f());
+							default:
+								null;
+						}
+					}
+
 					function look(t:TypedExpr):Void {
 						if (t == null || reason != null)
 							return;
+
+						var named:Null<String> = switch (t.expr) {
+							case TVar(v, _):
+								privateName(v.t);
+							case TNew(_, params, _):
+								var found:Null<String> = null;
+								for (p in params)
+									if (found == null)
+										found = privateName(p);
+								found;
+							case TCast(_, m) if (m != null):
+								privateName(t.t);
+							default:
+								null;
+						};
+						if (named != null) {
+							reason = 'it names $named, which is private';
+							return;
+						}
 
 						switch (t.expr) {
 							case TNew(c, _, _):
