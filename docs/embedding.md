@@ -143,6 +143,7 @@ Everything the library reads. Only the first group is likely to concern you.
 | `-D hxscript_no_banner` | print nothing at all. `HXSCRIPT_NO_BANNER=1` does the same from the environment |
 | `-D hxscript_keep=<types>` | comma-separated standard-library types to keep beyond the default set. See [dead code elimination](#dead-code-elimination) |
 | `-D hxscript_globals` | take every bare name a `Library` record offers, at startup. No shipped preset offers any, so this does nothing until you add a record: see [types a script can name](#types-a-script-can-name) |
+| `-D hxscript_no_flixel_console` | leave flixel's debugger console, watch expressions and console completion off when hscript is not installed. Without it they run on hxScript: the flixel modules that test `hscript` are copied beside the build's output with that test read as `hxscript`, and put first on the classpath. A host with hscript keeps flixel's own |
 | `-dce no` | keep the standard-library members scripts reach by reflection. See [dead code elimination](#dead-code-elimination) |
 
 ### Behaviour
