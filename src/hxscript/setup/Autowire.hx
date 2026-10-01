@@ -29,6 +29,12 @@ class Autowire {
 		 */
 		Native.run();
 
+		/**
+		 * Also outside the switch, and before anything below loads a type: the console's modules have
+		 * to be swapped before flixel's own copies are parsed.
+		 */
+		hxscript.lib.flixel.FlixelConsole.run();
+
 		if (Context.defined('hxscript_no_autowire'))
 			return;
 
