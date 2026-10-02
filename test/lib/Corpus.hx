@@ -509,6 +509,13 @@ class Corpus {
 		check('string interpolation', "var n = 5; return 'n is ${n}';", 'n is 5');
 		check('nested function', 'function inner(a:Int) return a + 1; return inner(4);', '5');
 		check('final local', 'final n = 4; return n * 2;', '8');
+
+		// A `null` setter lets only its own class write, and the interpreter tells who is writing by
+		// tracking which one is running, which starts once some accessor is noted. An instance field's
+		// never was, so unless a static or a local declared one first, its own class was refused.
+		check('a null setter written by its own class', 'return new Box().bump();', '9', null,
+			'class Box { public function new() {} public var shown(default, null):Int = 0; '
+			+ 'public function bump():Int { shown = 9; return shown; } }');
 		check('untyped passthrough', 'return untyped 5;', '5');
 		check('multi catch', 'try { throw "x"; } catch (e:Int) { return "int"; } catch (e:String) { return "str"; }',
 			'str');
