@@ -1135,7 +1135,7 @@ class Interp {
 
 		switch (l.get) {
 			case 'null':
-				if (accessingInterp != this)
+				if (accessingInterp != this && !lets(accessingInterp, id))
 					throw 'This expression cannot be accessed for reading';
 				return (l.a ?? l.r);
 			case 'never':
@@ -1225,6 +1225,23 @@ class Interp {
 	}
 
 	/**
+	 * Whether another interpreter may use a `null` accessor of this one's class, as Haxe lets
+	 * `@:privateAccess` at the access and `@:allow` naming the accessing class through.
+	 *
+	 * @param caller The interpreter evaluating the access.
+	 * @param id The member.
+	 */
+	function lets(caller:Interp, id:String):Bool {
+		if (caller == null)
+			return false;
+
+		if (caller.getMeta(':privateAccess') != null)
+			return true;
+
+		return ownerClass != null && ownerClass.allows(caller.ownerClass, id);
+	}
+
+	/**
 	 * Writes an already-resolved slot, honouring finality, method rebinding and its accessor.
 	 *
 	 * The write-side counterpart of `readLocal`, split out for the same two reasons: a caller holding
@@ -1248,7 +1265,7 @@ class Interp {
 
 		switch (l.set) {
 			case 'null':
-				if (accessingInterp != this)
+				if (accessingInterp != this && !lets(accessingInterp, id))
 					throw 'This expression cannot be accessed for writing';
 				return store(l, v);
 			case 'never':
@@ -3918,7 +3935,7 @@ class Interp {
 		if (getMeta(':privateAccess') != null)
 			return;
 
-		if (ownerClass == null || !ownerClass.isOrExtends(declaring))
+		if (ownerClass == null || (!ownerClass.isOrExtends(declaring) && !declaring.allows(ownerClass, f)))
 			error(ECustom('Cannot access private field $f of ${declaring.path}'));
 	}
 
