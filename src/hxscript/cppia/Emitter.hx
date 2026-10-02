@@ -1463,6 +1463,15 @@ class Emitter {
 					&& !typePaths.exists(cl) ? 'hxscript.runtime.AnyMap' : resolveType(cl, e.pos);
 
 				/**
+				 * A host abstract nothing wrapped reaches here too, since its name is in the type
+				 * table, but it has no class for a `NEW` to make either. The hxcpp JIT dereferenced
+				 * the null it resolved to while loading the module and ended the process: `new
+				 * openfl.utils.ByteArray()`, `new lime.utils.UInt8Array(4)`, `new openfl.Vector<Int>()`.
+				 */
+				if (declaredClass(built) == null && hostAbstract(built))
+					throw new Unsupported('new $built, an abstract with no class at runtime', e.pos);
+
+				/**
 				 * A call that may be leaving out an optional in the middle, which an arity cannot
 				 * place: padding from the right would write the third argument into the second. The
 				 * helper has the values in hand and places them by type, the way Haxe placed them.
@@ -5186,6 +5195,15 @@ class Emitter {
 		}
 
 		return current;
+	}
+
+	/** Whether a path, typedefs already followed, names an abstract the host compiled. */
+	function hostAbstract(path:String):Bool {
+		var infos:Array<hxscript.types.TypeCollection.TypeInfo> = hxscript.types.TypeCollection.main.fromCompilePath(path);
+		if (infos == null || infos.length == 0)
+			infos = hxscript.types.TypeCollection.main.fromPath(path);
+
+		return infos != null && infos.length > 0 && infos[0].kind == 'abstract';
 	}
 
 	/** The dotted path a type annotation names, or the empty string when it is not a plain path. */
