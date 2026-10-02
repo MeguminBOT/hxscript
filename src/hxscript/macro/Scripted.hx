@@ -2077,6 +2077,12 @@ class Scripted {
 								if (v.set != null)
 									l.set = v.set;
 
+								// A `null` accessor is checked against the interpreter making the access,
+								// which is only tracked once one is noted. Statics and locals noted theirs;
+								// an instance field did not, so its own class was refused it too.
+								hxscript.runtime.Interp.noteAccessor(v.get);
+								hxscript.runtime.Interp.noteAccessor(v.set);
+
 								__interp.locals.set(f, l);
 							}
 					}
