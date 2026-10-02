@@ -23,6 +23,14 @@ class Config {
 	public static var strictAccess:Bool = false;
 
 	/**
+	 * Raises on reading a field of a null object, `a.b` with `a` null, as Haxe does, instead of
+	 * answering null. Off by default because scripts rely on the null, typically as a check one level
+	 * too deep: `if (level.player.sprite != null)` while `level.player` is still null. Compiled code
+	 * also stops ignoring a write to a field of a null object, which the interpreter always refused.
+	 */
+	public static var strictNullAccess:Bool = false;
+
+	/**
 	 * Whether cppia declares a `Bool` field with its real type, which needs the hxcpp fix in
 	 * `HXCPP-ISSUES.md`. `-D hxscript_cppia_bool_compat` turns it off for a stock hxcpp, where a
 	 * boolean is then right interpreted and wrong jitted.

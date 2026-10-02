@@ -2939,7 +2939,7 @@ class Interp {
 						if (obj == null) {
 							if (m)
 								return null;
-							error(EInvalidAccess(f));
+							error(ENullAccess(f));
 						}
 						return fcall(obj, f, args);
 					default:
@@ -3091,8 +3091,9 @@ class Interp {
 
 		/**
 		 * Whether `got` holds a value rather than a path still being resolved. A null value is then an
-		 * object with no fields, not a prefix of a longer type name: `h.kept` with `h` null was looked
-		 * up as a type called `h.kept`, found nothing, and read as null instead of raising.
+		 * object with no fields, not a prefix of a longer type name. Without `Config.strictNullAccess`,
+		 * `h.kept` with `h` null is still looked up as a type called `h.kept`, finds nothing, and reads
+		 * as null, which scripts rely on.
 		 */
 		var valued:Bool = false;
 
@@ -3113,10 +3114,10 @@ class Interp {
 					continue;
 			}
 
-			if (got == null && valued) {
+			if (got == null && valued && Config.strictNullAccess) {
 				if (maybe)
 					return null;
-				error(EInvalidAccess(field));
+				error(ENullAccess(field));
 			}
 
 			if (got == null) {
@@ -3958,7 +3959,7 @@ class Interp {
 
 		if (o == null) {
 			if (!maybe) {
-				error(EInvalidAccess(f));
+				error(ENullAccess(f));
 			} else {
 				return null;
 			}
@@ -4140,7 +4141,7 @@ class Interp {
 			hxscript.debug.Metrics.writes++;
 
 		if (o == null)
-			error(EInvalidAccess(f));
+			error(ENullAccess(f));
 
 		if (canDefer && o is IScriptedType && !o.initialized)
 			throw DDefer;

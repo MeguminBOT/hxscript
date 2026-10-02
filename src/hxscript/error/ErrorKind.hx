@@ -49,6 +49,9 @@ enum ErrorKind {
 	/** Field `f` cannot be accessed (e.g. a `private` violation). */
 	EInvalidAccess(f:String);
 
+	/** Field `f` was read, written or called on a null object. */
+	ENullAccess(f:String);
+
 	/** An arbitrary message. */
 	ECustom(msg:String);
 }
