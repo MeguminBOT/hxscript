@@ -289,6 +289,28 @@ class Corpus {
 		check('host plain field beside a property',
 			'var h = new HostBase(); h.kept = 2; h.scaled = 3; return h.kept + h.scaled;', '8', null, host);
 
+		// A field of a null host object. By default a read answers null in every mode, which scripts
+		// rely on, so it stays that way; `Config.strictNullAccess` makes reads and writes raise, and
+		// compiled code then stops where interpreted code stops instead of reading null or writing
+		// nowhere. `HostNullAccess` switches the flag from inside the case, so every mode runs it alike.
+		check('host field of a null object reads null',
+			'var h:HostBase = null; return Std.string(h.kept);', 'null', null, host);
+		check('host property of a null object reads null',
+			'var h:HostBase = null; return Std.string(h.scaled);', 'null', null, host);
+
+		var strict:String->String = function(body:String):String {
+			return 'var h:HostBase = null; var r = "none"; var was = HostNullAccess.strict(true); '
+				+ 'try { $body } catch (e:Dynamic) { r = Std.string(e); } '
+				+ 'HostNullAccess.strict(was); return r;';
+		}
+		check('strict: host field of a null object raises', strict('r = Std.string(h.kept);'), 'Null access to field kept', null,
+			host);
+		check('strict: host property of a null object raises', strict('r = Std.string(h.scaled);'), 'Null access to field scaled',
+			null, host);
+		check('strict: host field write on a null object raises', strict('h.kept = 1; r = "wrote";'), 'Null access to field kept',
+			null, host);
+		check('strict: ?. on a null object still reads null', strict('r = Std.string(h?.kept);'), 'null', null, host);
+
 		// An array literal has nothing in it to say what it holds, so it used to be built loose while an
 		// annotation promised a specific kind. Reading it back through that annotation reinterprets the
 		// memory, which crashes rather than misbehaves, so these index one after the round trip.

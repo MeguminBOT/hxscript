@@ -239,6 +239,7 @@ project, and nothing to do for a 3D one, which is why it is off by default rathe
 | `globalStatics` | bare names answered by a host static, as `owner.path::field` |
 | `blacklist` | types scripts may not touch, by `ByType`, `ByModule` or `ByPackage` |
 | `strictAccess` | enforce `private` on script-declared members |
+| `strictNullAccess` | raise on a field of a null object instead of reading null |
 | `typedMode` | runtime type enforcement, on unless `-D hxscript_dynamic` |
 | `callShims` | a closure standing in for a member with no runtime form, keyed `Owner.method` |
 | `preprocessorValues` | values a script's `#if` can test |

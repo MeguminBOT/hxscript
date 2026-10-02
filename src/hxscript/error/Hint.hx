@@ -38,6 +38,10 @@ class Hint {
 				'inside the type that declares it; expose a public accessor, or set Config.strictAccess\n' +
 				'to false if this host wants scripts to reach private members.';
 
+			case ENullAccess(f):
+				'The object `$f` was asked of is null. Check it before using its fields, or use `?.`, which\n' +
+				'answers null instead.';
+
 			case ECustom(message):
 				custom(message);
 
