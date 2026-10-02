@@ -516,6 +516,16 @@ class Corpus {
 		check('a null setter written by its own class', 'return new Box().bump();', '9', null,
 			'class Box { public function new() {} public var shown(default, null):Int = 0; '
 			+ 'public function bump():Int { shown = 9; return shown; } }');
+
+		// `@:allow` lets another class past `private` and past a `null` accessor, as `@:privateAccess`
+		// does at one access. Neither was read: a private member stayed refused to the class the meta
+		// names, and a `null` setter refused every other class whatever the access carried.
+		check('a private static reached through a class @:allow', 'Box.secret = 5; return Box.secret;', '5', null,
+			'@:allow(T) class Box { private static var secret:Int = 0; }');
+		check('a private static reached through a member @:allow', 'return Box.secret;', '3', null,
+			'class Box { @:allow(T) private static var secret:Int = 3; }');
+		check('a null setter written through @:allow', 'var b = new Box(); b.shown = 4; return b.shown;', '4', null,
+			'@:allow(T) class Box { public function new() {} public var shown(default, null):Int = 0; }');
 		check('untyped passthrough', 'return untyped 5;', '5');
 		check('multi catch', 'try { throw "x"; } catch (e:Int) { return "int"; } catch (e:String) { return "str"; }',
 			'str');
