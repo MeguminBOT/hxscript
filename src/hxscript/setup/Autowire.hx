@@ -35,6 +35,9 @@ class Autowire {
 		 */
 		hxscript.lib.flixel.FlixelConsole.run();
 
+		/** Also before anything loads a type, since metadata does nothing to one already typed. */
+		hxscript.lib.openfl.VectorItems.run();
+
 		if (Context.defined('hxscript_no_autowire'))
 			return;
 
