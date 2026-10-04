@@ -579,6 +579,15 @@ class Corpus {
 			'class Child extends Base { public var extra:Int = 5; }\n' +
 			'class Grand extends Child { public var more:Array<Int> = [1, 2]; }');
 
+		var scriptBase:String = 'class Base { public var tag:String; public function new() { tag = "t"; } '
+			+ 'public function hello():String return "hi"; }\n';
+		check('a host type named bare under a script base', 'return new Child().named();', 'HostBase,hi,t', null,
+			scriptBase + 'class Child extends Base { public function new() { super(); } '
+			+ 'public function named():String return Type.getClassName(HostBase) + "," + hello() + "," + tag; }');
+		check('a package named under a script base', 'return new Child().named();', 'haxe.ds.StringMap', null,
+			scriptBase + 'class Child extends Base { public function new() { super(); } '
+			+ 'public function named():String return Type.getClassName(haxe.ds.StringMap); }');
+
 		check('member initialiser over a host base with no constructor of its own', 'return new Sub().extra + new Sub().kept;',
 			'5', null, 'import HostBase;\nclass Sub extends HostBase { public var extra:Int = 5; }');
 

@@ -176,7 +176,7 @@ class Emitter {
 	/** Every `using` type declaring a given member name, in declaration order. */
 	var usingOwners:StringMap<Array<String>> = new StringMap();
 
-	/** Every member of the current class's host base, or null when reflection could not list them. */
+	/** Every member of the current class's first host base, or null when reflection could not list them. */
 	var inherited:StringMap<Bool> = null;
 
 	/** Which base `inherited` was built for, so a class per batch does not rebuild it per name. */
@@ -207,6 +207,9 @@ class Emitter {
 
 	/** Each batch class's superclass path, empty for none, for walking a constructor chain. */
 	var batchSupers:StringMap<String> = new StringMap();
+
+	/** Each batch class's own instance members, by name, for knowing what a subclass inherits. */
+	var batchMembers:StringMap<StringMap<Bool>> = new StringMap();
 
 	/** Batch classes that initialise a member field but declare no constructor to run it in. */
 	var needsImplicitNew:Array<String> = [];
@@ -522,6 +525,7 @@ class Emitter {
 						}
 					}
 					classVars.set(full, vars);
+					batchMembers.set(full, [for (f in c.fields) if (!hasAccess(f, AStatic)) f.name => true]);
 
 					if (decl.d.match(DClass(_))) {
 						batchSupers.set(full, c.extend == null ? '' : typeName(c.extend));
@@ -2630,17 +2634,31 @@ class Emitter {
 	 * @return Whether a class up the chain declares it.
 	 */
 	function inheritedMember(name:String):Bool {
-		if (currentSuper.length == 0)
+		/**
+		 * Script bases first, by what they declare. Answering yes for any name once the base was a
+		 * script class compiled a package or a host type named without an import to a field of
+		 * `this`, which read null at run time instead of refusing the module.
+		 */
+		var base:String = currentSuper;
+		var own:Null<String> = declaredClass(base);
+		var depth:Int = 0;
+		while (own != null && depth++ < 64) {
+			var declared:Null<StringMap<Bool>> = batchMembers.get(own);
+			if (declared == null || declared.exists(name) || declared.exists('get_$name') || declared.exists('set_$name'))
+				return true;
+
+			base = batchSupers.get(own);
+			own = declaredClass(base);
+		}
+
+		if (base == null || base.length == 0)
 			return false;
 
-		if (declaredClass(currentSuper) != null)
-			return true;
-
-		if (inheritedFrom != currentSuper) {
-			inheritedFrom = currentSuper;
+		if (inheritedFrom != base) {
+			inheritedFrom = base;
 			inherited = new StringMap();
 
-			var cls:Dynamic = Type.resolveClass(currentSuper);
+			var cls:Dynamic = Type.resolveClass(base);
 			var seen:Bool = false;
 
 			while (cls != null) {
