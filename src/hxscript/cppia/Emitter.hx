@@ -212,6 +212,13 @@ class Emitter {
 	var needsImplicitNew:Array<String> = [];
 
 	/**
+	 * Batch classes that declare no constructor and extend something. hxcpp hands such a class its
+	 * base's constructor only when that base is a script class, so one directly over a host class has
+	 * none: `new` skipped the host's constructor, and a subclass's `super()` crashed the link.
+	 */
+	var ctorless:Array<String> = [];
+
+	/**
 	 * The arity of the constructor written for each class in `needsImplicitNew`, or -1 when its
 	 * base's constructor shape is unknown.
 	 */
@@ -541,6 +548,8 @@ class Emitter {
 						}
 						if (initialises && !ownsNew)
 							needsImplicitNew.push(full);
+						else if (!ownsNew && c.extend != null)
+							ctorless.push(full);
 					}
 
 					var rets:StringMap<String> = new StringMap();
@@ -893,8 +902,7 @@ class Emitter {
 
 		var implicitArity:Null<Int> = isInterface ? null : implicitNew.get(full);
 		if (implicitArity != null && implicitArity < 0)
-			throw new Unsupported('member initialisers without a constructor, over ' + currentSuper
-				+ ', whose constructor shape is unknown', pos);
+			throw new Unsupported('no constructor of its own, over ' + currentSuper + ', whose constructor shape is unknown', pos);
 
 		w.newline();
 		w.token(isInterface ? 'INTERFACE' : 'CLASS');
@@ -919,11 +927,15 @@ class Emitter {
 	 * Gives every class in `needsImplicitNew` the constructor Haxe would have generated: it takes the
 	 * base constructor's arguments, passes them to `super`, and runs the member initialisers.
 	 *
-	 * Without it the class inherits its base's constructor and every `var x = value` starts zeroed.
-	 * Settled after the whole batch is declared, since a base may be declared after its subclass, and
+	 * Without it the class inherits its base's constructor and every `var x = value` starts zeroed;
+	 * one directly over a host class (`ctorless`) had no constructor at all. Settled after the whole batch is declared, since a base may be declared after its subclass, and
 	 * before anything is emitted, since a `new` call site is padded to the arity recorded here.
 	 */
 	public function settleImplicitConstructors():Void {
+		for (full in ctorless)
+			if (declaredClass(batchSupers.get(full)) == null && needsImplicitNew.indexOf(full) < 0)
+				needsImplicitNew.push(full);
+
 		for (full in needsImplicitNew) {
 			var arity:Int = constructorArity(batchSupers.get(full), 0);
 			implicitNew.set(full, arity);

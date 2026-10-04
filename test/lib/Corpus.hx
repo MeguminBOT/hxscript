@@ -582,6 +582,14 @@ class Corpus {
 		check('member initialiser over a host base with no constructor of its own', 'return new Sub().extra + new Sub().kept;',
 			'5', null, 'import HostBase;\nclass Sub extends HostBase { public var extra:Int = 5; }');
 
+		// hxcpp hands a class without a constructor its base's only when that base is a script class.
+		var hostMid:String = 'import HostBase;\nclass Mid extends HostBase {}\n';
+		check('a class without a constructor over a host base, constructed', 'return new Mid().made;', 'host', null, hostMid);
+		check('super() through a class without a constructor', 'return new Sub().made;', 'host', null,
+			hostMid + 'class Sub extends Mid { public function new() { super(); } }');
+		check('an implicit super() through a class without a constructor', 'var s = new Sub(); return s.made + s.extra;', 'host5',
+			null, hostMid + 'class Sub extends Mid { public var extra:Int = 5; }');
+
 		at('shapes');
 		check('a do while', 'var i = 0; var n = 0; do { n += i; i++; } while (i < 5); return n;', '10');
 		check('a nested function calling itself', 'return fact(5);', '120',
