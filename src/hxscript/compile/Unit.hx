@@ -29,4 +29,10 @@ class Unit {
 	 * may share it.
 	 */
 	public var key:String = null;
+
+	/**
+	 * Why the module is left interpreted before it is written, or null. Its users then follow it
+	 * the way they follow a module the emitter declined.
+	 */
+	public var skip:Null<String> = null;
 }

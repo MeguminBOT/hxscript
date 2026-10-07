@@ -241,6 +241,11 @@ class Backend {
 		var uses:Map<String, Array<String>> = new Map();
 
 		for (input in inputs) {
+			if (input.skip != null) {
+				skipped.push({name: input.name, reason: input.skip});
+				continue;
+			}
+
 			var trial:Emitter = prepare(inputs, ambient, external, statics);
 
 			try {
@@ -485,7 +490,8 @@ class Backend {
 					name: module.name,
 					decls: module.decls,
 					scope: module.interp,
-					key: module.path
+					key: module.path,
+					skip: startFailure(module)
 				}
 		];
 
@@ -520,6 +526,28 @@ class Backend {
 		var mid:Int = group.length >> 1;
 		batch(group.slice(0, mid), env, report, false);
 		batch(group.slice(mid), env, report, false);
+	}
+
+	/**
+	 * Why a module is not worth writing: one of its statics threw when it started. Compiled, it would
+	 * run that initialiser again as it boots, and the throw would be the loader refusing its whole
+	 * batch, which is then split until the module is alone, leaving the halves unable to name each
+	 * other's classes.
+	 *
+	 * @param module The module.
+	 * @return The reason, or null.
+	 */
+	static function startFailure(module:Module):Null<String> {
+		for (type in module.types) {
+			if (!(type is hxscript.types.ScriptedClass))
+				continue;
+
+			var failure:Null<String> = (cast type : hxscript.types.ScriptedClass).staticFailure;
+			if (failure != null)
+				return 'a static initialiser threw when the module started (' + failure + ')';
+		}
+
+		return null;
 	}
 
 	/**

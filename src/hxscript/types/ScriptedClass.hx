@@ -105,6 +105,13 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 	public var initializing:Bool = false;
 
 	/**
+	 * The first static initialiser that threw while the class initialised, as `field: message`, or
+	 * null. A compiler leaves such a class interpreted: compiled, it would run that initialiser again
+	 * as it boots, and a throw there is the loader refusing the whole batch.
+	 */
+	public var staticFailure(default, null):Null<String> = null;
+
+	/**
 	 * Creates the runtime class from its declaration and gives it a deferring interpreter.
 	 *
 	 * @param decl The parsed class declaration.
@@ -134,6 +141,7 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 	public function init(?env:Environment, ?baseInterp:Interp, restore:Bool = true):Void {
 		_extending = null;
 		_extendingResolved = false;
+		staticFailure = null;
 
 		privateFields = null;
 		for (field in decl.fields) {
@@ -252,12 +260,14 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 							try {
 								initField(f, v);
 							} catch (e:haxe.Exception) {
+								staticFailure ??= '$f: ${e.message}';
 								onExpressionError(e, f, v.expr);
 							}
 
 							return false;
 						});
 					} catch (e:haxe.Exception) {
+						staticFailure ??= '$f: ${e.message}';
 						onExpressionError(e, f, v.expr);
 					}
 			}
@@ -755,7 +765,25 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 	 * @param v The field's declaration.
 	 */
 	function initField(f:String, v:VarDecl):Void {
-		var value:Dynamic = (v.expr == null) ? null : interp.exprReturn(v.expr, v.type);
+		/**
+		 * A script function unwinds its frame on a throw only inside a script `try`, and what the
+		 * initialiser throws is caught by the caller instead, so it runs as if inside one. Left wound,
+		 * the frame of a function that threw made the next static function built here crash.
+		 */
+		var outer:Bool = interp.inTry;
+		var declared:Int = interp.declaredNames.length;
+		interp.inTry = true;
+
+		var value:Dynamic = null;
+		try {
+			if (v.expr != null)
+				value = interp.exprReturn(v.expr, v.type);
+		} catch (e:Dynamic) {
+			interp.restore(declared);
+			interp.inTry = outer;
+			throw e;
+		}
+		interp.inTry = outer;
 		var slot:Variable = interp.locals.get(f);
 		var bound:Variable = interp.bindDeclared(value, v.type);
 
