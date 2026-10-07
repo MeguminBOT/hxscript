@@ -3,6 +3,8 @@ import hxscript.Module;
 import hxscript.cppia.Backend;
 import hxscript.compile.Unit;
 import hxscript.compile.Result;
+import hxscript.compile.Compiler;
+import hxscript.compile.Report;
 import hxscript.types.ScriptedClass;
 
 /**
@@ -166,6 +168,38 @@ class ShapeEntry {
 		shapes('shapes: everything compiled', ['w.Colour', 'w.ShapeEntry'], true);
 		shapes('shapes: entry compiled, types interpreted falls back', ['w.ShapeEntry'], false);
 		shapes('shapes: types compiled, entry interpreted', ['w.Colour'], false);
+
+		sameName();
+	}
+
+	/**
+	 * Two modules with the same name in two packages are two modules.
+	 *
+	 * A batch told them apart by name, so what one `Main` used was read as the other's: `a.Main` was
+	 * left interpreted for a class only `d.Main` names, or `d.Main` was written naming a class that
+	 * stayed interpreted and the loader refused the whole batch. Every mod of a host that gives each
+	 * one a `Main` is in that position.
+	 */
+	static function sameName():Void {
+		var env:Environment = new Environment();
+		env.addModule(new Module('package a;\nclass Hub {\n\tpublic static function two():Int { return 2; }\n}\n', 'Hub', ['a'], 'a/Hub.hx'));
+		env.addModule(new Module('package a;\nclass Main {\n\tpublic static function go():Int { return Hub.two(); }\n}\n', 'Main', ['a'], 'a/Main.hx'));
+		env.addModule(new Module('package d;\nclass H {\n\tpublic static var item:Int = 7;\n\tpublic static var interpreted(nonesuch, never):Int;\n}\n',
+			'H', ['d'], 'd/H.hx'));
+		env.addModule(new Module('package d;\nclass Main {\n\tpublic static function go():Int { return H.item; }\n}\n', 'Main', ['d'], 'd/Main.hx'));
+		env.start();
+
+		var report:Report = Compiler.compile(env);
+
+		TestCase.ok('same name: the loader refused nothing', report.failed.length == 0);
+		TestCase.ok('same name: the Main that uses nothing interpreted compiled', report.compiled.indexOf('a.Main') >= 0);
+		TestCase.ok('same name: the Main that reads an interpreted class did not', report.compiled.indexOf('d.Main') < 0);
+
+		var answers:Array<Dynamic> = [for (path in ['a.Main', 'd.Main']) try Reflect.callMethod(null, (cast env.resolve(path) : ScriptedClass).reflectGetField('go'), []) catch (e:Dynamic) 'threw: ' + e];
+		if (answers[0] != 2 || answers[1] != 7)
+			TestCase.bad('same name', 'answered ' + answers + ', expected [2,7]');
+		else
+			TestCase.ok('same name: both answer   ' + answers, true);
 	}
 
 	/**
