@@ -1745,6 +1745,7 @@ class Scripted {
 											__result = std.Reflect.callMethod(__interp, __interp.getLocal(__name),
 												$a{argsArray});
 										} catch (__e:Dynamic) {
+											__base.threw(__e, __name);
 											__base.onInstanceError(__e, __name, this);
 											__result = null;
 										}
@@ -1760,6 +1761,7 @@ class Scripted {
 									try {
 										${isVoid ? macro super.$f($a{superArgs}) : macro return super.$f($a{superArgs})}
 									} catch (__e:Dynamic) {
+										__base.threw(__e, __name);
 										__base.onInstanceError(__e, __name, this);
 										${isVoid?macro return:macro return cast null}
 									}
@@ -2191,6 +2193,7 @@ class Scripted {
 				try {
 					std.Reflect.callMethod(this, entry, arguments);
 				} catch (e:Dynamic) {
+					base.threw(e, 'new');
 					base.onInstanceError(e, 'new', this);
 				}
 			} else {

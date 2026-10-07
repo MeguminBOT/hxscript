@@ -252,12 +252,14 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 							try {
 								initField(f, v);
 							} catch (e:haxe.Exception) {
+								threw(e, f);
 								onExpressionError(e, f, v.expr);
 							}
 
 							return false;
 						});
 					} catch (e:haxe.Exception) {
+						threw(e, f);
 						onExpressionError(e, f, v.expr);
 					}
 			}
@@ -792,28 +794,36 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 	}
 
 	/**
-	 * Overridable hook: a static field's initializer threw. Defaults to tracing.
+	 * Reports what this class's own code threw through `Sink`, as a module's errors are, before its
+	 * hook is called. A script may throw any value, so a value that is not an exception is wrapped.
+	 *
+	 * @param error The thrown value.
+	 * @param member The static field or method it came out of.
+	 */
+	public function threw(error:Dynamic, member:String):Void {
+		var exception:haxe.Exception = Std.isOfType(error, haxe.Exception) ? cast error : new haxe.ValueException(error);
+		hxscript.error.Sink.caught(exception, hxscript.error.Phase.PRun, '$name.$member');
+	}
+
+	/**
+	 * Overridable hook: a static field's initializer threw. Empty, because the error has already gone
+	 * to `Sink`.
 	 *
 	 * @param error The thrown value.
 	 * @param field The field being initialized.
 	 * @param expr The initializer expression, if available.
 	 */
-	public dynamic function onExpressionError(error:Dynamic, field:String, ?expr:Expr):Void {
-		trace('Error on field $field of $path:
-' + describeError(error));
-	}
+	public dynamic function onExpressionError(error:Dynamic, field:String, ?expr:Expr):Void {}
 
 	/**
-	 * Overridable hook: an instance method threw while the class is in `safe` mode. Defaults to tracing.
+	 * Overridable hook: an instance method threw while the class is in `safe` mode. Empty, because the
+	 * error has already gone to `Sink`.
 	 *
 	 * @param error The thrown value.
 	 * @param fun The method that threw.
 	 * @param instance The instance it ran on, if available.
 	 */
-	public dynamic function onInstanceError(error:Dynamic, fun:String, ?instance:IScriptedInstance):Void {
-		trace('Error on function $fun of $path:
-' + describeError(error));
-	}
+	public dynamic function onInstanceError(error:Dynamic, fun:String, ?instance:IScriptedInstance):Void {}
 
 	/**
 	 * Renders a thrown value with its call stack when it has one.

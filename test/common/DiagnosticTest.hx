@@ -24,6 +24,7 @@ class DiagnosticTest {
 		nearMiss();
 		cannotCall();
 		routing();
+		staticInitialiser();
 
 		Sink.printing = wasPrinting;
 	}
@@ -136,6 +137,31 @@ class DiagnosticTest {
 		TestCase.ok('listening stops the default printer', !Sink.printing);
 
 		Sink.onDiagnostic.splice(before, Sink.onDiagnostic.length - before);
+	}
+
+	/**
+	 * A static initialiser that throws is reported to the sink, as a module's errors are, and the
+	 * class's hook is still called. The hook only traced it before, so a host listening to the sink
+	 * never heard of it.
+	 */
+	static function staticInitialiser():Void {
+		var env:Environment = new Environment();
+		env.addModule(new Module('package p;\nclass Hooked {\n\tstatic var v:Int = throw "boom";\n}\n', 'Hooked', ['p'], 'Hooked.hx'));
+
+		var hooked:Bool = false;
+		var cls:hxscript.types.ScriptedClass = cast env.resolve('p.Hooked');
+		cls.onExpressionError = function(error:Dynamic, field:String, ?expr):Void hooked = true;
+
+		var mark:Int = Sink.history.length;
+		env.start();
+
+		var reported:Diagnostic = null;
+		for (d in Sink.history.slice(mark))
+			if (d.message.indexOf('Hooked.v') >= 0)
+				reported = d;
+
+		TestCase.ok('a static initialiser that throws is reported', reported != null && reported.message.indexOf('boom') >= 0);
+		TestCase.ok('the class hook is still called', hooked);
 	}
 
 	/**
