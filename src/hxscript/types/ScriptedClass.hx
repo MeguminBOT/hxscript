@@ -217,6 +217,22 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 			interp.locals.set(f, l);
 		}
 
+		/**
+		 * Every static function before any static's initialiser, as Haxe has them: an initialiser may
+		 * call a function declared below it, and built in declaration order that function was still
+		 * null when the initialiser ran.
+		 */
+		for (field in decl.fields) {
+			if (field.name == 'new' || !field.access.contains(AStatic))
+				continue;
+
+			switch (field.kind) {
+				case KFunction(fun):
+					interp.locals.get(field.name).r = interp.buildFunction(field.name, fun.args, fun.expr, fun.ret, interp.locals);
+				case KVar(_):
+			}
+		}
+
 		for (field in decl.fields) {
 			var f:String = field.name;
 
@@ -224,8 +240,7 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 				continue;
 
 			switch (field.kind) {
-				case KFunction(fun):
-					interp.locals.get(f).r = interp.buildFunction(f, fun.args, fun.expr, fun.ret, interp.locals);
+				case KFunction(_):
 
 				case KVar(v):
 					if (restore) {

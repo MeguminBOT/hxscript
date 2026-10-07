@@ -36,6 +36,9 @@ class ClassProbe {
 		p("guard skipped, no-arg ctor", guards, "switch (C) { case A(x) if (x > 5): 'big'; case A(x): 'small'; case B(y): 'b'; case C: 'c'; }", "c");
 		p("enum equality", "enum Col2 { X; Y; }\n", "{ (X == X) + ',' + (X == Y); }", "true,false");
 		p("static in method", "class J { static var s = 2; public function new() {} public function m() return s * 3; }\n", "new J().m()", "6");
+		// Haxe has every static function before any initialiser runs, whatever their order.
+		p("static initialiser calls a function below it",
+			"class J2 { public static var s:Int = twice(4); static function twice(n:Int):Int return n * 2; }\n", "J2.s", "8");
 		p("field default", "class K { public var arr:Array<Int> = [1,2]; public function new() {} }\n", "new K().arr.length", "2");
 		p("nested new", base, "{ var xs = [for (i in 0...3) new A()]; xs.length + ':' + xs[0].who(); }", "3:A");
 		p("this in closure", "class L { public var v=9; public function new() {} public function m() { var f = function() return v; return f(); } }\n",
