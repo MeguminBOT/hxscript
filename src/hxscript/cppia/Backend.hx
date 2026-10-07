@@ -544,7 +544,16 @@ class Backend {
 		}
 
 		if (load(result, group, env, report) != null) {
-			jit = false;
+			/**
+			 * Refused without the JIT too, so the JIT is not what the loader objected to, and it goes
+			 * back on. Left off, every later batch of the process lost its speed over a fault that was
+			 * a module's: a static initialiser that throws while the module boots is enough.
+			 */
+			try {
+				cpp.cppia.Host.enableJit(true);
+			} catch (e:haxe.Exception) {
+				jit = false;
+			}
 			return false;
 		}
 
