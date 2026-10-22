@@ -53,7 +53,23 @@ class HostBase {
 		return v;
 	}
 
-	/** An ordinary constructor, which is what a bridge reconstructs. */
+	/**
+	 * A property with no storage of its own, only its accessors, as most of a display object's are:
+	 * there is no field of its name to store to.
+	 */
+	public var hidden(get, set):Bool;
+
+	var hiddenStore:Bool = false;
+
+	function get_hidden():Bool {
+		return hiddenStore;
+	}
+
+	function set_hidden(v:Bool):Bool {
+		return hiddenStore = v;
+	}
+
+		/** An ordinary constructor, which is what a bridge reconstructs. */
 	public function new() {}
 
 	/** A plain method, so a subclass can be seen to inherit one. */

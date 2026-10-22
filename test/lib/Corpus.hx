@@ -202,6 +202,20 @@ class Corpus {
 		check('an enum abstract annotated, an accessor that is false',
 			'var a:HostAxes = HostAxes.X; return Std.string(a.y);', 'false', '', 'import HostAxes;');
 
+		// A host base's properties written by bare name in a subclass, as a class over a display object
+		// sets its own `visible`: a store by name went past the setter, and to a property with no
+		// storage of its own, such as `hidden`, it threw.
+		check('host property setter, bare in a subclass', 'return new Sub().set();', '1', null,
+			'import HostBase;\nclass Sub extends HostBase { public function set():Int { scaled = 5; return writes; } }');
+		check('host property without storage, bare in a subclass', 'return new Sub().hide();', 'true', null,
+			'import HostBase;\nclass Sub extends HostBase { public function hide():Bool { hidden = true; return hidden; } }');
+		check('host property setter, bare compound in a subclass', 'return new Sub().add();', '4/1', null,
+			'import HostBase;\nclass Sub extends HostBase { public function add():String { scaled += 2; return scaled + "/" + writes; } }');
+		check('host property setter, bare increment in a subclass', 'return new Sub().bump();', '2/1', null,
+			'import HostBase;\nclass Sub extends HostBase { public function bump():String { scaled++; return scaled + "/" + writes; } }');
+		check('host property without storage, bare in a constructor', 'return new Sub().hidden;', 'true', null,
+			'import HostBase;\nclass Sub extends HostBase { public function new() { super(); hidden = true; } }');
+
 		check('trace', 'trace("t"); return 1;', '1');
 		check('trace of several values', 'trace("a", 1, true); return 2;', '2');
 		check('trace in a loop', 'var n = 0; for (i in 0...2) { trace(i); n += i; } return n;', '1');
@@ -578,6 +592,15 @@ class Corpus {
 			'class Base { var n:Int; public function new(n:Int) { this.n = n; } public function total():Int return n; }\n' +
 			'class Child extends Base { public var extra:Int = 5; }\n' +
 			'class Grand extends Child { public var more:Array<Int> = [1, 2]; }');
+
+		var scriptBase:String = 'class Base { public var tag:String; public function new() { tag = "t"; } '
+			+ 'public function hello():String return "hi"; }\n';
+		check('a host type named bare under a script base', 'return new Child().named();', 'HostBase,hi,t', null,
+			scriptBase + 'class Child extends Base { public function new() { super(); } '
+			+ 'public function named():String return Type.getClassName(HostBase) + "," + hello() + "," + tag; }');
+		check('a package named under a script base', 'return new Child().named();', 'haxe.ds.StringMap', null,
+			scriptBase + 'class Child extends Base { public function new() { super(); } '
+			+ 'public function named():String return Type.getClassName(haxe.ds.StringMap); }');
 
 		check('member initialiser over a host base with no constructor of its own', 'return new Sub().extra + new Sub().kept;',
 			'5', null, 'import HostBase;\nclass Sub extends HostBase { public var extra:Int = 5; }');

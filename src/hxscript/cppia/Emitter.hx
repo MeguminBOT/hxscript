@@ -176,7 +176,7 @@ class Emitter {
 	/** Every `using` type declaring a given member name, in declaration order. */
 	var usingOwners:StringMap<Array<String>> = new StringMap();
 
-	/** Every member of the current class's host base, or null when reflection could not list them. */
+	/** Every member of the current class's first host base, or null when reflection could not list them. */
 	var inherited:StringMap<Bool> = null;
 
 	/** Which base `inherited` was built for, so a class per batch does not rebuild it per name. */
@@ -207,6 +207,9 @@ class Emitter {
 
 	/** Each batch class's superclass path, empty for none, for walking a constructor chain. */
 	var batchSupers:StringMap<String> = new StringMap();
+
+	/** Each batch class's own instance members, by name, for knowing what a subclass inherits. */
+	var batchMembers:StringMap<StringMap<Bool>> = new StringMap();
 
 	/** Batch classes that initialise a member field but declare no constructor to run it in. */
 	var needsImplicitNew:Array<String> = [];
@@ -522,6 +525,7 @@ class Emitter {
 						}
 					}
 					classVars.set(full, vars);
+					batchMembers.set(full, [for (f in c.fields) if (!hasAccess(f, AStatic)) f.name => true]);
 
 					if (decl.d.match(DClass(_))) {
 						batchSupers.set(full, c.extend == null ? '' : typeName(c.extend));
@@ -1687,6 +1691,10 @@ class Emitter {
 				return;
 			}
 
+			var inherited:Null<Expr> = hostInherited(e1);
+			if (inherited != null)
+				e1 = inherited;
+
 			var member:Null<Expr> = memberSetterCall(e1, e2, pos);
 			if (member != null) {
 				expr(member);
@@ -2588,6 +2596,11 @@ class Emitter {
 			return;
 		}
 
+		if (hostInherited({e: EIdent(v), pos: pos}) != null) {
+			expr({e: EField({e: EIdent('this'), pos: pos}, v, false), pos: pos});
+			return;
+		}
+
 		if (inheritedMember(v)) {
 			w.pos(line);
 			w.token('FNAME');
@@ -2624,23 +2637,79 @@ class Emitter {
 	}
 
 	/**
+	 * `this.name` for a bare name that only a host base answers, so it is read and written the way
+	 * `this.name` is.
+	 *
+	 * A host base's property may have no storage behind it, such as `visible` on an OpenFL `Sprite`:
+	 * stored to by name, it threw `Invalid field`, and read by name it was not its getter's value,
+	 * where `this.visible` called its accessors. Only a property is rewritten: a plain field of the
+	 * host base, and a name a script base declares, keep their direct access.
+	 *
+	 * @param e The expression read or assigned to.
+	 * @return `this.name`, or null when the name is anything else.
+	 */
+	function hostInherited(e:Expr):Null<Expr> {
+		switch (e.e) {
+			case EIdent(v):
+				if (v == 'this' || v == 'true' || v == 'false' || v == 'null' || lookupVar(v) != null || enumOwning(v) != null
+					|| members.exists(v) || statics.exists(v) || moduleFields.exists(v) || typePaths.exists(v)
+					|| ambientMembers.exists(v) || importedFields.exists(v) || scriptBaseDeclares(v) || !inheritedMember(v)
+					|| inherited == null || !(inherited.exists('get_$v') || inherited.exists('set_$v')))
+					return null;
+				return {e: EField({e: EIdent('this'), pos: e.pos}, v, false), pos: e.pos};
+			case _:
+				return null;
+		}
+	}
+
+	/** Whether a script class up the chain declares the name, or might: one whose members are unknown. */
+	function scriptBaseDeclares(name:String):Bool {
+		var base:String = currentSuper;
+		var own:Null<String> = declaredClass(base);
+		var depth:Int = 0;
+		while (own != null && depth++ < 64) {
+			var declared:Null<StringMap<Bool>> = batchMembers.get(own);
+			if (declared == null || declared.exists(name) || declared.exists('get_$name') || declared.exists('set_$name'))
+				return true;
+
+			base = batchSupers.get(own);
+			own = declaredClass(base);
+		}
+		return false;
+	}
+
+	/**
 	 * Whether a name a scripted class does not declare is one it inherits.
 	 *
 	 * @param name The unresolved name.
 	 * @return Whether a class up the chain declares it.
 	 */
 	function inheritedMember(name:String):Bool {
-		if (currentSuper.length == 0)
+		/**
+		 * Script bases first, by what they declare. Answering yes for any name once the base was a
+		 * script class compiled a package or a host type named without an import to a field of
+		 * `this`, which read null at run time instead of refusing the module.
+		 */
+		var base:String = currentSuper;
+		var own:Null<String> = declaredClass(base);
+		var depth:Int = 0;
+		while (own != null && depth++ < 64) {
+			var declared:Null<StringMap<Bool>> = batchMembers.get(own);
+			if (declared == null || declared.exists(name) || declared.exists('get_$name') || declared.exists('set_$name'))
+				return true;
+
+			base = batchSupers.get(own);
+			own = declaredClass(base);
+		}
+
+		if (base == null || base.length == 0)
 			return false;
 
-		if (declaredClass(currentSuper) != null)
-			return true;
-
-		if (inheritedFrom != currentSuper) {
-			inheritedFrom = currentSuper;
+		if (inheritedFrom != base) {
+			inheritedFrom = base;
 			inherited = new StringMap();
 
-			var cls:Dynamic = Type.resolveClass(currentSuper);
+			var cls:Dynamic = Type.resolveClass(base);
 			var seen:Bool = false;
 
 			while (cls != null) {
@@ -4966,9 +5035,10 @@ class Emitter {
 				/**
 				 * A host-bound name is repeatable, which is what routes `+=` and `++` through the
 				 * rewrite into a plain assignment. Written straight they would be a `+=` token over a
-				 * call, which is not something the loader will assign to.
+				 * call, which is not something the loader will assign to. So is a member of a host
+				 * base, read and written as `this.name`.
 				 */
-				return members.exists(name) || statics.exists(name) || globalTarget(e) != null;
+				return members.exists(name) || statics.exists(name) || globalTarget(e) != null || hostInherited(e) != null;
 
 			case _:
 				return false;
