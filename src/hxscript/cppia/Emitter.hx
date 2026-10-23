@@ -2972,7 +2972,9 @@ class Emitter {
 	 * The name a case binds, when its pattern is a bare identifier rather than a value to match.
 	 *
 	 * hxscript treats any such identifier as a capture that always matches and rebinds, so it cannot
-	 * be emitted as an equality test. `true`, `false` and `null` are literals, not captures.
+	 * be emitted as an equality test. `true`, `false` and `null` are literals, not captures, and a
+	 * static of the class, a module field or an imported one is a value to compare, as Haxe matches
+	 * an inline or read-only static and the interpreter compares it.
 	 *
 	 * @param c The case to inspect.
 	 * @return The bound name, or null when the case matches by value.
@@ -2985,7 +2987,10 @@ class Emitter {
 						&& name != 'false'
 						&& name != 'null'
 						&& !typePaths.exists(name)
-						&& enumOwning(name) == null)
+						&& enumOwning(name) == null
+						&& !statics.exists(name)
+						&& !moduleFields.exists(name)
+						&& !importedFields.exists(name))
 						return name;
 				case _:
 			}

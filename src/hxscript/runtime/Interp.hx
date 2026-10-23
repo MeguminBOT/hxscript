@@ -2599,6 +2599,13 @@ class Interp {
 						return matchValues(resolve(id), match);
 
 					/**
+					 * A static of the class running, which Haxe matches as a constant when it is inline
+					 * or read-only: compared, not captured, and not an unknown name either.
+					 */
+					if (ownerClass != null && ownerClass.reflectHasField(id))
+						return matchValues(ownerClass.reflectGetField(id), match);
+
+					/**
 					 * A constructor of whatever is being matched, which is how Haxe reads a bare
 					 * upper-case name in a pattern: the subject's type is what the pattern is checked
 					 * against, so `case None:` needs no import and names nothing that has to resolve.
