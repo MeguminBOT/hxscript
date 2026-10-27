@@ -607,6 +607,10 @@ class Corpus {
 		check('a switch on a string',
 			'var s = "b"; switch (s) { case "a": return 1; case "b": return 2; default: return 3; }', '2');
 		check('a ternary chain', 'var n = 7; return n < 5 ? "low" : n < 10 ? "mid" : "high";', 'mid');
+		check('an unsafe cast in parentheses', 'var d:Dynamic = 4; var n:Int = cast(d); return n + 1;', '5');
+		check('an unsafe cast of a ternary chain in parentheses',
+			'var n = 7; var s:String = cast(n < 5 ? "low" : n < 10 ? "mid" : "high"); return s;', 'mid');
+		check('an unsafe cast in parentheses, then a field', 'var d:Dynamic = "abc"; return cast(d).length;', '3');
 
 		at('arguments');
 		check('an optional argument left out', 'return pad(3);', '13',
