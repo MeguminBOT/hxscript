@@ -57,6 +57,13 @@ It pushes a record from an init macro and asks whether the setup acted on it, in
 The order that matters is the one where the host's macro runs second, since that is the only one a
 lime project can produce and the only one that was ever broken.
 
+Whether two bases whose names differ only in case get bridges whose names differ in more than case,
+which Windows and macOS need since hxcpp names a file after each class:
+
+```sh
+sh test/bridge-names.sh
+```
+
 One test on its own, which is often what you want while fixing it:
 
 ```sh
