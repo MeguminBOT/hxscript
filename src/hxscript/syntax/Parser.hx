@@ -726,7 +726,12 @@ class Parser extends Lexer {
 					}
 				}
 				var args = parseExprList(TPClose);
-				mk(ENew(mapClassFor(a.join("."), targs), args), p1);
+				var made = mk(ENew(mapClassFor(a.join("."), targs), args), p1);
+				// The element type is kept as a check on the result, which is how a compiled
+				// script learns to build the typed array: `ENew` has nowhere to hold it.
+				if (a.length == 1 && a[0] == "Array" && targs != null && targs.length == 1)
+					made = mk(ECheckType(made, CTPath(["Array"], targs)), p1);
+				made;
 			case "throw":
 				var e = parseExpr();
 				mk(EThrow(e), p1, pmax(e));
