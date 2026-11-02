@@ -363,6 +363,19 @@ class Corpus {
 			+ 'static function seen(who:String):Float { '
 			+ 'var a = times.get(who); if (a == null) { a = []; times.set(who, a); } return push(a); } '
 			+ push);
+		// A value not known to be the array a parameter declares is converted on the way in, as
+		// Haxe's own cppia does: handed over as it was, the method's typed push ended the process.
+		check('Dynamic array argument', 'var d:Dynamic = [2]; return push(d);', '2', push);
+		check('Dynamic empty array argument', 'var d:Dynamic = []; return push(d);', '1.5', push);
+		check('Dynamic array as an int argument', 'var d:Dynamic = [1]; return add(d);', '6',
+			'static function add(a:Array<Int>):Int { a.push(5); return a[0] + a[1]; } ');
+		check('Dynamic array as a string argument', 'var d:Dynamic = ["x"]; return add(d);', 'xy',
+			'static function add(a:Array<String>):String { a.push("y"); return a[0] + a[1]; } ');
+		check('Dynamic array to an instance method', 'var d:Dynamic = [2]; return new T().push(d);', '2',
+			'public function new() {} public function push(a:Array<Float>):Float { a.push(1.5); return a[0]; }');
+		check('Dynamic array to a constructor', 'var d:Dynamic = [2]; return new T(d).first;', '2',
+			'public var first:Float; public function new(a:Array<Float>) { a.push(1.5); first = a[0]; }');
+		check('parsed array argument', 'return push(haxe.Json.parse("[3]"));', '3', push);
 		check('array literal stored in a map local made with its types',
 			'var m = new Map<String, Array<Float>>(); m.set("a", []); return push(m.get("a"));', '1.5', push);
 		check('array literal stored in a map field made with its types',

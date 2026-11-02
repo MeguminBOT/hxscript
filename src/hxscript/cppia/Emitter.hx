@@ -223,6 +223,9 @@ class Emitter {
 	 */
 	var methodArgs:StringMap<Array<Null<CType>>> = new StringMap();
 
+	/** The array spellings whose elements are stored unboxed, which an array of anything else is not. */
+	static final SCALAR_ARRAYS:Array<String> = ['Array.int', 'Array.Float', 'Array.bool', 'Array.String'];
+
 	/** The map types whose last type parameter is their values'. */
 	static final MAP_TYPES:Array<String> = ['Map', 'StringMap', 'IntMap', 'ObjectMap', 'EnumValueMap', 'WeakMap'];
 
@@ -4206,6 +4209,22 @@ class Emitter {
 	}
 
 	/**
+	 * Whether a value is already the typed array `array` without a conversion: a literal, which is
+	 * built as the array expected of it, or what is known to be that array.
+	 *
+	 * @param e The value.
+	 * @param array The cppia array spelling.
+	 */
+	function builtAs(e:Expr, array:String):Bool {
+		return switch (e.e) {
+			case EArrayDecl(_) | ENew('Array', []): true;
+			case ECheckType({e: EArrayDecl(_) | ENew('Array', [])}, _): true;
+			case EParent(inner): builtAs(inner, array);
+			case _: inferType(e) == array;
+		}
+	}
+
+	/**
 	 * Writes a call's arguments, then a null for each optional the call left off.
 	 *
 	 * @param params The arguments as written.
@@ -4221,8 +4240,22 @@ class Emitter {
 
 		for (i in 0...params.length) {
 			var t:Null<CType> = (types == null || i + leading >= types.length) ? null : types[i + leading];
-			expectedArray = t == null ? null : elementArray(typeName(t));
-			expectedElem = expectedArray == null ? null : arrayElemOf(t);
+			var array:Null<String> = t == null ? null : elementArray(typeName(t));
+
+			/**
+			 * A value not known to be that array is converted to it on the way in, as Haxe's own cppia
+			 * does with `TODATAARRAY`. An argument is the one place the loader does not: a typed local,
+			 * field or return converts what it stores, but a call hands the object over as it is, and
+			 * the method's typed reads and writes of a `Dynamic` array ended the process.
+			 */
+			if (array != null && SCALAR_ARRAYS.indexOf(array) >= 0 && !builtAs(params[i], array)) {
+				w.pos(line);
+				w.token('TODATAARRAY');
+				w.type(array);
+			}
+
+			expectedArray = array;
+			expectedElem = array == null ? null : arrayElemOf(t);
 			expr(params[i]);
 		}
 		expectedArray = null;
