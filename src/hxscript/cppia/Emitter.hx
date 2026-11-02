@@ -888,7 +888,7 @@ class Emitter {
 		for (f in c.fields) {
 			switch (f.kind) {
 				case KVar(v):
-					var values:Null<CType> = mapValueType(v.type);
+					var values:Null<CType> = mapValueType(writtenOrChecked(v.type, v.expr));
 					if (values != null)
 						fieldMapValues.set(f.name, values);
 				case _:
@@ -1641,7 +1641,7 @@ class Emitter {
 					// emit stays as it was, since what the map holds may have been put there untyped.
 					var id:Int = declareVar(n, t == null ? inferType(init) : typeName(t),
 						t == null ? readArray(init) : null);
-					noteMapValue(n, t);
+					noteMapValue(n, writtenOrChecked(t, init));
 					var stored:String = t != null ? typeName(t) : literalType(init);
 
 					if (init == null) {
@@ -4069,6 +4069,23 @@ class Emitter {
 		}
 	}
 
+	/**
+	 * The type a variable was written with, else the one its initialiser is checked against, which
+	 * is where the parser keeps `new Map<K, V>()`'s parameters.
+	 *
+	 * @param t The written type, if any.
+	 * @param init The initialiser, if any.
+	 * @return The type, or null.
+	 */
+	static function writtenOrChecked(t:Null<CType>, init:Null<Expr>):Null<CType> {
+		if (t != null || init == null)
+			return t;
+		return switch (init.e) {
+			case ECheckType(_, checked): checked;
+			case _: null;
+		}
+	}
+
 	/** Records a local's map value type, when it was written as a map of arrays. */
 	function noteMapValue(name:String, t:Null<CType>):Void {
 		var values:Null<CType> = mapValueType(t);
@@ -5589,6 +5606,14 @@ class Emitter {
 
 			case ENew(cl, _):
 				return typePaths.exists(cl) ? typePaths.get(cl) : null;
+
+			// What the parser keeps of `new Array<T>()` and `new Map<K, V>()`. A literal checked as an
+			// array is built as one; anything else checked is only what it was.
+			case ECheckType({e: EArrayDecl(_) | ENew('Array', [])}, t) if (elementArray(typeName(t)) != null):
+				return elementArray(typeName(t));
+
+			case ECheckType(inner, _):
+				return inferType(inner);
 
 			case EBinop(op, _, _) if (COMPARISONS.indexOf(op) >= 0):
 				return 'Bool';

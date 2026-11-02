@@ -363,6 +363,11 @@ class Corpus {
 			+ 'static function seen(who:String):Float { '
 			+ 'var a = times.get(who); if (a == null) { a = []; times.set(who, a); } return push(a); } '
 			+ push);
+		check('array literal stored in a map local made with its types',
+			'var m = new Map<String, Array<Float>>(); m.set("a", []); return push(m.get("a"));', '1.5', push);
+		check('array literal stored in a map field made with its types',
+			'times.set("a", []); return push(times.get("a"));', '1.5',
+			'static var times = new Map<String, Array<Float>>(); ' + push);
 
 		at('modules');
 		check('static property', 'return T.only;', '42', '

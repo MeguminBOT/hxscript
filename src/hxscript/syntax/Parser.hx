@@ -728,9 +728,12 @@ class Parser extends Lexer {
 				var args = parseExprList(TPClose);
 				var made = mk(ENew(mapClassFor(a.join("."), targs), args), p1);
 				// The element type is kept as a check on the result, which is how a compiled
-				// script learns to build the typed array: `ENew` has nowhere to hold it.
+				// script learns to build the typed array: `ENew` has nowhere to hold it. So is a
+				// map's, when its values are arrays, for the literals stored in it.
 				if (a.length == 1 && a[0] == "Array" && targs != null && targs.length == 1)
 					made = mk(ECheckType(made, CTPath(["Array"], targs)), p1);
+				else if (holdsArrays(a, targs))
+					made = mk(ECheckType(made, CTPath(a, targs)), p1);
 				made;
 			case "throw":
 				var e = parseExpr();
@@ -1239,6 +1242,26 @@ class Parser extends Lexer {
 				return parseTypeNext(CTAnon(fields));
 			default:
 				return unexpected(t);
+		}
+	}
+
+	/**
+	 * Whether a constructed type is a map whose values are arrays.
+	 *
+	 * @param path The type's path as written.
+	 * @param targs Its type parameters, if written.
+	 */
+	static function holdsArrays(path:Array<String>, targs:Array<CType>):Bool {
+		if (targs == null || targs.length == 0)
+			return false;
+		switch (path[path.length - 1]) {
+			case "Map" | "StringMap" | "IntMap" | "ObjectMap" | "EnumValueMap" | "WeakMap":
+			default:
+				return false;
+		}
+		return switch (targs[targs.length - 1]) {
+			case CTPath(["Array"], _): true;
+			default: false;
 		}
 	}
 
