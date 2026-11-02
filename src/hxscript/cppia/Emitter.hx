@@ -99,6 +99,9 @@ class Emitter {
 	 */
 	var scopeWritten:Array<StringMap<String>>;
 
+	/** The value type of each map local in scope, by name, when it was written and is an array. */
+	var scopeMapValues:Array<StringMap<CType>>;
+
 	/** Full path for each short type name in view, from imports, declarations and ambient types. */
 	var typePaths:StringMap<String>;
 
@@ -138,6 +141,12 @@ class Emitter {
 	 * `Array.Object`, so a nested literal has no way to recover what its own elements are.
 	 */
 	var expectedElem:Null<CType> = null;
+
+	/** The array type the method being emitted declares it returns, or null when it is not one. */
+	var returnArray:Null<String> = null;
+
+	/** That array's declared element type, as `expectedElem` carries it for a nested literal. */
+	var returnElem:Null<CType> = null;
 
 	/**
 	 * Paths in this batch that were declared as abstracts rather than classes.
@@ -204,6 +213,21 @@ class Emitter {
 	 * so does the emitter now, which is why the count has to be known here.
 	 */
 	var methodArity:StringMap<Int> = new StringMap();
+
+	/**
+	 * The types a batch type's methods declare their arguments with, by `owner method`, a leading
+	 * null for each argument a call writes itself.
+	 *
+	 * An array literal passed as one is built as the array the argument declares: built untyped, the
+	 * method's typed reads and writes took it for that array and ended the process.
+	 */
+	var methodArgs:StringMap<Array<Null<CType>>> = new StringMap();
+
+	/** The map types whose last type parameter is their values'. */
+	static final MAP_TYPES:Array<String> = ['Map', 'StringMap', 'IntMap', 'ObjectMap', 'EnumValueMap', 'WeakMap'];
+
+	/** The value type of each map field of the class being emitted, by field name, when it is an array. */
+	var fieldMapValues:StringMap<CType> = new StringMap();
 
 	/** Each batch class's superclass path, empty for none, for walking a constructor chain. */
 	var batchSupers:StringMap<String> = new StringMap();
@@ -377,6 +401,7 @@ class Emitter {
 		scopes = [];
 		scopeTypes = [];
 		scopeWritten = [];
+		scopeMapValues = [];
 		typePaths = new StringMap();
 		moduleClasses = new StringMap();
 		classVars = new StringMap();
@@ -858,8 +883,17 @@ class Emitter {
 		statics = new StringMap();
 		memberTypes = new StringMap();
 		staticTypes = new StringMap();
+		fieldMapValues = new StringMap();
 
 		for (f in c.fields) {
+			switch (f.kind) {
+				case KVar(v):
+					var values:Null<CType> = mapValueType(writtenOrChecked(v.type, v.expr));
+					if (values != null)
+						fieldMapValues.set(f.name, values);
+				case _:
+			}
+
 			var declared:String = switch (f.kind) {
 				case KVar(v): v.type == null ? null : typeName(v.type);
 				case KFunction(fn): fn.ret == null ? null : typeName(fn.ret);
@@ -1116,6 +1150,11 @@ class Emitter {
 	function emitFun(args:Array<Argument>, body:Expr, ret:Null<CType>, pos:Position):Void {
 		pushScope();
 
+		var outerReturn:Null<String> = returnArray;
+		var outerReturnElem:Null<CType> = returnElem;
+		returnArray = ret == null ? null : elementArray(typeName(ret));
+		returnElem = returnArray == null ? null : arrayElemOf(ret);
+
 		var prologue:Array<Expr> = [];
 		for (a in args) {
 			if (a.value != null) {
@@ -1161,6 +1200,7 @@ class Emitter {
 
 			noteArrayElement(a.name, a.t);
 			var id:Int = declareVar(a.name, loose ? null : spelling, a.t == null ? null : typeName(a.t));
+			noteMapValue(a.name, a.t);
 
 			w.str(a.name);
 			w.int(id);
@@ -1180,6 +1220,8 @@ class Emitter {
 		else
 			expr({e: EBlock(entry.concat([boxedBody])), pos: pos});
 
+		returnArray = outerReturn;
+		returnElem = outerReturnElem;
 		popScope();
 	}
 
@@ -1193,8 +1235,10 @@ class Emitter {
 	 * @throws Unsupported If it has no cppia spelling.
 	 */
 	function expr(e:Expr):Void {
-		if (e != null && !e.e.match(EArrayDecl(_)))
+		if (e != null && !e.e.match(EArrayDecl(_) | ENew('Array', []))) {
 			expectedArray = null;
+			expectedElem = null;
+		}
 
 		if (e == null) {
 			w.pos(0);
@@ -1309,8 +1353,11 @@ class Emitter {
 					w.type('');
 					if (returnsBool)
 						boolean(v, line);
-					else
+					else {
+						expectedArray = returnArray;
+						expectedElem = returnElem;
 						expr(v);
+					}
 				}
 
 			case EThrow(v):
@@ -1354,6 +1401,10 @@ class Emitter {
 						throw new Unsupported('unary operator ' + op, e.pos);
 				}
 				expr(inner);
+
+			case ECall(callee = {e: EField(map, 'set', _)}, [key, value]) if (mapValueOf(map) != null):
+				// Stored in a map whose values are arrays, a literal is built as that array.
+				emitCall(callee, [key, {e: ECheckType(value, mapValueOf(map)), pos: value.pos}], e.pos);
 
 			case ECall(callee, params):
 				emitCall(callee, params, e.pos);
@@ -1425,6 +1476,10 @@ class Emitter {
 				expectedArray = null;
 				expectedElem = null;
 
+			// `new Array()` is the empty literal, and is built as the array expected of it the same way.
+			case ENew('Array', []):
+				expr({e: EArrayDecl([]), pos: e.pos});
+
 			case ENew(cl, params):
 				var boxed:Null<String> = abstractPathOf(cl);
 				if (boxed != null) {
@@ -1441,7 +1496,7 @@ class Emitter {
 					w.int(wantedCtor);
 					w.pos(line);
 					w.token('NULL');
-					emitArgs(params, wantedCtor, 1, line);
+					emitArgs(params, wantedCtor, 1, line, boxed, '@new');
 					return;
 				}
 
@@ -1477,7 +1532,7 @@ class Emitter {
 				w.token('NEW');
 				useType(built);
 				w.int(wantedNew);
-				emitArgs(params, wantedNew, 0, line);
+				emitArgs(params, wantedNew, 0, line, declaredClass(built), 'new');
 
 			case EObject(fields):
 				w.pos(line);
@@ -1508,7 +1563,11 @@ class Emitter {
 				w.token('CAST');
 				expr(inner);
 
-			case ECheckType(inner, _):
+			case ECheckType(inner, t):
+				var want:Null<String> = elementArray(typeName(t));
+				var elem:Null<CType> = want == null ? null : arrayElemOf(t);
+				expectedArray = want;
+				expectedElem = elem;
 				expr(inner);
 
 			case EMeta(':hxsFieldInit', _, inner):
@@ -1577,7 +1636,12 @@ class Emitter {
 					// holding one of this batch's abstracts has to be known as one: its methods are
 					// statics taking the boxed value, and a call it did not recognise was emitted as an
 					// instance call on the type the abstract wraps, which the loader resolves to nothing.
-					var id:Int = declareVar(n, t == null ? inferType(init) : typeName(t));
+					// A local read out of a map whose values are arrays is written down as one, so a
+					// literal assigned to it later is built as that array. Only written: what its reads
+					// emit stays as it was, since what the map holds may have been put there untyped.
+					var id:Int = declareVar(n, t == null ? inferType(init) : typeName(t),
+						t == null ? readArray(init) : null);
+					noteMapValue(n, writtenOrChecked(t, init));
 					var stored:String = t != null ? typeName(t) : literalType(init);
 
 					if (init == null) {
@@ -1725,7 +1789,7 @@ class Emitter {
 				w.pos(line);
 				w.token('s');
 				w.str(member);
-				expectedArray = elementArray(inferType(e1));
+				expectedArray = assignedArray(e1);
 				boolean(e2, line);
 				return;
 			}
@@ -1735,7 +1799,7 @@ class Emitter {
 			writingTo = true;
 			expr(e1);
 			writingTo = false;
-			expectedArray = elementArray(inferType(e1));
+			expectedArray = assignedArray(e1);
 			boolean(e2, line);
 			return;
 		}
@@ -1972,7 +2036,7 @@ class Emitter {
 					useType(asType);
 					w.str(name);
 					w.int(wantedStatic);
-					emitArgs(params, wantedStatic, 0, line);
+					emitArgs(params, wantedStatic, 0, line, asType, name);
 					return;
 				}
 
@@ -1985,7 +2049,7 @@ class Emitter {
 					w.str(name);
 					w.int(wantedBoxed);
 					expr(obj);
-					emitArgs(params, wantedBoxed, 1, line);
+					emitArgs(params, wantedBoxed, 1, line, boxed, name);
 					return;
 				}
 
@@ -2013,7 +2077,7 @@ class Emitter {
 						w.type(currentSuper);
 						w.str(name);
 						w.int(wantedSuper);
-						emitArgs(params, wantedSuper, 0, line);
+						emitArgs(params, wantedSuper, 0, line, currentSuper, name);
 						return;
 					case _:
 				}
@@ -2063,7 +2127,7 @@ class Emitter {
 				w.str(name);
 				w.int(wantedMember);
 				expr(obj);
-				emitArgs(params, wantedMember, 0, line);
+				emitArgs(params, wantedMember, 0, line, receiver, name);
 
 			case EIdent('super'):
 				var supplied:Int = params.length;
@@ -2132,7 +2196,7 @@ class Emitter {
 				w.type(currentClass);
 				w.str(name);
 				w.int(wantedThis);
-				emitArgs(params, wantedThis, 0, line);
+				emitArgs(params, wantedThis, 0, line, currentClass, name);
 
 			case EIdent(name) if (lookupVar(name) == null && statics.exists(name)):
 				var wantedOwn:Int = padArgs(currentClass, name, params.length);
@@ -2141,7 +2205,7 @@ class Emitter {
 				w.type(currentClass);
 				w.str(name);
 				w.int(wantedOwn);
-				emitArgs(params, wantedOwn, 0, line);
+				emitArgs(params, wantedOwn, 0, line, currentClass, name);
 
 			case EIdent(name) if (lookupVar(name) == null && moduleFields.exists(name)):
 				var owningModule:String = moduleFields.get(name);
@@ -2151,7 +2215,7 @@ class Emitter {
 				w.type(owningModule);
 				w.str(name);
 				w.int(wantedModule);
-				emitArgs(params, wantedModule, 0, line);
+				emitArgs(params, wantedModule, 0, line, owningModule, name);
 
 			case EIdent(name) if (lookupVar(name) == null && ambientMembers.exists(name)):
 				var target:String = ambientMembers.get(name);
@@ -3434,6 +3498,8 @@ class Emitter {
 		if (t == null)
 			return null;
 		switch (t) {
+			case CTPath(['Null'], params) if (params != null && params.length == 1):
+				return arrayElemOf(params[0]);
 			case CTPath(path, params):
 				return (path.join('.') == 'Array' && params != null && params.length == 1) ? params[0] : null;
 			case CTParent(inner) | CTOpt(inner) | CTNamed(_, inner):
@@ -3904,6 +3970,130 @@ class Emitter {
 	}
 
 	/**
+	 * The array a literal assigned to `target` has to be built as: its type, a local's written type,
+	 * which an optional argument's slot does not keep, or the values of the map it indexes.
+	 *
+	 * @param target What is assigned.
+	 * @return The cppia array spelling, or null for an untyped literal.
+	 */
+	function assignedArray(target:Expr):Null<String> {
+		var known:Null<String> = elementArray(inferType(target));
+		if (known != null)
+			return known;
+
+		switch (target.e) {
+			case EArray(_, _):
+				return readArray(target);
+			case _:
+		}
+
+		var name:String = varNameOf(target);
+		return (name != '' && lookupVar(name) != null) ? elementArray(writtenVarType(name)) : null;
+	}
+
+	/**
+	 * The array a read out of a map gives, from the map's declared value type: `map.get(key)` or
+	 * `map[key]`.
+	 *
+	 * @param e The read.
+	 * @return The cppia array spelling, or null when it is not such a read.
+	 */
+	function readArray(e:Null<Expr>):Null<String> {
+		if (e == null)
+			return null;
+
+		var values:Null<CType> = switch (e.e) {
+			case ECall({e: EField(map, 'get', _)}, [_]): mapValueOf(map);
+			case EArray(map, _): mapValueOf(map);
+			case EParent(inner): return readArray(inner);
+			case _: null;
+		}
+		return values == null ? null : elementArray(typeName(values));
+	}
+
+	/**
+	 * The declared value type of a map a script names: a local or argument written with a map type,
+	 * or a field of the class being emitted.
+	 *
+	 * @param map The map expression.
+	 * @return Its value type when that is an array, otherwise null.
+	 */
+	function mapValueOf(map:Expr):Null<CType> {
+		switch (map.e) {
+			case EParent(inner):
+				return mapValueOf(inner);
+
+			case EIdent(v):
+				var i:Int = scopes.length - 1;
+				while (i >= 0) {
+					if (scopes[i].exists(v))
+						return scopeMapValues[i].get(v);
+					i--;
+				}
+				return fieldMapValues.get(v);
+
+			case EField({e: EIdent('this')}, f, _):
+				return fieldMapValues.get(f);
+
+			case EField(owner, f, _) if (typeOf(owner) == currentClass):
+				return fieldMapValues.get(f);
+
+			case _:
+				return null;
+		}
+	}
+
+	/**
+	 * The value type of a written map type, when it is an array.
+	 *
+	 * @param t The written type.
+	 * @return The value type, or null.
+	 */
+	function mapValueType(t:Null<CType>):Null<CType> {
+		if (t == null)
+			return null;
+
+		switch (t) {
+			case CTPath(path, params) if (params != null && params.length > 0):
+				var last:String = path[path.length - 1];
+				if (last == 'Null' && params.length == 1)
+					return mapValueType(params[0]);
+				if (MAP_TYPES.indexOf(last) < 0)
+					return null;
+				var values:CType = params[params.length - 1];
+				return arrayNameOf(values) == null ? null : values;
+			case CTParent(inner) | CTOpt(inner) | CTNamed(_, inner):
+				return mapValueType(inner);
+			case _:
+				return null;
+		}
+	}
+
+	/**
+	 * The type a variable was written with, else the one its initialiser is checked against, which
+	 * is where the parser keeps `new Map<K, V>()`'s parameters.
+	 *
+	 * @param t The written type, if any.
+	 * @param init The initialiser, if any.
+	 * @return The type, or null.
+	 */
+	static function writtenOrChecked(t:Null<CType>, init:Null<Expr>):Null<CType> {
+		if (t != null || init == null)
+			return t;
+		return switch (init.e) {
+			case ECheckType(_, checked): checked;
+			case _: null;
+		}
+	}
+
+	/** Records a local's map value type, when it was written as a map of arrays. */
+	function noteMapValue(name:String, t:Null<CType>):Void {
+		var values:Null<CType> = mapValueType(t);
+		if (values != null && scopeMapValues.length > 0)
+			scopeMapValues[scopeMapValues.length - 1].set(name, values);
+	}
+
+	/**
 	 * Remembers that a local holds an array of one of this batch's abstracts.
 	 *
 	 * The erased spelling cannot carry it: `Array<Meters>` becomes `Array.int`, which is right for
@@ -3978,6 +4168,11 @@ class Emitter {
 		}
 
 		methodArity.set(owner + ' ' + name, fn.args.length + extra);
+
+		var types:Array<Null<CType>> = [for (_ in 0...extra) null];
+		for (a in fn.args)
+			types.push(a.t);
+		methodArgs.set(owner + ' ' + name, types);
 	}
 
 	/**
@@ -4017,10 +4212,21 @@ class Emitter {
 	 * @param wanted The arity being written.
 	 * @param leading Arguments the caller writes itself before these.
 	 * @param line The line to attribute the nulls to.
+	 * @param owner The declaring type's full path, when it is a batch type, so an array literal
+	 *   argument is built as the array its parameter declares.
+	 * @param name The method being called.
 	 */
-	function emitArgs(params:Array<Expr>, wanted:Int, leading:Int, line:Int):Void {
-		for (p in params)
-			expr(p);
+	function emitArgs(params:Array<Expr>, wanted:Int, leading:Int, line:Int, ?owner:String, ?name:String):Void {
+		var types:Null<Array<Null<CType>>> = owner == null ? null : methodArgs.get(owner + ' ' + name);
+
+		for (i in 0...params.length) {
+			var t:Null<CType> = (types == null || i + leading >= types.length) ? null : types[i + leading];
+			expectedArray = t == null ? null : elementArray(typeName(t));
+			expectedElem = expectedArray == null ? null : arrayElemOf(t);
+			expr(params[i]);
+		}
+		expectedArray = null;
+		expectedElem = null;
 
 		var i:Int = params.length + leading;
 		while (i < wanted) {
@@ -5196,8 +5402,12 @@ class Emitter {
 				if (joined == 'Array')
 					return arrayTypeName(params);
 
-				if (joined == 'Null')
-					return '';
+				// `Null` only matters to a basic type, which it boxes. An array is an object either way,
+				// and a literal stored where one is declared has to be built as that array.
+				if (joined == 'Null') {
+					var arrayOf:Bool = params != null && params.length == 1 && arrayNameOf(params[0]) != null;
+					return arrayOf ? typeName(params[0]) : '';
+				}
 
 				if (path.length == 1 && typePaths.exists(joined))
 					return typePaths.get(joined);
@@ -5218,6 +5428,8 @@ class Emitter {
 		if (t == null)
 			return null;
 		switch (t) {
+			case CTPath(['Null'], params) if (params != null && params.length == 1):
+				return arrayNameOf(params[0]);
 			case CTPath(path, params):
 				return path.join('.') == 'Array' ? arrayTypeName(params) : null;
 			case CTParent(inner) | CTOpt(inner) | CTNamed(_, inner):
@@ -5273,6 +5485,7 @@ class Emitter {
 		scopes.push(new StringMap());
 		scopeTypes.push(new StringMap());
 		scopeWritten.push(new StringMap());
+		scopeMapValues.push(new StringMap());
 	}
 
 	/** Closes the innermost scope. */
@@ -5280,6 +5493,7 @@ class Emitter {
 		scopes.pop();
 		scopeTypes.pop();
 		scopeWritten.pop();
+		scopeMapValues.pop();
 	}
 
 	/**
@@ -5392,6 +5606,14 @@ class Emitter {
 
 			case ENew(cl, _):
 				return typePaths.exists(cl) ? typePaths.get(cl) : null;
+
+			// What the parser keeps of `new Array<T>()` and `new Map<K, V>()`. A literal checked as an
+			// array is built as one; anything else checked is only what it was.
+			case ECheckType({e: EArrayDecl(_) | ENew('Array', [])}, t) if (elementArray(typeName(t)) != null):
+				return elementArray(typeName(t));
+
+			case ECheckType(inner, _):
+				return inferType(inner);
 
 			case EBinop(op, _, _) if (COMPARISONS.indexOf(op) >= 0):
 				return 'Bool';

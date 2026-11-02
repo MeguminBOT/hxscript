@@ -334,6 +334,41 @@ class Corpus {
 		check('nested float array', 'var d:Array<Array<Float>> = [[1.5], [2.5]]; return d[1][0];', '2.5');
 		check('nested string array', 'var d:Array<Array<String>> = [["a"], ["b"]]; return d[1][0];', 'b');
 
+		// A literal is built as the array its destination declares wherever that destination is
+		// written: built loose, the typed push and read of the method it reached ended the process.
+		var push:String = 'static function push(a:Array<Float>):Float { a.push(1.5); return a[0]; } ';
+		check('array literal argument', 'return push([]);', '1.5', push);
+		check('filled array literal argument', 'return push([2.5]);', '2.5', push);
+		check('new Array() argument', 'return push(new Array());', '1.5', push);
+		check('new Array<T>() local', 'var a = new Array<Float>(); return push(a);', '1.5', push);
+		check('array literal as an int argument', 'return push([]);', '3',
+			'static function push(a:Array<Int>):Int { a.push(3); return a[0]; } ');
+		check('array literal as a string argument', 'return push([]);', 'x',
+			'static function push(a:Array<String>):String { a.push("x"); return a[0]; } ');
+		check('array literal to an instance method', 'return new T().push([]);', '1.5',
+			'public function new() {} public function push(a:Array<Float>):Float { a.push(1.5); return a[0]; }');
+		check('array literal returned', 'return push(make());', '1.5',
+			'static function make():Array<Float> { return []; } ' + push);
+		check('array literal returned by a local function',
+			'var make = function():Array<Float> return []; return push(make());', '1.5', push);
+		check('array literal into a Null<Array> local', 'var a:Null<Array<Float>> = null; a = []; return push(a);',
+			'1.5', push);
+		check('array literal into an optional argument', 'return fill();', '1.5',
+			'static function fill(?a:Array<Float>):Float { if (a == null) a = []; return push(a); } ' + push);
+		check('array literal type check', 'var a = ([] : Array<Float>); return push(a);', '1.5', push);
+		check('array literal stored in a map', 'times.set("a", []); return push(times.get("a"));', '1.5',
+			'static var times:Map<String, Array<Float>> = new haxe.ds.StringMap(); ' + push);
+		check('array literal into a local read from a map', 'seen("a"); return seen("a");', '1.5',
+			'static var times:Map<String, Array<Float>> = new haxe.ds.StringMap(); '
+			+ 'static function seen(who:String):Float { '
+			+ 'var a = times.get(who); if (a == null) { a = []; times.set(who, a); } return push(a); } '
+			+ push);
+		check('array literal stored in a map local made with its types',
+			'var m = new Map<String, Array<Float>>(); m.set("a", []); return push(m.get("a"));', '1.5', push);
+		check('array literal stored in a map field made with its types',
+			'times.set("a", []); return push(times.get("a"));', '1.5',
+			'static var times = new Map<String, Array<Float>>(); ' + push);
+
 		at('modules');
 		check('static property', 'return T.only;', '42', '
 			public static var only(get, never):Int;
