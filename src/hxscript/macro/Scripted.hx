@@ -120,6 +120,32 @@ class Scripted {
 		}
 
 		/**
+		 * Whether a type is a class, interface, enum, structure or function: nullable without boxing,
+		 * so an argument of it keeps its type with a default value. Untyped, the argument is Dynamic in
+		 * the rebuilt body, where `for (k in map.keys())` on an `IMap` does not compile.
+		 *
+		 * @param t The argument's type.
+		 * @return False for an abstract (`Int`, `Float`, `Bool`, `Null<Float>`...) and `Dynamic`.
+		 */
+		function isReference(t:Type):Bool {
+			if (t == null)
+				return false;
+
+			return switch (t) {
+				case TLazy(f):
+					isReference(f());
+				case TType(_, _):
+					isReference(t.follow());
+				case TAbstract(a, params) if (a.get().name == 'Null' && params.length == 1):
+					isReference(params[0]);
+				case TInst(_, _) | TEnum(_, _) | TAnonymous(_) | TFun(_, _):
+					true;
+				default:
+					false;
+			}
+		}
+
+		/**
 		 * Converts a typed `Type` to the `ComplexType` the bridge declares.
 		 *
 		 * `Type.toComplexType()` renders a sub-module type as `pack.SubType`, dropping the module that
@@ -1559,7 +1585,7 @@ class Scripted {
 							args: [
 								for (i => arg in args) {
 									var defaultValue:Expr = defaults[i];
-									var typed:Null<ComplexType> = defaultValue == null ? toCT(arg.t) : null;
+									var typed:Null<ComplexType> = defaultValue == null || isReference(arg.t) ? toCT(arg.t) : null;
 
 									if (defaultValue != null)
 										switch (defaultValue.expr) {
