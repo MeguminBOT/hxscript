@@ -493,11 +493,32 @@ class Scripted {
 
 								/**
 								 * A pattern is left as written. A bare name there is an enum constructor the
-								 * subject's type resolves, or a capture that binds a new local.
+								 * subject's type resolves, or a capture that binds a new local. The
+								 * expression of an extractor (`case (_ == Node.KIND => true)`) is not a
+								 * pattern, and names types like any other.
 								 */
 								case ESwitch(subject, cases, edef):
+									function patternWalk(pattern:Expr):Void {
+										switch (pattern.expr) {
+											case EBinop(OpArrow, extractor, sub):
+												sourceWalk(extractor);
+												patternWalk(sub);
+											case EParenthesis(sub):
+												patternWalk(sub);
+											case ECall(_, subs) | EArrayDecl(subs):
+												for (sub in subs)
+													patternWalk(sub);
+											case EBinop(OpOr, a, b):
+												patternWalk(a);
+												patternWalk(b);
+											default:
+										}
+									}
+
 									sourceWalk(subject);
 									for (c in cases) {
+										for (value in c.values)
+											patternWalk(value);
 										if (c.guard != null)
 											sourceWalk(c.guard);
 										if (c.expr != null)
