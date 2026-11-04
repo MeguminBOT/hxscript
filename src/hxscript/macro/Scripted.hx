@@ -1452,7 +1452,36 @@ class Scripted {
 						}
 					}
 
-					var constrExpr = expr.map(mapSuper);
+					/**
+					 * `getTypedExpr` prints the iterator a loop over an abstract calls (an OpenFL
+					 * `Vector`) as `for (x in (cast v).iterator())`. That `cast` has no type, so the
+					 * reprinted loop calls `iterator()` on a monomorph and iterates a `Dynamic` value,
+					 * which the compiler rejects. The call takes the abstract value itself.
+					 */
+					function uncast(e:Expr):Expr {
+						return switch (e.expr) {
+							case EParenthesis(sub) | ECast(sub, null): uncast(sub);
+							default: e;
+						}
+					}
+
+					function uncastIterables(e:Expr):Expr {
+						return switch (e.expr) {
+							case EFor({expr: EBinop(op = OpIn | OpArrow, v, iterable), pos: itPos}, body):
+								var it:Expr = uncast(iterable);
+								it = switch (it.expr) {
+									case ECall({expr: EField(receiver, name), pos: fieldPos}, args):
+										{pos: it.pos, expr: ECall({pos: fieldPos, expr: EField(uncast(receiver), name)}, args)};
+									default: it;
+								}
+								{pos: e.pos, expr: EFor({pos: itPos, expr: EBinop(op, v, uncastIterables(it))}, uncastIterables(body))};
+
+							default:
+								e.map(uncastIterables);
+						}
+					}
+
+					var constrExpr = uncastIterables(expr).map(mapSuper);
 					var body:Array<Expr> = switch (constrExpr) {
 						case {pos: _, expr: EBlock(a)}: a;
 						case e: [e];
