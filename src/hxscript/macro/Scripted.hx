@@ -693,6 +693,19 @@ class Scripted {
 						}
 					}
 
+					/**
+					 * Whether `getTypedExpr` named a type with a path that is the printed type, as it does
+					 * for the statics of a class used as a value (`var t:Class<pack.Node> = pack.Node`,
+					 * from `Node.count++`). Nothing declares that path, and `Class<pack.Node>` has none of
+					 * the statics, so the declaration or check goes and the statics type is inferred again.
+					 */
+					function isPrintedStatics(t:ComplexType):Bool {
+						return switch (t) {
+							case TPath(p): p.pack.length == 0 && p.name.indexOf('<') > 0;
+							default: false;
+						}
+					}
+
 					function fix(x:Expr):Expr {
 						return switch (x.expr) {
 							case ENew(t, params):
@@ -712,6 +725,13 @@ class Scripted {
 									])
 									}, [for (p in params) fix(p)])
 								};
+
+							/** A class used as a value is not checked against its statics (see isPrintedStatics). */
+							case ECheckType(inner, t) if (isPrintedStatics(t)):
+								fix(inner);
+
+							case ECast(inner, t) if (t != null && isPrintedStatics(t)):
+								fix(inner);
 
 							case ECheckType(inner, t):
 								{pos: x.pos, expr: ECheckType(fix(inner), bindType(qualifyType(t)))};
@@ -752,7 +772,7 @@ class Scripted {
 										for (v in vars)
 											{
 												name: v.name.replace('`', '_'),
-												type: v.type == null ? null : bindType(qualifyType(v.type)),
+												type: v.type == null || isPrintedStatics(v.type) ? null : bindType(qualifyType(v.type)),
 												expr: v.expr == null ? null : fix(v.expr),
 												isFinal: v.isFinal,
 												isStatic: v.isStatic,
