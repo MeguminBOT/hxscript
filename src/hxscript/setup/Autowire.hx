@@ -252,7 +252,7 @@ class Autowire {
 	 * @param ignore The entries to match, by name or by a trailing `*`.
 	 * @return Whether it is ignored.
 	 */
-	static function ignored(path:String, ignore:Array<String>):Bool {
+	@:allow(hxscript.setup.Abstracts) static function ignored(path:String, ignore:Array<String>):Bool {
 		for (rule in ignore) {
 			if (StringTools.endsWith(rule, '*')) {
 				if (StringTools.startsWith(path, rule.substr(0, rule.length - 1)))
