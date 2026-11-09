@@ -376,6 +376,28 @@ class Corpus {
 		check('Dynamic array to a constructor', 'var d:Dynamic = [2]; return new T(d).first;', '2',
 			'public var first:Float; public function new(a:Array<Float>) { a.push(1.5); first = a[0]; }');
 		check('parsed array argument', 'return push(haxe.Json.parse("[3]"));', '3', push);
+		// So is one stored where a local, a field, a static or a return declares a typed array: the
+		// loader stores the object as it is, and the typed reads that followed took the elements of a
+		// Dynamic array for the declared ones and ended the process.
+		check('Dynamic array into a typed local', 'var d = ["x"]; var a:Array<String> = d; var s:String = a[0]; return s;',
+			'x');
+		check('Dynamic array assigned to a typed local',
+			'var d = ["x"]; var a:Array<String> = []; a = d; var s:String = a[0]; return s;', 'x');
+		check('Dynamic array into a field', 'var d = ["x"]; var t = new T(); t.names = d; var s:String = t.names[0]; return s;',
+			'x', 'public var names:Array<String> = []; public function new() {}');
+		check('Dynamic array into a field of its own class', 'return new T().fill();', 'xy',
+			'var names:Array<String> = []; public function new() {} '
+			+ 'public function fill():String { var d = ["x"]; names = d.concat(["y"]); var s:String = names[0] + names[1]; return s; }');
+		check('Dynamic array into a static', 'var d = [2.5]; values = d; var f:Float = values[0]; return f;', '2.5',
+			'static var values:Array<Float> = [];');
+		check('Dynamic array into an int static', 'var d = [3]; ints = d; ints.push(4); var i:Int = ints[0] + ints[1]; return i;',
+			'7', 'static var ints:Array<Int> = [];');
+		check('Dynamic array into a static initialiser', 'var s:String = names[0]; return s;', 'x',
+			'static var source:Dynamic = ["x"]; static var names:Array<String> = source;');
+		check('Dynamic array returned', 'var a = make(); var f:Float = a[0]; return f;', '2.5',
+			'static function make():Array<Float> { var d = [2.5]; return d; }');
+		check('Dynamic array type check stored', 'var d:Dynamic = ["x"]; names = (d : Array<String>); var s:String = names[0]; return s;',
+			'x', 'static var names:Array<String> = [];');
 		check('array literal stored in a map local made with its types',
 			'var m = new Map<String, Array<Float>>(); m.set("a", []); return push(m.get("a"));', '1.5', push);
 		check('array literal stored in a map field made with its types',

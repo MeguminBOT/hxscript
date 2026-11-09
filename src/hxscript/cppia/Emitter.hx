@@ -1110,6 +1110,7 @@ class Emitter {
 					booting = true;
 					expectedArray = elementArray(v.type == null ? null : typeName(v.type));
 					expectedElem = arrayElemOf(v.type);
+					storedAs(v.expr, expectedArray, pos == null ? 0 : pos.line);
 					expr(v.expr);
 					expectedArray = null;
 					expectedElem = null;
@@ -1359,6 +1360,7 @@ class Emitter {
 					else {
 						expectedArray = returnArray;
 						expectedElem = returnElem;
+						storedAs(v, returnArray, line);
 						expr(v);
 					}
 				}
@@ -1571,6 +1573,7 @@ class Emitter {
 				var elem:Null<CType> = want == null ? null : arrayElemOf(t);
 				expectedArray = want;
 				expectedElem = elem;
+				storedAs(inner, want, line);
 				expr(inner);
 
 			case EMeta(':hxsFieldInit', _, inner):
@@ -1662,6 +1665,7 @@ class Emitter {
 						w.type('');
 
 						var declared:Null<String> = elementArray(t == null ? null : typeName(t));
+						storedAs(init, declared, item.pos == null ? 0 : item.pos.line);
 						if (declared == null && temporaryArray != null) {
 							declared = temporaryArray;
 							temporaryArray = null;
@@ -1803,6 +1807,7 @@ class Emitter {
 			expr(e1);
 			writingTo = false;
 			expectedArray = assignedArray(e1);
+			storedAs(e2, expectedArray, line);
 			boolean(e2, line);
 			return;
 		}
@@ -4225,6 +4230,26 @@ class Emitter {
 	}
 
 	/**
+	 * Converts a value stored where a typed array is declared (a local, a field, a static, a return,
+	 * an argument or a type check) to that array, unless it already is one, as Haxe's own cppia does
+	 * with `TODATAARRAY`. The loader stores the object as it is: a `Dynamic` array kept there was then
+	 * read and written as the typed array, with elements of another size, and the process ended.
+	 *
+	 * `TODATAARRAY` gives back an array that already is the typed one, and a null, as they are.
+	 *
+	 * @param value The value stored.
+	 * @param array The cppia array spelling declared there, or null when it is not an array.
+	 * @param line The line to attribute the conversion to.
+	 */
+	function storedAs(value:Null<Expr>, array:Null<String>, line:Int):Void {
+		if (value == null || array == null || SCALAR_ARRAYS.indexOf(array) < 0 || builtAs(value, array))
+			return;
+		w.pos(line);
+		w.token('TODATAARRAY');
+		w.type(array);
+	}
+
+	/**
 	 * Writes a call's arguments, then a null for each optional the call left off.
 	 *
 	 * @param params The arguments as written.
@@ -4242,18 +4267,7 @@ class Emitter {
 			var t:Null<CType> = (types == null || i + leading >= types.length) ? null : types[i + leading];
 			var array:Null<String> = t == null ? null : elementArray(typeName(t));
 
-			/**
-			 * A value not known to be that array is converted to it on the way in, as Haxe's own cppia
-			 * does with `TODATAARRAY`. An argument is the one place the loader does not: a typed local,
-			 * field or return converts what it stores, but a call hands the object over as it is, and
-			 * the method's typed reads and writes of a `Dynamic` array ended the process.
-			 */
-			if (array != null && SCALAR_ARRAYS.indexOf(array) >= 0 && !builtAs(params[i], array)) {
-				w.pos(line);
-				w.token('TODATAARRAY');
-				w.type(array);
-			}
-
+			storedAs(params[i], array, line);
 			expectedArray = array;
 			expectedElem = array == null ? null : arrayElemOf(t);
 			expr(params[i]);
