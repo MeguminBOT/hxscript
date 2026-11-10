@@ -162,6 +162,8 @@ class ShapeEntry {
 		check('tables compiled, the rest interpreted', ['w.Tables'], false);
 		check('worker compiled without the class it reads', ['w.Worker'], false);
 
+		imports();
+
 		shapes('shapes: nothing compiled', [], false);
 		shapes('shapes: everything compiled', ['w.Colour', 'w.ShapeEntry'], true);
 		shapes('shapes: entry compiled, types interpreted falls back', ['w.ShapeEntry'], false);
@@ -331,6 +333,43 @@ class ShapeEntry {
 
 		env.substituting = env.compiled.keys().hasNext();
 		#end
+	}
+
+	/**
+	 * An import names a type in the module that wrote it, and in no other.
+	 *
+	 * The names of a batch are one table, and every module's imports went into it for good: after a
+	 * module importing a host class named `Map`, `Map` was that class in every module written after
+	 * it, and one that builds a standard map built the host's class, then failed with `Null Function`
+	 * at its first `set`. One mod importing a game's own `Map` did that to every other mod.
+	 */
+	static function imports():Void {
+		// Compiled in, since nothing else names it.
+		var kept:Class<Dynamic> = hostnames.Map;
+
+		// The work is in instance methods: a static called from outside stays interpreted.
+		var user = (pack:String) -> 'package ' + pack + ';\nclass User {\n\tvar seen:Map<String, Int> = new Map();\n\tpublic function new() {}\n'
+			+ '\tpublic function run():Int {\n\t\tvar local:Map<String, Int> = new Map();\n\t\tseen.set("a", 1);\n\t\tlocal.set("b", 2);\n'
+			+ '\t\treturn seen.exists("a") ? seen.get("a") + local.get("b") : -1;\n\t}\n'
+			+ '\tpublic static function go():Int {\n\t\treturn new User().run();\n\t}\n}\n';
+
+		var env:Environment = new Environment();
+		// A user declared before the module with the import, and one after.
+		env.addModule(new Module(user('before'), 'User', ['before'], 'before/User.hx'));
+		env.addModule(new Module('package host;\nimport hostnames.Map;\nclass Holder {\n\tpublic function new() {}\n'
+			+ '\tpublic function run():Int {\n\t\tvar held:Map = null;\n\t\treturn held == null ? 2 : 0;\n\t}\n'
+			+ '\tpublic static function go():Int {\n\t\treturn new Holder().run();\n\t}\n}\n', 'Holder', ['host'], 'host/Holder.hx'));
+		env.addModule(new Module(user('after'), 'User', ['after'], 'after/User.hx'));
+		env.start();
+
+		var paths:Array<String> = ['before.User', 'host.Holder', 'after.User'];
+		var answers = () -> [for (path in paths)
+			try Reflect.callMethod(null, (cast env.resolve(path) : ScriptedClass).reflectGetField('go'), []) catch (e:Dynamic) 'threw: ' + e].join(',');
+		TestCase.eq('imports: interpreted', answers(), '3,2,3');
+
+		var report = hxscript.compile.Compiler.compile(env);
+		TestCase.ok('imports: every module compiled', paths.filter(path -> report.compiled.indexOf(path) < 0).length == 0);
+		TestCase.eq('imports: compiled', answers(), '3,2,3');
 	}
 
 	static function main():Void {
