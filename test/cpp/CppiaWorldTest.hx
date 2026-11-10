@@ -3,6 +3,8 @@ import hxscript.Module;
 import hxscript.cppia.Backend;
 import hxscript.compile.Unit;
 import hxscript.compile.Result;
+import hxscript.compile.Compiler;
+import hxscript.compile.Report;
 import hxscript.types.ScriptedClass;
 
 /**
@@ -153,8 +155,47 @@ class ShapeEntry {
 }
 ';
 
+	/**
+	 * A bare type name is the module's own type, else an imported one, else one of its package, as in
+	 * Haxe.
+	 *
+	 * Every type a batch declares was registered under its bare name, the last declared winning, and a
+	 * module only re-registered its own types and imports before being written. A type of its package
+	 * it names without an import was read as the last one of that name in the batch: `a.Main` built
+	 * `b.Panel`. Two mods that each have a `Panel` beside their `Main` are in that position.
+	 */
+	static function samePackage():Void {
+		var env:Environment = new Environment();
+		var add = (pack:String, name:String, code:String) -> env.addModule(new Module('package ' + pack + ';\n' + code, name,
+			pack.split('.'), pack.split('.').join('/') + '/' + name + '.hx'));
+		var panel = (tag:String) -> 'class Panel {\n\tpublic var tag:String;\n\tpublic function new() { tag = "' + tag + '"; }\n}\n';
+		var main = (imports:String) -> imports
+			+ 'class Main extends base.Mod {\n\tvar panel:Panel;\n\toverride public function init():Void {\n\t\tpanel = new Panel();\n\t}\n'
+			+ '\toverride public function tag():String {\n\t\treturn panel.tag;\n\t}\n'
+			+ '\tpublic static function go():String {\n\t\tvar main = new Main();\n\t\tmain.init();\n\t\treturn main.tag();\n\t}\n}\n';
+		add('base', 'Mod', 'class Mod {\n\tpublic function new() {}\n\tpublic function init():Void {}\n\tpublic function tag():String { return ""; }\n}\n');
+		// As a mod with its panel in a sub-package, then one with its panel beside its Main.
+		add('p.ui', 'Panel', panel('p'));
+		add('p', 'Main', main('import p.ui.Panel;\n'));
+		add('q', 'Panel', panel('q'));
+		add('q', 'Main', main(''));
+		// An import still wins over the package.
+		add('c', 'Panel', panel('c'));
+		add('c', 'Main', main('import p.ui.Panel;\n'));
+		env.start();
+
+		var answers = () -> [for (path in ['p.Main', 'q.Main', 'c.Main'])
+			try Reflect.callMethod(null, (cast env.resolve(path) : ScriptedClass).reflectGetField('go'), []) catch (e:Dynamic) 'threw: ' + e].join(',');
+		TestCase.eq('same package: interpreted', answers(), 'p,q,p');
+
+		var report = hxscript.compile.Compiler.compile(env);
+		TestCase.ok('same package: every Main compiled', ['p.Main', 'q.Main', 'c.Main'].filter(path -> report.compiled.indexOf(path) < 0).length == 0);
+		TestCase.eq('same package: compiled', answers(), 'p,q,p');
+	}
+
 	public static function run():Void {
 		cpp.cppia.Host.enableJit(true);
+		samePackage();
 
 		check('nothing compiled', [], false);
 		check('everything compiled', ['w.Tables', 'w.Worker', 'w.Entry'], true);
@@ -162,10 +203,45 @@ class ShapeEntry {
 		check('tables compiled, the rest interpreted', ['w.Tables'], false);
 		check('worker compiled without the class it reads', ['w.Worker'], false);
 
+		imports();
+		declared();
+
 		shapes('shapes: nothing compiled', [], false);
 		shapes('shapes: everything compiled', ['w.Colour', 'w.ShapeEntry'], true);
 		shapes('shapes: entry compiled, types interpreted falls back', ['w.ShapeEntry'], false);
 		shapes('shapes: types compiled, entry interpreted', ['w.Colour'], false);
+
+		sameName();
+	}
+
+	/**
+	 * Two modules with the same name in two packages are two modules.
+	 *
+	 * A batch told them apart by name, so what one `Main` used was read as the other's: `a.Main` was
+	 * left interpreted for a class only `d.Main` names, or `d.Main` was written naming a class that
+	 * stayed interpreted and the loader refused the whole batch. Every mod of a host that gives each
+	 * one a `Main` is in that position.
+	 */
+	static function sameName():Void {
+		var env:Environment = new Environment();
+		env.addModule(new Module('package a;\nclass Hub {\n\tpublic static function two():Int { return 2; }\n}\n', 'Hub', ['a'], 'a/Hub.hx'));
+		env.addModule(new Module('package a;\nclass Main {\n\tpublic static function go():Int { return Hub.two(); }\n}\n', 'Main', ['a'], 'a/Main.hx'));
+		env.addModule(new Module('package d;\nclass H {\n\tpublic static var item:Int = 7;\n\tpublic static var interpreted(nonesuch, never):Int;\n}\n',
+			'H', ['d'], 'd/H.hx'));
+		env.addModule(new Module('package d;\nclass Main {\n\tpublic static function go():Int { return H.item; }\n}\n', 'Main', ['d'], 'd/Main.hx'));
+		env.start();
+
+		var report:Report = Compiler.compile(env);
+
+		TestCase.ok('same name: the loader refused nothing', report.failed.length == 0);
+		TestCase.ok('same name: the Main that uses nothing interpreted compiled', report.compiled.indexOf('a.Main') >= 0);
+		TestCase.ok('same name: the Main that reads an interpreted class did not', report.compiled.indexOf('d.Main') < 0);
+
+		var answers:Array<Dynamic> = [for (path in ['a.Main', 'd.Main']) try Reflect.callMethod(null, (cast env.resolve(path) : ScriptedClass).reflectGetField('go'), []) catch (e:Dynamic) 'threw: ' + e];
+		if (answers[0] != 2 || answers[1] != 7)
+			TestCase.bad('same name', 'answered ' + answers + ', expected [2,7]');
+		else
+			TestCase.ok('same name: both answer   ' + answers, true);
 	}
 
 	/**
@@ -331,6 +407,89 @@ class ShapeEntry {
 
 		env.substituting = env.compiled.keys().hasNext();
 		#end
+	}
+
+	/**
+	 * An import names a type in the module that wrote it, and in no other.
+	 *
+	 * The names of a batch are one table, and every module's imports went into it for good: after a
+	 * module importing a host class named `Map`, `Map` was that class in every module written after
+	 * it, and one that builds a standard map built the host's class, then failed with `Null Function`
+	 * at its first `set`. One mod importing a game's own `Map` did that to every other mod.
+	 *
+	 * And in the module that imports it, the name is that class: interpreted, `new Map()` there
+	 * built a standard map, the name being taken for the standard one before the import was looked at.
+	 */
+	static function imports():Void {
+		// Compiled in, since nothing else names it.
+		var kept:Class<Dynamic> = hostnames.Map;
+
+		// The work is in instance methods: a static called from outside stays interpreted.
+		var user = (pack:String) -> 'package ' + pack + ';\nclass User {\n\tvar seen:Map<String, Int> = new Map();\n\tpublic function new() {}\n'
+			+ '\tpublic function run():Int {\n\t\tvar local:Map<String, Int> = new Map();\n\t\tseen.set("a", 1);\n\t\tlocal.set("b", 2);\n'
+			+ '\t\treturn seen.exists("a") ? seen.get("a") + local.get("b") : -1;\n\t}\n'
+			+ '\tpublic static function go():Int {\n\t\treturn new User().run();\n\t}\n}\n';
+
+		var env:Environment = new Environment();
+		// A user declared before the module with the import, and one after.
+		env.addModule(new Module(user('before'), 'User', ['before'], 'before/User.hx'));
+		env.addModule(new Module('package host;\nimport hostnames.Map;\nclass Holder {\n\tpublic function new() {}\n'
+			+ '\tpublic function run():Int {\n\t\tvar held = new Map();\n\t\theld.add("a");\n\t\theld.add("b");\n\t\treturn held.size();\n\t}\n'
+			+ '\tpublic static function go():Int {\n\t\treturn new Holder().run();\n\t}\n}\n', 'Holder', ['host'], 'host/Holder.hx'));
+		env.addModule(new Module(user('after'), 'User', ['after'], 'after/User.hx'));
+		env.start();
+
+		var paths:Array<String> = ['before.User', 'host.Holder', 'after.User'];
+		var answers = () -> [for (path in paths)
+			try Reflect.callMethod(null, (cast env.resolve(path) : ScriptedClass).reflectGetField('go'), []) catch (e:Dynamic) 'threw: ' + e].join(',');
+		TestCase.eq('imports: interpreted', answers(), '3,2,3');
+
+		var report = hxscript.compile.Compiler.compile(env);
+		TestCase.ok('imports: every module compiled', paths.filter(path -> report.compiled.indexOf(path) < 0).length == 0);
+		TestCase.eq('imports: compiled', answers(), '3,2,3');
+	}
+
+	/**
+	 * A type a module declares is named bare in its package, and in no other.
+	 *
+	 * Every type of a batch was in the one table under its bare name, for every module: after a
+	 * module declaring a class named `Map`, `Map` was that class in the modules of other packages,
+	 * which built it where they wrote a standard map. One mod with a `Map` of its own did that to
+	 * every other mod.
+	 */
+	static function declared():Void {
+		// The work is in instance methods: a static called from outside stays interpreted.
+		var user = (pack:String) -> 'package ' + pack + ';\nclass User {\n\tvar seen:Map<String, Int> = new Map();\n\tpublic function new() {}\n'
+			+ '\tpublic function run():Int {\n\t\tvar local:Map<String, Int> = new Map();\n\t\tseen.set("a", 1);\n\t\tlocal.set("b", 2);\n'
+			+ '\t\treturn seen.exists("a") ? seen.get("a") + local.get("b") : -1;\n\t}\n'
+			+ '\tpublic static function go():Int {\n\t\treturn new User().run();\n\t}\n}\n';
+		var holder = (pack:String) -> 'package ' + pack + ';\nclass Holder {\n\tpublic function new() {}\n'
+			+ '\tpublic function run():Int {\n\t\tvar held = new Map();\n\t\theld.add("a");\n\t\theld.add("b");\n\t\treturn held.size() + Rooted.one();\n\t}\n'
+			+ '\tpublic static function go():Int {\n\t\treturn new Holder().run();\n\t}\n}\n';
+
+		var env:Environment = new Environment();
+		var add = (pack:String, name:String, code:String) -> env.addModule(new Module(code, name, pack.length == 0 ? [] : pack.split('.'),
+			(pack.length == 0 ? '' : pack.split('.').join('/') + '/') + name + '.hx'));
+		// A user declared before the module with the class, and one after.
+		add('first', 'User', user('first'));
+		add('own', 'Map', 'package own;\nclass Map {\n\tvar keys:Array<String> = [];\n\tpublic function new() {}\n'
+			+ '\tpublic function add(key:String):Void { keys.push(key); }\n\tpublic function size():Int { return keys.length; }\n}\n');
+		// Its package names it bare, and a package under it, as a type of the root package is everywhere.
+		add('own', 'Holder', holder('own'));
+		add('own.deep', 'Holder', holder('own.deep'));
+		add('', 'Rooted', 'class Rooted {\n\tpublic static function one():Int { return 1; }\n}\n');
+		add('last', 'User', user('last'));
+		env.start();
+
+		var answers = (paths:Array<String>) -> [for (path in paths)
+			try Reflect.callMethod(null, (cast env.resolve(path) : ScriptedClass).reflectGetField('go'), []) catch (e:Dynamic) 'threw: ' + e].join(',');
+		// Interpreted, a module does not look in the packages above its own.
+		TestCase.eq('declared: interpreted', answers(['first.User', 'own.Holder', 'last.User']), '3,3,3');
+
+		var paths:Array<String> = ['first.User', 'own.Holder', 'own.deep.Holder', 'last.User'];
+		var report = hxscript.compile.Compiler.compile(env);
+		TestCase.ok('declared: every module compiled', paths.concat(['own.Map', 'Rooted']).filter(path -> report.compiled.indexOf(path) < 0).length == 0);
+		TestCase.eq('declared: compiled', answers(paths), '3,3,3,3');
 	}
 
 	static function main():Void {
