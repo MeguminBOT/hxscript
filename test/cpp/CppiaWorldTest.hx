@@ -342,6 +342,9 @@ class ShapeEntry {
 	 * module importing a host class named `Map`, `Map` was that class in every module written after
 	 * it, and one that builds a standard map built the host's class, then failed with `Null Function`
 	 * at its first `set`. One mod importing a game's own `Map` did that to every other mod.
+	 *
+	 * And in the module that imports it, the name is that class: interpreted, `new Map()` there
+	 * built a standard map, the name being taken for the standard one before the import was looked at.
 	 */
 	static function imports():Void {
 		// Compiled in, since nothing else names it.
@@ -357,7 +360,7 @@ class ShapeEntry {
 		// A user declared before the module with the import, and one after.
 		env.addModule(new Module(user('before'), 'User', ['before'], 'before/User.hx'));
 		env.addModule(new Module('package host;\nimport hostnames.Map;\nclass Holder {\n\tpublic function new() {}\n'
-			+ '\tpublic function run():Int {\n\t\tvar held:Map = null;\n\t\treturn held == null ? 2 : 0;\n\t}\n'
+			+ '\tpublic function run():Int {\n\t\tvar held = new Map();\n\t\theld.add("a");\n\t\theld.add("b");\n\t\treturn held.size();\n\t}\n'
 			+ '\tpublic static function go():Int {\n\t\treturn new Holder().run();\n\t}\n}\n', 'Holder', ['host'], 'host/Holder.hx'));
 		env.addModule(new Module(user('after'), 'User', ['after'], 'after/User.hx'));
 		env.start();
