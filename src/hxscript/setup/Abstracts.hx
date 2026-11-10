@@ -28,7 +28,7 @@ class Abstracts {
 		for (lib in libs) {
 			for (pack in lib.abstractPackages)
 				for (dir in Context.getClassPath())
-					scan(dir + pack.split('.').join('/'), pack, exclude, wrapped);
+					scan(dir + pack.split('.').join('/'), pack, exclude, wrapped, lib.ignore);
 
 			for (path in lib.abstracts)
 				wrap(path, exclude, wrapped);
@@ -50,16 +50,20 @@ class Abstracts {
 	 * @param pack The package it holds.
 	 * @param exclude Paths to leave alone.
 	 * @param wrapped Collects what was wrapped.
+	 * @param ignore Packages the library keeps out of scripts' reach, left out with what they hold, as
+	 *        the bridges leave them: OpenFL's `_internal` ones hold abstracts of its own workings.
 	 */
-	static function scan(dir:String, pack:String, exclude:Array<String>, wrapped:Array<String>):Void {
+	static function scan(dir:String, pack:String, exclude:Array<String>, wrapped:Array<String>, ignore:Array<String>):Void {
 		if (!FileSystem.exists(dir) || !FileSystem.isDirectory(dir))
+			return;
+		if (Autowire.ignored(pack, ignore))
 			return;
 
 		for (entry in FileSystem.readDirectory(dir)) {
 			var full:String = '$dir/$entry';
 
 			if (FileSystem.isDirectory(full)) {
-				scan(full, '$pack.$entry', exclude, wrapped);
+				scan(full, '$pack.$entry', exclude, wrapped, ignore);
 				continue;
 			}
 
@@ -163,8 +167,13 @@ class Abstracts {
 		 *
 		 * `extern` is allowed for the same reason: it is legal in front of `abstract` and nothing here
 		 * should turn on which order the modifiers were written in.
+		 *
+		 * So is a conditional written on the same line, and metadata without a colon. OpenFL declares
+		 * every enum abstract as `#if (haxe_ver >= 4.0) enum #else @:enum #end abstract`, some behind
+		 * `@SuppressWarnings(...)`, and none of them matched: a preset scanning its packages found
+		 * nothing there.
 		 */
-		var re:EReg = ~/^[ \t]*(@:[^\n]*[ \t]+)*((private|extern|enum)[ \t]+)*abstract[ \t]+([A-Za-z_][A-Za-z0-9_]*)/gm;
+		var re:EReg = ~/^[ \t]*((@:?[A-Za-z_][^\n]*?|#if[^\n]*?#end)[ \t]+)*((private|extern|enum)[ \t]+)*abstract[ \t]+([A-Za-z_][A-Za-z0-9_]*)/gm;
 
 		/**
 		 * What may follow `abstract` and not be an abstract's name.
@@ -200,7 +209,7 @@ class Abstracts {
 
 		var at:Int = 0;
 		while (re.matchSub(source, at)) {
-			var name:String = re.matched(4);
+			var name:String = re.matched(5);
 			if (keywords.indexOf(name) < 0)
 				found.push(name);
 
