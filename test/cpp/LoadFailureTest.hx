@@ -14,15 +14,16 @@ import hxscript.compile.Result;
  * expected, is a defect below the script, and used to end the host process, throwing a bare string naming
  * the fault and nothing inside the module, with nothing catching it.
  *
- * The refusal path cannot be reached from a script, because reaching it means finding a construct
- * the emitter emits and the loader rejects, and every one of those found so far has been fixed. So
- * it is tested where it can be: the guard is proved against bytecode that is definitely bad, and the
- * skip path is proved against a construct the emitter definitely refuses.
+ * The refusal path is reached from a script by one construct the emitter writes and the loader
+ * rejects: a value of a host enum abstract with no wrapper. Otherwise it is tested where it can be:
+ * the guard is proved against bytecode that is definitely bad, and the skip path is proved against a
+ * construct the emitter definitely refuses.
  */
 class LoadFailureTest {
 	public static function run():Void {
 		guarded();
 		skipping();
+		narrowing();
 		clean();
 	}
 
@@ -98,6 +99,58 @@ class LoadFailureTest {
 			TestCase.bad('interpreted fallback', 'gave ' + answer + ', expected 1');
 		else
 			TestCase.ok('the refused module still runs interpreted   ' + answer, true);
+	}
+
+	/**
+	 * A module the loader refuses is found and left out, and the rest still compiles as one batch.
+	 *
+	 * Reading a value of a host enum abstract with no wrapper is a construct the emitter writes and the
+	 * loader refuses: the static it names does not link. Split in halves to find it, the batch lost its
+	 * references across the cut, so users of a library in the other half were left interpreted as
+	 * `compiled elsewhere`. Several users of one library are what makes a split strand some of them.
+	 */
+	static function narrowing():Void {
+		var env:Environment = new Environment();
+		env.addModule(new Module('package nlink;\nclass Lib {\n\tpublic static function two():Int { return 2; }\n}\n', 'Lib',
+			['nlink'], 'Lib.hx'));
+		for (i in 0...6)
+			env.addModule(new Module('package nlink;\nimport nlink.Lib;\nclass User$i {\n\tpublic static function go():Int { return Lib.two(); }\n}\n',
+				'User$i', ['nlink'], 'User$i.hx'));
+		env.addModule(new Module('package nlink;\nclass Bad {\n\tpublic static function go():Int { return HostAutoSize.RIGHT; }\n}\n', 'Bad',
+			['nlink'], 'Bad.hx'));
+		env.addModule(new Module('package nlink;\nclass BadUser {\n\tpublic static function go():Int { return Bad.go(); }\n}\n', 'BadUser',
+			['nlink'], 'BadUser.hx'));
+		env.start();
+
+		// The JIT is not what is wrong here, and a batch refused with it off too would leave it off for
+		// every test after this one.
+		var jit:Bool = Backend.jit;
+		Backend.jit = false;
+		var report:Report = Compiler.compile(env);
+		Backend.jit = jit;
+
+		var refused:Array<String> = [for (entry in report.failed) entry.name];
+		TestCase.ok('the loader refused the one module   ' + refused.join(', '), refused.length == 1 && refused[0] == 'Bad');
+
+		var users:Int = 0;
+		for (i in 0...6)
+			if (report.compiled.indexOf('nlink.User$i') >= 0)
+				users++;
+		if (users != 6 || report.compiled.indexOf('nlink.Lib') < 0)
+			TestCase.bad('narrowing', users + ' of 6 users of the library compiled, the library '
+				+ (report.compiled.indexOf('nlink.Lib') >= 0 ? 'did' : 'did not'));
+		else
+			TestCase.ok('the library and every user of it still compiled', true);
+
+		// It names the refused module without an import, as a class of its package, so it has to stay
+		// interpreted with it rather than compile a call to nothing.
+		TestCase.ok('the module using the refused one is left interpreted', report.compiled.indexOf('nlink.BadUser') < 0);
+
+		var answer:Dynamic = call(env, 'nlink.User3');
+		if (answer != 2)
+			TestCase.bad('narrowing', 'a user gave ' + answer + ', expected 2');
+		else
+			TestCase.ok('a user still answers   ' + answer, true);
 	}
 
 	/** A world with nothing wrong with it reports no failures at all. */

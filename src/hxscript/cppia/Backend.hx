@@ -239,6 +239,7 @@ class Backend {
 		var accepted:Array<Unit> = [];
 
 		var uses:Map<String, Array<String>> = new Map();
+		var mentions:Map<String, Array<String>> = new Map();
 
 		for (input in inputs) {
 			var trial:Emitter = prepare(inputs, ambient, external, statics);
@@ -247,6 +248,7 @@ class Backend {
 				trial.emit(input.decls, input.name);
 				trial.finish();
 				uses.set(input.name, trial.references());
+				mentions.set(input.name, trial.mentions());
 				accepted.push(input);
 			} catch (e:Unsupported) {
 				skipped.push({
@@ -279,7 +281,8 @@ class Backend {
 			bytes: emitter.finish(),
 			compiled: compiled,
 			skipped: skipped,
-			globals: emitter.globalUses
+			globals: emitter.globalUses,
+			mentions: mentions
 		};
 		#else
 		var skipped:Array<Skip> = [];
@@ -507,6 +510,9 @@ class Backend {
 		if (whole && retryWithoutJit(result, group, env, report))
 			return;
 
+		if (group.length > 1 && narrowOnFailure && leaveOut(group, result, fault, env, report))
+			return;
+
 		if (group.length == 1 || !narrowOnFailure) {
 			for (module in group)
 				rejected(module.name, fault, group.length > 1);
@@ -520,6 +526,112 @@ class Backend {
 		var mid:Int = group.length >> 1;
 		batch(group.slice(0, mid), env, report, false);
 		batch(group.slice(mid), env, report, false);
+	}
+
+	/**
+	 * Compiles a refused batch again without one module at a time, and keeps the first the loader takes.
+	 *
+	 * Split in halves instead, the batch loses its references across the cut: a half cannot name the
+	 * other's classes, so its modules that use them are left interpreted as `compiled elsewhere`, though
+	 * nothing is wrong with them. Without the culprit, the rest compiles as the one batch it was. A module that used the culprit is
+	 * left interpreted with it, as it has to be.
+	 *
+	 * The modules that write a name the loader's complaint holds are tried first, the most such names
+	 * first, so a link failure, which names what did not link, is usually found by the first attempt.
+	 * An attempt refused for a link fails before anything in it has started. When no single module is
+	 * to blame, the batch is split as before.
+	 *
+	 * @param group The refused batch.
+	 * @param result What it compiled to.
+	 * @param fault The loader's complaint.
+	 * @param env The world to bind into.
+	 * @param report The report being filled.
+	 * @return Whether a batch without one module loaded.
+	 */
+	static function leaveOut(group:Array<Module>, result:Result, fault:String, env:Environment, report:Report):Bool {
+		for (culprit in suspects(group, result, fault)) {
+			var rest:Array<Module> = [for (module in group) if (module != culprit) module];
+			var inputs:Array<Unit> = [
+				for (module in rest)
+					{
+						name: module.name,
+						decls: module.decls,
+						scope: module.interp,
+						key: module.path
+					}
+			];
+
+			var attempt:Result = compile(inputs, ambient.concat(aliases(rest)), outside(rest, env), statics);
+			if (attempt.bytes == null || load(attempt, rest, env, report) != null)
+				continue;
+
+			report.bytes += attempt.bytes.length;
+			collect(attempt, report);
+			rejected(culprit.name, fault, false);
+			report.failed.push({name: culprit.name, reason: fault});
+			return true;
+		}
+
+		return false;
+	}
+
+	/**
+	 * A refused batch's modules, those that write the most names the loader's complaint holds first.
+	 *
+	 * A name counts when the complaint has it whole, between characters no name has, so a short string
+	 * a module happens to write does not count for being part of a longer word.
+	 *
+	 * @param group The refused batch.
+	 * @param result What it compiled to, with what each module writes.
+	 * @param fault The loader's complaint.
+	 * @return The modules that compiled, in the order to leave them out.
+	 */
+	static function suspects(group:Array<Module>, result:Result, fault:String):Array<Module> {
+		var scored:Array<{module:Module, score:Int, at:Int}> = [];
+
+		for (i in 0...group.length) {
+			var module:Module = group[i];
+			if (result.compiled.indexOf(module.name) < 0)
+				continue;
+
+			var score:Int = 0;
+			var names:Null<Array<String>> = result.mentions.get(module.name);
+			if (names != null)
+				for (name in names)
+					if (named(fault, name))
+						score++;
+
+			scored.push({module: module, score: score, at: i});
+		}
+
+		scored.sort(function(a, b) return a.score != b.score ? b.score - a.score : a.at - b.at);
+		return [for (entry in scored) entry.module];
+	}
+
+	/** Whether a complaint holds a name whole, between characters that are no part of a name. */
+	static function named(fault:String, name:String):Bool {
+		if (name.length < 3)
+			return false;
+
+		var at:Int = fault.indexOf(name);
+		while (at >= 0) {
+			var before:String = at == 0 ? '' : fault.charAt(at - 1);
+			var after:String = fault.charAt(at + name.length);
+			if (!nameChar(before) && !nameChar(after))
+				return true;
+			at = fault.indexOf(name, at + 1);
+		}
+
+		return false;
+	}
+
+	/** Whether a character can be part of an identifier. A dot separates names, so it is not one. */
+	static function nameChar(c:String):Bool {
+		if (c == '')
+			return false;
+		var code:Int = c.charCodeAt(0);
+		return (code >= 'a'.code && code <= 'z'.code) || (code >= 'A'.code && code <= 'Z'.code)
+			|| (code >= '0'.code && code <= '9'.code) || code == '_'.code;
 	}
 
 	/**

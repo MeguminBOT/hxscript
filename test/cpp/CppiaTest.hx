@@ -41,6 +41,9 @@ class CppiaTest {
 	/** The abstract over a class, which is the shape every geometry type in a framework has. */
 	@:keep static var vec:HostVec = null;
 
+	/** An enum abstract with no wrapper, whose values a module writes and the loader cannot link. */
+	@:keep static var autoSize:HostAutoSize = HostAutoSize.CENTER;
+
 	public static function run():Void {
 		/**
 		 * On by default, because it is a different code path: an expression the JIT has no generator

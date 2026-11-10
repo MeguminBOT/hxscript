@@ -761,10 +761,28 @@ class Emitter {
 	/**
 	 * Re-resolves short names the way the module being emitted sees them.
 	 *
+	 * A class of the module's package that another batch holds is named as one, so a use of it is
+	 * refused as `compiled elsewhere`. Unknown, the name was compiled as a lookup that answered
+	 * nothing, and calling through it failed with `Null Function` once the module ran.
+	 *
 	 * @param decls The declarations of the module about to be emitted.
 	 */
 	function ownView(decls:Array<ModuleDecl>):Void {
 		var pack:String = '';
+
+		for (decl in decls)
+			switch (decl.d) {
+				case DPackage(path):
+					pack = path.join('.');
+				case _:
+			}
+
+		for (full in external.keys()) {
+			var dot:Int = full.lastIndexOf('.');
+			var short:String = full.substr(dot + 1);
+			if ((dot < 0 ? '' : full.substr(0, dot)) == pack && !typePaths.exists(short))
+				typePaths.set(short, full);
+		}
 
 		for (decl in decls) {
 			switch (decl.d) {
@@ -5011,6 +5029,11 @@ class Emitter {
 	/** Classes from this batch that the emitted code names. */
 	public function references():Array<String> {
 		return refs;
+	}
+
+	/** Every string and type written so far, for matching a loader's complaint to a module. */
+	public function mentions():Array<String> {
+		return w.names();
 	}
 
 	/** Whether a name is a constructor of an enum this batch declares. */
