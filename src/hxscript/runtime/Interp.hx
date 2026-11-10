@@ -4389,8 +4389,9 @@ class Interp {
 		var c = TypeTools.resolve(cl, environment);
 
 		if (c == null) {
-			// Unless the module imported a class of that name: `Map` is then that class.
-			if ((cl == 'Map' || cl == 'haxe.ds.Map') && !imports.exists(cl))
+			// Unless the module imported a class of that name, or its package has one: `Map` is then
+			// that class.
+			if ((cl == 'Map' || cl == 'haxe.ds.Map') && !imports.exists(cl) && packageType(cl) == null)
 				return new AnyMap();
 
 			c = resolve(cl);
