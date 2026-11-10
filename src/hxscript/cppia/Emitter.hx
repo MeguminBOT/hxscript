@@ -102,6 +102,12 @@ class Emitter {
 	/** Full path for each short type name in view, from imports, declarations and ambient types. */
 	var typePaths:StringMap<String>;
 
+	/** The short names the module being read bound by its imports, in the order it wrote them. */
+	var importedNames:Array<String> = [];
+
+	/** What each of `importedNames` named before the import, null for nothing. */
+	var importedBefore:Array<Null<String>> = [];
+
 	/** How many typedef hops to follow before giving up, so a cycle cannot spin. */
 	static inline var TYPEDEF_DEPTH:Int = 8;
 
@@ -462,6 +468,8 @@ class Emitter {
 	public function declare(decls:Array<ModuleDecl>, moduleName:String = null):Void {
 		var pack:String = '';
 
+		forgetImports();
+
 		for (decl in decls) {
 			switch (decl.d) {
 				case DField(m):
@@ -765,6 +773,8 @@ class Emitter {
 	 */
 	function ownView(decls:Array<ModuleDecl>):Void {
 		var pack:String = '';
+
+		forgetImports();
 
 		for (decl in decls) {
 			switch (decl.d) {
@@ -4785,8 +4795,35 @@ class Emitter {
 			}
 		}
 
+		importedNames.push(short);
+		importedBefore.push(typePaths.get(short));
+
 		typePaths.set(short, full);
 		bindConstructors(full);
+	}
+
+	/**
+	 * Takes the previous module's imports out of the short names, before another module is read.
+	 *
+	 * The table is the whole batch's, and an import stayed in it for every module read afterwards:
+	 * one module importing a host class named `Map` made `Map` that class in the others, which built
+	 * it where they wrote a standard map and failed at their first `set`. Each name is put back to
+	 * what it named before the import, the last import first, since two may bind the same name.
+	 */
+	function forgetImports():Void {
+		var at:Int = importedNames.length;
+
+		while (at-- > 0) {
+			var before:Null<String> = importedBefore[at];
+
+			if (before == null)
+				typePaths.remove(importedNames[at]);
+			else
+				typePaths.set(importedNames[at], before);
+		}
+
+		importedNames.resize(0);
+		importedBefore.resize(0);
 	}
 
 	/**
