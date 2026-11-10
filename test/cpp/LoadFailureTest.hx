@@ -118,6 +118,8 @@ class LoadFailureTest {
 				'User$i', ['nlink'], 'User$i.hx'));
 		env.addModule(new Module('package nlink;\nclass Bad {\n\tpublic static function go():Int { return HostAutoSize.RIGHT; }\n}\n', 'Bad',
 			['nlink'], 'Bad.hx'));
+		env.addModule(new Module('package nlink;\nclass BadUser {\n\tpublic static function go():Int { return Bad.go(); }\n}\n', 'BadUser',
+			['nlink'], 'BadUser.hx'));
 		env.start();
 
 		// The JIT is not what is wrong here, and a batch refused with it off too would leave it off for
@@ -139,6 +141,10 @@ class LoadFailureTest {
 				+ (report.compiled.indexOf('nlink.Lib') >= 0 ? 'did' : 'did not'));
 		else
 			TestCase.ok('the library and every user of it still compiled', true);
+
+		// It names the refused module without an import, as a class of its package, so it has to stay
+		// interpreted with it rather than compile a call to nothing.
+		TestCase.ok('the module using the refused one is left interpreted', report.compiled.indexOf('nlink.BadUser') < 0);
 
 		var answer:Dynamic = call(env, 'nlink.User3');
 		if (answer != 2)
