@@ -1807,10 +1807,15 @@ class Interp {
 	 * imported under that name, so the search happens once per name per interpreter and every later
 	 * read is the map lookup it would have been had the module written the import itself.
 	 *
+	 * An instance's interpreter has no package of its own: it asks its class's, which keeps what it
+	 * finds for every instance, since an instance stands on its class's imports.
+	 *
 	 * @param id The name.
 	 * @return The type the package holds under that name, or null when it holds none.
 	 */
 	public function packageType(id:String):Dynamic {
+		if (packagePath.length == 0 && ownerClass != null && ownerClass.interp != this)
+			return ownerClass.interp.packageType(id);
 		if (packagePath.length == 0 || id == null || id.length == 0)
 			return null;
 		if (!id.isTypeIdentifier() || packageMisses.exists(id))
