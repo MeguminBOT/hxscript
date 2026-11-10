@@ -47,6 +47,11 @@ class Writer {
 	/** Everything after the header: the tokens themselves. */
 	var body:StringBuf;
 
+	/** Every string and type the module names so far, which is what a loader's complaint can name. */
+	public function names():Array<String> {
+		return strings.concat(types);
+	}
+
 	/** Starts an empty module, with the pools seeded so index zero is the empty entry. */
 	public function new() {
 		strings = [];

@@ -16,4 +16,7 @@ class Result {
 
 	/** Host-bound names the compiled modules reached, and how each was spelled. */
 	public var globals:Array<GlobalUse> = [];
+
+	/** The strings and types each compiled module writes, by its name, to tell which a loader's complaint names. */
+	public var mentions:Map<String, Array<String>> = new Map();
 }

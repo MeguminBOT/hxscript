@@ -5013,6 +5013,11 @@ class Emitter {
 		return refs;
 	}
 
+	/** Every string and type written so far, for matching a loader's complaint to a module. */
+	public function mentions():Array<String> {
+		return w.names();
+	}
+
 	/** Whether a name is a constructor of an enum this batch declares. */
 	function isEnumCtor(path:String, name:String):Bool {
 		var ctors:Null<StringMap<Bool>> = enumCtors.get(path);
