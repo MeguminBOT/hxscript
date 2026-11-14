@@ -2325,6 +2325,20 @@ class Emitter {
 
 		var asType:Null<String> = typeOf(obj);
 		if (asType != null) {
+			/**
+			 * A type its module declares beside the one it is named for, `haxe.ds.BalancedTree.TreeNode`:
+			 * the path up to it names a type too, and it was read as a static of that one, which the
+			 * loader could not link. Only through a path written with its package, which is where the
+			 * interpreter takes the longer path for a type.
+			 */
+			var beside:Null<String> = obj.e.match(EField(_, _, _)) ? secondaryType(asType, name) : null;
+			if (beside != null) {
+				w.pos(line);
+				w.token('CLASSOF');
+				useType(beside);
+				return;
+			}
+
 			emitStaticField(asType, name, pos);
 			return;
 		}
@@ -2333,12 +2347,16 @@ class Emitter {
 		 * A dotted path that names a type as a whole, `Std.isOfType(v, openfl.display.Sprite)`. Its head
 		 * is a package, not a value, so reading it as a field chain refused the module over the first
 		 * segment.
+		 *
+		 * The class is named as it is once built. A type that is not the one its module is named for
+		 * is written through that module, `haxe.Constraints.IMap`, and built without it, `haxe.IMap`:
+		 * under the path as written nothing answered, and the value was null.
 		 */
 		var whole:Null<String> = typeOf({e: EField(obj, name, false), pos: pos});
 		if (whole != null) {
 			w.pos(line);
 			w.token('CLASSOF');
-			useType(whole);
+			useType(moduleClasses.exists(whole) ? whole : nativePath(whole));
 			return;
 		}
 
@@ -5030,6 +5048,23 @@ class Emitter {
 	function isEnumCtor(path:String, name:String):Bool {
 		var ctors:Null<StringMap<Bool>> = enumCtors.get(path);
 		return ctors != null && ctors.exists(name);
+	}
+
+	/**
+	 * The host type a module declares beside the one it is named for.
+	 *
+	 * @param owner The type the module is named for, as a path.
+	 * @param name What is read on it.
+	 * @return The class as it is named once built, or null when the module declares no such type.
+	 */
+	function secondaryType(owner:String, name:String):Null<String> {
+		if (moduleClasses.exists(owner) || !hxscript.types.TypeTools.isTypeIdentifier(name))
+			return null;
+
+		var path:String = owner + '.' + name;
+		var infos:Array<hxscript.types.TypeCollection.TypeInfo> = hxscript.types.TypeCollection.main.fromPath(path,
+			false);
+		return (infos == null || infos.length == 0) ? null : nativePath(path);
 	}
 
 	/** The type an expression names, when it names one rather than producing a value. */
