@@ -29,6 +29,7 @@ class AllCommon {
 		{name: 'ParentTest', run: ParentTest.run},
 		{name: 'PrinterTest', run: PrinterTest.run},
 		{name: 'RangeTest', run: RangeTest.run},
+		{name: 'RegexTest', run: RegexTest.run},
 		{name: 'ReturnTest', run: ReturnTest.run},
 		{name: 'ScriptedAbstractTest', run: ScriptedAbstractTest.run},
 		{name: 'StructTest', run: StructTest.run},

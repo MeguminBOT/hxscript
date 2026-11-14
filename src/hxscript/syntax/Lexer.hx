@@ -386,6 +386,44 @@ class Lexer {
 	}
 
 	/**
+	 * Writes an escape of a regular-expression literal to the pattern, as Haxe's lexer does.
+	 *
+	 * Only `\/`, `\n`, `\r` and `\t` are decoded. The others are the regular expression's own
+	 * (`\d`, `\.`, `\\`) and reach the pattern with their backslash.
+	 *
+	 * @param c The character following the backslash.
+	 * @param p The buffer holding the pattern.
+	 */
+	inline function parseRegexEscape(c:Int, p:StringBuf) {
+		switch (c) {
+			case '/'.code:
+				p.addChar(c);
+			case 'n'.code:
+				p.addChar('\n'.code);
+			case 'r'.code:
+				p.addChar('\r'.code);
+			case 't'.code:
+				p.addChar('\t'.code);
+			case '\\'.code, '$'.code, '.'.code, '*'.code, '+'.code, '^'.code, '|'.code, '{'.code, '}'.code, '['.code,
+				']'.code, '('.code, ')'.code, '?'.code, '-'.code, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 'w'.code,
+				'W'.code, 'b'.code, 'B'.code, 's'.code, 'S'.code, 'd'.code, 'D'.code, 'x'.code:
+				p.addChar('\\'.code);
+				p.addChar(c);
+			case 'u'.code, 'U'.code:
+				p.addChar('\\'.code);
+				p.addChar(c);
+				for (i in 0...4) {
+					var digit = readChar();
+					if (!((digit >= 48 && digit <= 57) || (digit >= 65 && digit <= 70) || (digit >= 97 && digit <= 102)))
+						invalidChar(digit);
+					p.addChar(digit);
+				}
+			default:
+				invalidChar(c);
+		}
+	}
+
+	/**
 	 * Reads a `~/.../flags` regular-expression literal.
 	 *
 	 * @return The regex token.
@@ -410,7 +448,7 @@ class Lexer {
 
 			if (esc) {
 				esc = false;
-				parseEscape(c, p, old);
+				parseRegexEscape(c, p);
 			} else if (c == '\\'.code) {
 				esc = true;
 			} else if (c == '/'.code) {
