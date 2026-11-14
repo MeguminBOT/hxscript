@@ -1373,7 +1373,7 @@ class Emitter {
 			case EArray(arr, index):
 				var known:Null<String> = inferType(arr);
 
-				if (isMapType(known)) {
+				if (keyed(arr, index)) {
 					w.pos(line);
 					w.token('CALL');
 					w.int(2);
@@ -1739,7 +1739,7 @@ class Emitter {
 			 * `Indexing.set`, which answers the value stored, as the assignment does.
 			 */
 			switch (e1.e) {
-				case EArray(map, key) if (isMapType(inferType(map))):
+				case EArray(map, key) if (keyed(map, key)):
 					w.pos(line);
 					w.token('CALL');
 					w.int(3);
@@ -5011,12 +5011,28 @@ class Emitter {
 	}
 
 	/** Whether an expression can be evaluated again without changing anything. */
-	/** Whether `e` is an entry of a value known to be a map, `map[key]`. */
+	/** Whether `e` is an entry read by its key, `map[key]`. */
 	function mapEntry(e:Expr):Bool {
 		return switch (e.e) {
-			case EArray(map, _): isMapType(inferType(map));
+			case EArray(map, key): keyed(map, key);
 			case _: false;
 		}
+	}
+
+	/**
+	 * Whether `receiver[index]` is read by a key rather than by a position.
+	 *
+	 * It is when the receiver is known to be a map, and when the index is a `String`: no array takes
+	 * one, so whatever the receiver was declared as, `Dynamic` or a host type that holds a map, it
+	 * is asked as the interpreter asks it. Written as an array's, the read answered null or threw
+	 * `Bad int convert`, and the write threw `Bad String conversion type`.
+	 *
+	 * @param receiver What is read from or written to.
+	 * @param index What it is read at.
+	 * @return True when `Indexing` is to answer.
+	 */
+	function keyed(receiver:Expr, index:Expr):Bool {
+		return isMapType(inferType(receiver)) || inferType(index) == 'String';
 	}
 
 	function sideEffectFree(e:Expr):Bool {

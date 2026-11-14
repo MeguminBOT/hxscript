@@ -440,6 +440,14 @@ class Corpus {
 		');
 		check('map made with its types, indexed', 'var m = new Map<String, Int>(); m["a"] = 3; return m["a"];', '3');
 		check('map made with int keys, indexed', 'var m = new Map<Int, String>(); m[2] = "x"; return m[2];', 'x');
+
+		// A text key reads an entry by its key whatever the receiver was declared as: no array takes
+		// one, and written as an array's the read answered null or threw and the write threw.
+		var held:String = 'var d:Dynamic = ["a" => 1]; ';
+		check('untyped map entry read by a text key', held + 'return d["a"];', '1');
+		check('untyped map entry written by a text key', held + 'd["b"] = 2; return d.get("b");', '2');
+		check('untyped map entry by a key held in a local', held + 'var k:String = "a"; d[k] += 4; return d[k];', '5');
+		check('untyped array still read by its position', 'var d:Dynamic = [5, 6]; var i:Int = 1; return d[i] + d[0];', '11');
 		check('key-value for over map',
 			"var m = ['a' => 1, 'b' => 2]; var t = 0; for (k => v in m) t += v; return t;", '3');
 		check('key-value for keys', "var m = ['a' => 1]; var s = ''; for (k => v in m) s += k; return s;", 'a');
