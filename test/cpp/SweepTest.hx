@@ -87,6 +87,7 @@ class SweepTest {
 			['closureOverWhileVar', 'var fs:Array<Void->Int> = []; var i:Int = 0; while (i < 3) { var k:Int = i; fs.push(function():Int return k); i++; } return Std.string(fs[0]() + fs[2]());', '2', ''],
 			['nestedClosureCapture', 'var n:Int = 1; var outer = function():Int { var inner = function():Int { n += 4; return n; }; return inner() + n; }; return Std.string(outer());', '10', ''],
 			['recursion', 'return Std.string(fib(10));', '55', '\tstatic function fib(n:Int):Int { return n < 2 ? n : fib(n - 1) + fib(n - 2); }\n'],
+			['regexEscapes', 'var r:EReg = ~/^(\\w+)\\.png$/; return r.match(\'panel_12.png\') ? r.matched(1) : \'no\';', 'panel_12', ''],
 
 			['doWhile', 'var i:Int = 0; var t:Int = 0; do { t += i; i++; } while (i < 3); return Std.string(t);', '3', ''],
 			['doWhileRunsOnce', 'var t:Int = 0; do { t = 9; } while (false); return Std.string(t);', '9', ''],
