@@ -1322,6 +1322,9 @@ class Emitter {
 				emitBinop(op, e1, e2, e.pos);
 
 			case EUnop(op, prefix, inner):
+				if ((op == '++' || op == '--') && !repeatableField(inner) && mapEntry(inner))
+					throw new Unsupported(op + ' on a map entry whose map or key is not read twice safely', e.pos);
+
 				if ((op == '++' || op == '--') && repeatableField(inner)) {
 					var step:String = op == '++' ? '+' : '-';
 					var back:String = op == '++' ? '-' : '+';
@@ -1370,7 +1373,7 @@ class Emitter {
 			case EArray(arr, index):
 				var known:Null<String> = inferType(arr);
 
-				if (isMapType(known)) {
+				if (keyed(arr, index)) {
 					w.pos(line);
 					w.token('CALL');
 					w.int(2);
@@ -1730,6 +1733,27 @@ class Emitter {
 				return;
 			}
 
+			/**
+			 * A map entry is read through `Indexing.get`, a call, and a call is nowhere `SET` can
+			 * store: the loader refused the whole module with `Bad Set expr`. It is written through
+			 * `Indexing.set`, which answers the value stored, as the assignment does.
+			 */
+			switch (e1.e) {
+				case EArray(map, key) if (keyed(map, key)):
+					w.pos(line);
+					w.token('CALL');
+					w.int(3);
+					w.pos(line);
+					w.token('FSTATIC');
+					w.type('hxscript.runtime.Indexing');
+					w.str('set');
+					expr(map);
+					expr(key);
+					boolean(e2, line);
+					return;
+				case _:
+			}
+
 			w.pos(line);
 			w.token('SET');
 			writingTo = true;
@@ -1806,6 +1830,10 @@ class Emitter {
 				emitBinop('=', e1, {e: EBinop(op.substr(0, op.length - 1), e1, e2), pos: pos}, pos);
 				return;
 			}
+
+			if (mapEntry(e1))
+				throw new Unsupported('a compound assignment to a map entry whose map or key is not read twice safely',
+					pos);
 
 			w.pos(line);
 			w.token(op);
@@ -4953,6 +4981,13 @@ class Emitter {
 	/** Whether an increment target can be evaluated twice, which the long-hand rewrite needs. */
 	function repeatableField(e:Expr):Bool {
 		switch (e.e) {
+			/**
+			 * A map entry is written by a call, so `+=` and `++` on one go through the rewrite into a
+			 * plain assignment too. That reads the map and the key twice, which only names may do.
+			 */
+			case EArray(map, key) if (mapEntry(e)):
+				return sideEffectFree(map) && sideEffectFree(key);
+
 			case EField(obj, _, maybe):
 				if (maybe == true)
 					return false;
@@ -4976,6 +5011,30 @@ class Emitter {
 	}
 
 	/** Whether an expression can be evaluated again without changing anything. */
+	/** Whether `e` is an entry read by its key, `map[key]`. */
+	function mapEntry(e:Expr):Bool {
+		return switch (e.e) {
+			case EArray(map, key): keyed(map, key);
+			case _: false;
+		}
+	}
+
+	/**
+	 * Whether `receiver[index]` is read by a key rather than by a position.
+	 *
+	 * It is when the receiver is known to be a map, and when the index is a `String`: no array takes
+	 * one, so whatever the receiver was declared as, `Dynamic` or a host type that holds a map, it
+	 * is asked as the interpreter asks it. Written as an array's, the read answered null or threw
+	 * `Bad int convert`, and the write threw `Bad String conversion type`.
+	 *
+	 * @param receiver What is read from or written to.
+	 * @param index What it is read at.
+	 * @return True when `Indexing` is to answer.
+	 */
+	function keyed(receiver:Expr, index:Expr):Bool {
+		return isMapType(inferType(receiver)) || inferType(index) == 'String';
+	}
+
 	function sideEffectFree(e:Expr):Bool {
 		switch (e.e) {
 			case EIdent(_):
@@ -5391,7 +5450,10 @@ class Emitter {
 				return null;
 
 			case ENew(cl, _):
-				return typePaths.exists(cl) ? typePaths.get(cl) : null;
+				if (typePaths.exists(cl))
+					return typePaths.get(cl);
+				// `new Map<K, V>()` arrives as the map class its key selected, which no import names.
+				return isMapType(cl) ? cl : null;
 
 			case EBinop(op, _, _) if (COMPARISONS.indexOf(op) >= 0):
 				return 'Bool';

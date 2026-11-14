@@ -425,6 +425,29 @@ class Corpus {
 		check('map literal, int keys', 'var m = [1 => "x", 2 => "y"]; return m.get(2);', 'y');
 		check('map literal, exists', "var m = ['a' => 1]; return m.exists('a') && !m.exists('b') ? 'ok' : 'no';", 'ok');
 		check('map literal, empty then set', "var m = ['a' => 1]; m.set('c', 9); return Std.string(m.get('c'));", '9');
+		// A map entry is read and written through calls: written straight, the loader refused the
+		// module, and a map made with `new Map<K, V>()` was indexed as an array, reading null.
+		var made:String = 'var m:Map<String, Int> = new haxe.ds.StringMap(); ';
+		check('map entry written', made + 'm["a"] = 3; return m.get("a");', '3');
+		check('map entry written, as a value', made + 'var v = (m["a"] = 7); return v;', '7');
+		check('map entry added to', made + 'm["a"] = 3; m["a"] += 2; return m["a"];', '5');
+		check('map entry incremented',
+			made + 'm["a"] = 3; var old = m["a"]++; var now = ++m["a"]; return old + "," + now;', '3,5');
+		check('map field entry written', 'return new T().write();', '5', '
+			var m:Map<String, Int> = new haxe.ds.StringMap();
+			public function new() {}
+			public function write():Int { m["a"] = 4; m["a"] += 1; return m.get("a"); }
+		');
+		check('map made with its types, indexed', 'var m = new Map<String, Int>(); m["a"] = 3; return m["a"];', '3');
+		check('map made with int keys, indexed', 'var m = new Map<Int, String>(); m[2] = "x"; return m[2];', 'x');
+
+		// A text key reads an entry by its key whatever the receiver was declared as: no array takes
+		// one, and written as an array's the read answered null or threw and the write threw.
+		var held:String = 'var d:Dynamic = ["a" => 1]; ';
+		check('untyped map entry read by a text key', held + 'return d["a"];', '1');
+		check('untyped map entry written by a text key', held + 'd["b"] = 2; return d.get("b");', '2');
+		check('untyped map entry by a key held in a local', held + 'var k:String = "a"; d[k] += 4; return d[k];', '5');
+		check('untyped array still read by its position', 'var d:Dynamic = [5, 6]; var i:Int = 1; return d[i] + d[0];', '11');
 		check('key-value for over map',
 			"var m = ['a' => 1, 'b' => 2]; var t = 0; for (k => v in m) t += v; return t;", '3');
 		check('key-value for keys', "var m = ['a' => 1]; var s = ''; for (k => v in m) s += k; return s;", 'a');
