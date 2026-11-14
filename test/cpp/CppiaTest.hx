@@ -159,6 +159,9 @@ class CppiaTest {
 		check('a catch variable named like a static', 'var h = new Sub(); return h.got;', 'static|thrown', '',
 			'import HostCatchName;\nclass Sub extends HostCatchName {\n\tpublic function new() { super(); }\n}');
 
+		check('a dotted script class as a value', 'return Type.getClassName(p.Sub) + "," + Std.isOfType(new Sub(), p.Sub);',
+			'p.Sub,true', '', 'class Sub {\n\tpublic function new() {}\n}');
+
 		TestCase.log('  refused by the emitter: ' + refused);
 	}
 

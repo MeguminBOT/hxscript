@@ -550,6 +550,15 @@ class Corpus {
 		check('is operator, false', 'var s:Dynamic = 5; return s is String;', 'false');
 		check('is operator on a scripted class', 'var v:Dynamic = new T(); return v is T;', 'true',
 			'public function new() {}');
+		check('a dotted host type as a value', 'return Type.getClassName(haxe.ds.StringMap);', 'haxe.ds.StringMap');
+		check('a dotted host type in isOfType', 'var m:Dynamic = new haxe.ds.StringMap<Int>(); return Std.isOfType(m, haxe.ds.StringMap);',
+			'true');
+		check('a dotted host type its module is not named for',
+			'var m:Dynamic = new haxe.ds.StringMap<Int>(); return Type.getClassName(haxe.Constraints.IMap) + "," + Std.isOfType(m, haxe.Constraints.IMap) + "," + (m is haxe.Constraints.IMap);',
+			'haxe.IMap,true,true');
+		check('a dotted host type beside the one its module is named for',
+			'var c:Dynamic = new other.Elsewhere.Ctx(); return Type.getClassName(other.Elsewhere.Ctx) + "," + Std.isOfType(c, other.Elsewhere.Ctx);',
+			'other.Ctx,true');
 
 		at('inheritance');
 		check('super call', 'return new Child().speak();', 'base then child', null,
