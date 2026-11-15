@@ -1372,12 +1372,10 @@ class Emitter {
 
 				if (isMapType(known)) {
 					w.pos(line);
-					w.token('CALL');
-					w.int(2);
-					w.pos(line);
-					w.token('FSTATIC');
+					w.token('CALLSTATIC');
 					w.type('hxscript.runtime.Indexing');
 					w.str('get');
+					w.int(2);
 					expr(arr);
 					expr(index);
 					return;
@@ -1715,12 +1713,10 @@ class Emitter {
 				}
 
 				w.pos(line);
-				w.token('CALL');
-				w.int(3);
-				w.pos(line);
-				w.token('FSTATIC');
+				w.token('CALLSTATIC');
 				w.type('Reflect');
 				w.str('setProperty');
+				w.int(3);
 				expr(target);
 				w.pos(line);
 				w.token('s');
@@ -2029,12 +2025,10 @@ class Emitter {
 					var named:Array<Expr> = [for (path in declaring) {e: EConst(CString(path, false)), pos: pos}];
 
 					w.pos(line);
-					w.token('CALL');
-					w.int(4);
-					w.pos(line);
-					w.token('FSTATIC');
+					w.token('CALLSTATIC');
 					w.type('hxscript.runtime.Using');
 					w.str('call');
+					w.int(4);
 					expr(obj);
 					expr({e: EArrayDecl(named), pos: pos});
 					expr({e: EConst(CString(name, false)), pos: pos});
@@ -2389,12 +2383,10 @@ class Emitter {
 		}
 
 		w.pos(line);
-		w.token('CALL');
-		w.int(2);
-		w.pos(line);
-		w.token('FSTATIC');
+		w.token('CALLSTATIC');
 		w.type('Reflect');
 		w.str('getProperty');
+		w.int(2);
 		expr(obj);
 		w.pos(line);
 		w.token('s');
