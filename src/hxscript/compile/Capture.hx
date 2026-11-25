@@ -340,8 +340,10 @@ class Capture {
 			case EReturn(inner):
 				f(inner);
 			case EMeta(_, margs, inner):
-				for (a in margs)
-					f(a);
+				// Null when the meta has no parentheses, as `@:privateAccess`.
+				if (margs != null)
+					for (a in margs)
+						f(a);
 				f(inner);
 			case EBlock(list) | EArrayDecl(list):
 				for (x in list)
@@ -443,7 +445,7 @@ class Capture {
 			case EUnop(op, pre, inner): EUnop(op, pre, rewrite(inner));
 			case EField(inner, fi, maybe): EField(rewrite(inner), fi, maybe);
 			case EReturn(inner): EReturn(rewrite(inner));
-			case EMeta(n, margs, inner): EMeta(n, [for (a in margs) rewrite(a)], rewrite(inner));
+			case EMeta(n, margs, inner): EMeta(n, margs == null ? null : [for (a in margs) rewrite(a)], rewrite(inner));
 			case EBlock(list): EBlock([for (x in list) rewrite(x)]);
 			case EArrayDecl(list): EArrayDecl([for (x in list) rewrite(x)]);
 			case EBinop(op, e1, e2): EBinop(op, rewrite(e1), rewrite(e2));

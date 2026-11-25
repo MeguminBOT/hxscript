@@ -532,6 +532,14 @@ class Corpus {
 		check('nested function', 'function inner(a:Int) return a + 1; return inner(4);', '5');
 		check('final local', 'final n = 4; return n * 2;', '8');
 		check('untyped passthrough', 'return untyped 5;', '5');
+
+		// A meta written without parentheses has no argument list at all, and the compiler's closure
+		// pass walked that list as if it were empty. It ended the whole batch on a null, every module
+		// in it included, rather than the one module that carried the meta.
+		check('a meta without arguments on a call', 'return @:privateAccess new Holder().secret();', '42', null,
+			'class Holder { public function new() {} function secret():Int return 42; }');
+		check('a meta without arguments on a host field', 'return @:privateAccess new HostBase().kept;', '0', null,
+			'import HostBase;');
 		check('multi catch', 'try { throw "x"; } catch (e:Int) { return "int"; } catch (e:String) { return "str"; }',
 			'str');
 		check('static extension', 'return "ab".startsWith("a") ? "y" : "n";', 'y', '', 'using StringTools;');
