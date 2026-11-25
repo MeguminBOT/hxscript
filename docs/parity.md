@@ -197,7 +197,9 @@ and never reaches that stage.
   `super(...)` at emit time against the recorded parameters, refusing only when the argument types do
   not decide it.
 - **No `@:structInit` or `@:multiType`.** `Map` is the one special-cased multi-type
-  (its implementation is picked from the key type). `@:op` and `@:arrayAccess` are honored on native
+  (its implementation is picked from the key type). An `openfl.Vector` the host hands over can be
+  indexed on hxcpp, since `hxscript.lib.openfl.VectorItems` gives its classes `__GetItem` and
+  `__SetItem`; one cannot be constructed. `@:op` and `@:arrayAccess` are honored on native
   abstracts only; see section 3.
 - **`inline` / `final` have no optimization effect**, they parse, but everything is interpreted.
   There is no constant folding, inlining, or dead-code elimination; expect interpreter-level
