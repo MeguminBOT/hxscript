@@ -1338,12 +1338,40 @@ class Scripted {
 					 * later `this` in that block means the receiver. Left as `this`, it is the instance,
 					 * so `scrollFactor.set` writes the sprite. Renaming the local, and the `this` after
 					 * it until the block ends, keeps the constructor rebuilt.
+					 *
+					 * Except where the typer kept the instance: the call's arguments are bound in the
+					 * same block, so in `byId.set(this.id, this)` both `this` of the arguments are the
+					 * instance, printed like the receiver. `instanceThis` holds where those are, less
+					 * any position the receiver also has: an implicit conversion moves the inlined body
+					 * onto the field it converts, so there both are at `id`, and the receiver wins.
 					 */
 					var receivers:Int = 0;
 
+					function thisKey(p:Position):String {
+						var info = Context.getPosInfos(p);
+						return info.file + ':' + info.min + ':' + info.max;
+					}
+
+					var instanceThis:Map<String, Bool> = [];
+					var receiverThis:Map<String, Bool> = [];
+
+					function findInstanceThis(t:TypedExpr):Void {
+						switch (t.expr) {
+							case TConst(TThis):
+								instanceThis.set(thisKey(t.pos), true);
+							case TLocal(v) if (v.name == 'this'):
+								receiverThis.set(thisKey(t.pos), true);
+							default:
+						}
+						haxe.macro.TypedExprTools.iter(t, findInstanceThis);
+					}
+					findInstanceThis(typedConstr);
+					for (key in receiverThis.keys())
+						instanceThis.remove(key);
+
 					function renameReceiver(e:Expr, to:Null<String>):Expr {
 						return switch (e.expr) {
-							case EConst(CIdent('this')) if (to != null):
+							case EConst(CIdent('this')) if (to != null && !instanceThis.exists(thisKey(e.pos))):
 								{pos: e.pos, expr: EConst(CIdent(to))};
 
 							case EBlock(exprs):

@@ -154,6 +154,9 @@ class CppiaTest {
 		check('a static field read in a host constructor', 'var h = new Sub(); return Std.string(h.chosen.span);', '8', '',
 			'import HostStaticRead;\nclass Sub extends HostStaticRead {\n\tpublic function new() { super(); }\n}');
 
+		check('an instance field passed to an inlined abstract method on a static', 'var h = new Sub(7); return h.id + "," + h.registered;',
+			'7,true', '', 'import HostInlinedReceiver;\nclass Sub extends HostInlinedReceiver {\n\tpublic function new(id:Int) { super(id); }\n}');
+
 		check('a field of this in a reprinted switch', 'var h = new Sub(0); return Std.string(h.width);', '10', '',
 			'import HostSwitchField;\nclass Sub extends HostSwitchField {\n\tpublic function new(mode:Int) { super(mode); }\n}');
 
