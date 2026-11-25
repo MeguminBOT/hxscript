@@ -58,6 +58,7 @@ class AbstractTest {
 
 		ok("cast constructs", eval("{ var v:OpVec = cast 7; v.raw; }") == "7");
 		ok("cast() constructs", eval("cast(7, OpVec).raw") == "7");
+		ok("cast() without a type constructs", eval("{ var v:OpVec = cast(7); v.raw; }") == "7");
 		ok("property reads", eval("{ var v:OpVec = cast 7; v.raw; }") == "7");
 		ok("static reads", eval("OpVec.ZERO.raw") == "0");
 		ok("method call", eval("{ var x:OpVec = cast 1; var y:OpVec = cast 2; x.add(y).raw; }") == "21");

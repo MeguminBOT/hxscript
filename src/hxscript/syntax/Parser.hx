@@ -859,11 +859,19 @@ class Parser extends Lexer {
 			case "cast":
 				var tk = token();
 				if (tk == TPOpen) {
+					var pp = tokenMin;
 					var e = parseExpr();
-					ensure(TComma);
-					var t = parseType();
-					ensure(TPClose);
-					mk(ECast(e, t), p1, tokenMax);
+					if (maybe(TPClose)) {
+						// No type: an unsafe cast of the parenthesized expression and what follows it, as
+						// Haxe reads it, so `cast(a) + 1` is `cast ((a) + 1)`.
+						var ep = parseExprNext(mk(EParent(e), pp, tokenMax));
+						mk(ECast(ep, type), p1, pmax(ep));
+					} else {
+						ensure(TComma);
+						var t = parseType();
+						ensure(TPClose);
+						mk(ECast(e, t), p1, tokenMax);
+					}
 				} else {
 					push(tk);
 					var e = parseExpr();
