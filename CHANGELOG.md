@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 2.1.0
+
+Fifty-six pull requests from Tutez64 and a handful of follow-ups. Almost all of it is compiled
+scripts and generated bridges now doing what the interpreter and Haxe already did, so a module that
+was refused, crashed or answered differently compiled now runs compiled and agrees. Where a change
+touches something that already worked, it says so below.
 
 ### Changed
 
@@ -16,6 +21,107 @@
   `apps/sandbox`'s setup installs libhxcpp 6.0.0 and runs its setup inside the sandbox's own haxelib
   repository, falling back to hxcpp when that fails; `HXSCRIPT_RUNTIME=hxcpp` asks for hxcpp outright.
   `patches/apply-hxcpp.py` recognises a libhxcpp checkout and changes nothing in it.
+- **A write or call through a null object raises `ENullAccess`.** It raised `EInvalidAccess` with a
+  hint about `private` and `Config.strictAccess`, which was wrong for it. The text is now
+  `Null access to field f`. A host matching on the kind or the message sees the change; `ENullAccess`
+  is the last constructor of `ErrorKind`, so every existing index keeps its value. Reads through null
+  still answer null unless `Config.strictNullAccess` is set (below).
+- **What a scripted class throws is reported through `Sink`**, as `Script` already did and
+  `embedding.md` said. With no listener these errors print once to stderr rather than through
+  `trace`, so a host that watched them through a redirected `trace` wants `Sink.listen`, and a host
+  that sets its own hook and never listens gets the stderr line as well.
+- **Every enum abstract of OpenFL's roots has a runtime form.** The preset named four by hand
+  (`BlendMode`, `CapsStyle`, `JointStyle`, `TextFormatAlign`); it now scans `openfl.display`,
+  `events`, `filters`, `geom`, `text` and `utils`, so `TextFieldAutoSize.RIGHT` and thirty-nine more
+  reach scripts. The abstracts that are not enumerations (`ByteArray`, `ChildAccess`, `Dictionary`,
+  `EventType`, `Object`, `ShaderData`) are left as they were. The scan also reads OpenFL's
+  `#if (haxe_ver >= 4.0) enum #else @:enum #end abstract` declarations, and a preset can leave
+  packages out of it with the new `abstractIgnore` field, which OpenFL's sets to its `_internal`
+  packages.
+- **A rebuilt constructor keeps the type of an argument with a default** when it is a class,
+  interface, enum, structure or function, so `for (k in m.keys())` over an optional `IMap` argument
+  compiles. `String` keeps the rule it had (typed for a literal default only), and basic types stay
+  untyped. In openfl's packages this changes the generated constructor of `ShaderJob` and
+  `AMF3Reader`, both over a class argument that defaults to null.
+- **Bridges are named apart when their names differ only in case.** hxcpp writes one file per
+  class, so on Windows and macOS `ScriptedWebSocketEvent` and `ScriptedWebsocketEvent` overwrote each
+  other and `__boot__.cpp` failed to compile. The second now takes its flattened path, as two
+  identical names already did.
+
+### Added
+
+- **`Config.strictNullAccess`**, off by default: a field read, write or call on a null object
+  raises, interpreted and compiled, and `?.` still reads null.
+- **A script can index an `openfl.Vector` it was handed**, on hxcpp, at native speed: `v[i]` read
+  null and `v[i] = x` wrote nowhere. `-D hxscript_no_vector_items` turns it off.
+- **`@:allow` on script classes**, for private members and `null` accessors.
+- **flixel's debugger console, watch expressions and console completion run on hxScript** when
+  hscript is not installed. `-D hxscript_no_flixel_console` leaves them off.
+- **`cast(e)` without a type** parses as an unsafe cast, as in Haxe: `var n:Int = cast(d);`,
+  `cast(d).length`.
+- **The escapes a regular expression has of its own**: `~/\d+/`, `\w`, `\s`, `\b`, `\.`, `\$`, back
+  references, `\x` and `\U` reach the pattern instead of being refused. The escapes a string also has
+  (`\n`, `\r`, `\t`, `\\`, `\"`, `\'`, and `\u` where JSON escapes are on) keep the reading they had,
+  so `~/^panel_\\d+$/`, the usual way around the refusal, still matches `panel_12`.
+- **Bridge scan flags**: `-D hxscript_bridge_exclude=<prefixes>` drops paths from a package,
+  classpath or all scan; `-D hxscript_bridge_classpath=<dirs>` walks `-cp` entries with an empty
+  package; `-D hxscript_bridge_eager` types each bridge before defining the next, for builds with a
+  few hundred bases.
+
+### Fixed
+
+Compiled scripts (cppia and the JIT):
+
+- A module refused, or ended the batch, over: a meta without arguments (`@:privateAccess new X()`);
+  a throw inside the emitter itself, which now costs only that module; a dotted path naming a type
+  used as a value (`Std.isOfType(v, openfl.display.Sprite)`, `haxe.Constraints.IMap`); a map entry
+  written by index (`m["a"] = 3`, `+=`, `++`). A host abstract `new` that nothing wrapped segfaulted
+  the JIT, and is now refused.
+- Wrong values: a local named like the method or outer local its initialiser reads
+  (`var value = value();`); a class without a constructor over a host class, which now gets the one
+  Haxe generates, and the member initialisers of a class that declares none; what a script base
+  declares taken for inherited; a bare host property read and written past its accessors
+  (`visible = false` in a `Sprite` subclass threw, `alpha = 0.5` skipped `set_alpha`); a `case` on an
+  inline, final or never-written static, which matched every value, while a plain `static var` stays
+  a capture as in Haxe; a map built with `new Map<K, V>()` indexed as an array; an entry read by a
+  `String` key through a `Dynamic` or a host type; `x = (h.f = 5)` giving null.
+- Modules of a batch are told apart by path, so two `Main`s in two packages are two modules, and a
+  module sees its package's types by bare name rather than another module's import.
+- A static initialiser that throws stays in its module: it no longer leaves the frame wound and
+  crashes the next static function, and no longer makes the loader refuse the whole batch.
+- The JIT comes back on when a batch is refused with and without it, and keeps its one retry for a
+  batch the JIT really refuses.
+
+The interpreter:
+
+- An instance's own class may write a field with a `null` setter, and an instance method sees its
+  class's package types by bare name.
+- Every static function is built before any static initialiser runs, so an initialiser may call a
+  function declared below it, in every mode.
+- `new Map()` in a module that imports a class named `Map` builds that class.
+
+Generated bridges, mostly constructors rebuilt from their base:
+
+- Package scans skip `@:generic` types and `Foo.macro.hx`. Bridges skip methods with `haxe.Rest`,
+  count an inline `toString`, map untyped parameters to `Dynamic`, and leave an unbound return
+  unannotated.
+- A rebuilt constructor is refused, rather than miscompiled, when it assigns through an extern
+  property setter or a final field, names a private type in its body or field initialisers, gives
+  two loop temps one name, or calls an abstract instance member. Plain abstract statics are no
+  longer refused.
+- It follows private import aliases, calls `std.Type` and `std.Reflect` by their std path, renames an
+  argument that hides a package path and the local `this` an inlined abstract method prints, keeps
+  the instance's `this` in that call's arguments (lime's `NativeTrayIcon`), drops only the nulls the
+  typer inserted, resolves bare names in a reprinted `switch` by position, qualifies an extractor's
+  names, loops over an abstract with an inline iterator (OpenFL's `Vector`), and infers the type of a
+  class held as a value.
+- The `-D hxscript_verbose` trace no longer prints the hand-written placeholder.
+
+### Performance
+
+- The four helpers the emitter writes for host field reads and writes, map indexing and `using`
+  calls are linked as statics instead of looked up by name on every call: about a third less time
+  for a compiled loop that reads or writes a host field.
 
 ## 2.0.6
 
