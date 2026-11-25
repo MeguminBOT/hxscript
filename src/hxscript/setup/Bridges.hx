@@ -61,6 +61,7 @@ class Bridges {
 		var pos:Position = Context.currentPos();
 		var pack:Array<String> = PACK.split('.');
 		var taken:Map<String, String> = [];
+		var takenFolded:Map<String, String> = [];
 
 		var every:Array<String> = [];
 		var listed:Map<String, Bool> = [];
@@ -107,16 +108,24 @@ class Bridges {
 				 * second was dropped with a warning nobody reads, so a scripted 3D project could not
 				 * exist. Whichever comes first keeps the short name, since bridges are indexed by the
 				 * base they extend rather than by what they are called and only a person reads these.
+				 *
+				 * Names are compared ignoring case, because hxcpp writes each class to a file named
+				 * after it and Windows and macOS do not tell `ScriptedWebSocketEvent.h` from
+				 * `ScriptedWebsocketEvent.h`. With AIR's `openfl.events.WebSocketEvent` beside openfl's
+				 * own `openfl.net._internal.websocket.WebsocketEvent`, one file overwrote the other and
+				 * `__boot__.cpp` named a class no header declared.
 				 */
-				if (taken.exists(name) && taken.get(name) != base)
+				if (takenFolded.exists(name.toLowerCase()) && takenFolded.get(name.toLowerCase()) != base)
 					name = 'Scripted' + flatten(base);
 
-				if (taken.exists(name)) {
-					Context.warning('hxscript: bridge name $name already taken by ${taken.get(name)}; skipping $base',
+				var folded:String = name.toLowerCase();
+				if (takenFolded.exists(folded)) {
+					Context.warning('hxscript: bridge name $name already taken by ${takenFolded.get(folded)}; skipping $base',
 						pos);
 					continue;
 				}
 				taken.set(name, base);
+				takenFolded.set(folded, base);
 
 				Context.defineModule('$PACK.$name', [
 					{
