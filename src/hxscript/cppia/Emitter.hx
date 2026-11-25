@@ -772,12 +772,30 @@ class Emitter {
 	}
 
 	/**
-	 * Re-resolves short names the way the module being emitted sees them.
+	 * Re-resolves short names the way the module being emitted sees them: its package's types, then
+	 * its imports, then its own, each over the one before, as Haxe does.
+	 *
+	 * The package's types go first because the table is the whole batch's: without them, a type of
+	 * the package the module names without an import was whatever the previous module saw under that
+	 * name, such as a class it imported from another package.
 	 *
 	 * @param decls The declarations of the module about to be emitted.
 	 */
 	function ownView(decls:Array<ModuleDecl>):Void {
 		var pack:String = '';
+
+		for (decl in decls)
+			switch (decl.d) {
+				case DPackage(path):
+					pack = path.join('.');
+				case _:
+			}
+
+		for (full in moduleClasses.keys()) {
+			var dot:Int = full.lastIndexOf('.');
+			if ((dot < 0 ? '' : full.substr(0, dot)) == pack)
+				typePaths.set(full.substr(dot + 1), full);
+		}
 
 		for (decl in decls) {
 			switch (decl.d) {

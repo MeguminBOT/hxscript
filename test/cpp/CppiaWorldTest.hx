@@ -155,8 +155,47 @@ class ShapeEntry {
 }
 ';
 
+	/**
+	 * A bare type name is the module's own type, else an imported one, else one of its package, as in
+	 * Haxe.
+	 *
+	 * Every type a batch declares was registered under its bare name, the last declared winning, and a
+	 * module only re-registered its own types and imports before being written. A type of its package
+	 * it names without an import was read as the last one of that name in the batch: `a.Main` built
+	 * `b.Panel`. Two mods that each have a `Panel` beside their `Main` are in that position.
+	 */
+	static function samePackage():Void {
+		var env:Environment = new Environment();
+		var add = (pack:String, name:String, code:String) -> env.addModule(new Module('package ' + pack + ';\n' + code, name,
+			pack.split('.'), pack.split('.').join('/') + '/' + name + '.hx'));
+		var panel = (tag:String) -> 'class Panel {\n\tpublic var tag:String;\n\tpublic function new() { tag = "' + tag + '"; }\n}\n';
+		var main = (imports:String) -> imports
+			+ 'class Main extends base.Mod {\n\tvar panel:Panel;\n\toverride public function init():Void {\n\t\tpanel = new Panel();\n\t}\n'
+			+ '\toverride public function tag():String {\n\t\treturn panel.tag;\n\t}\n'
+			+ '\tpublic static function go():String {\n\t\tvar main = new Main();\n\t\tmain.init();\n\t\treturn main.tag();\n\t}\n}\n';
+		add('base', 'Mod', 'class Mod {\n\tpublic function new() {}\n\tpublic function init():Void {}\n\tpublic function tag():String { return ""; }\n}\n');
+		// As a mod with its panel in a sub-package, then one with its panel beside its Main.
+		add('p.ui', 'Panel', panel('p'));
+		add('p', 'Main', main('import p.ui.Panel;\n'));
+		add('q', 'Panel', panel('q'));
+		add('q', 'Main', main(''));
+		// An import still wins over the package.
+		add('c', 'Panel', panel('c'));
+		add('c', 'Main', main('import p.ui.Panel;\n'));
+		env.start();
+
+		var answers = () -> [for (path in ['p.Main', 'q.Main', 'c.Main'])
+			try Reflect.callMethod(null, (cast env.resolve(path) : ScriptedClass).reflectGetField('go'), []) catch (e:Dynamic) 'threw: ' + e].join(',');
+		TestCase.eq('same package: interpreted', answers(), 'p,q,p');
+
+		var report = hxscript.compile.Compiler.compile(env);
+		TestCase.ok('same package: every Main compiled', ['p.Main', 'q.Main', 'c.Main'].filter(path -> report.compiled.indexOf(path) < 0).length == 0);
+		TestCase.eq('same package: compiled', answers(), 'p,q,p');
+	}
+
 	public static function run():Void {
 		cpp.cppia.Host.enableJit(true);
+		samePackage();
 
 		check('nothing compiled', [], false);
 		check('everything compiled', ['w.Tables', 'w.Worker', 'w.Entry'], true);
