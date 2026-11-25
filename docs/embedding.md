@@ -553,7 +553,7 @@ s.start();   // returns null, sets s.failed
 
 `e.message` is the message alone. `describeError` adds the **call stack** across script boundaries and
 into your own code, and passes a non-exception value through unchanged. A scripted class's own hooks
-(`onExpressionError`, `onInstanceError`, `onStaticError`) render through the same function.
+(`onExpressionError`, `onInstanceError`) render through the same function.
 
 These hooks are empty by default rather than tracing, because everything reaching them has already
 gone to the sink. If you print from one as well, either use `Sink.listen` or set `Sink.printing` to

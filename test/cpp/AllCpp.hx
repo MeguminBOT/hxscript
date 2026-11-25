@@ -26,7 +26,8 @@ class AllCpp {
 		{name: 'PropTest', run: PropTest.run},
 		{name: 'GlobalsTest', run: GlobalsTest.run},
 		{name: 'CatchNative', run: CatchNative.run},
-		{name: 'DceProbe', run: DceProbe.run}
+		{name: 'DceProbe', run: DceProbe.run},
+		{name: 'SafeHookTest', run: SafeHookTest.run}
 	];
 
 	public static function main():Void {

@@ -161,31 +161,7 @@ class Sandbox {
 	static function guard():Void {
 		for (cls in classes()) {
 			cls.safe = true;
-
-			cls.onInstanceError = function(error:Dynamic, fun:String, ?instance):Void {
-				report(error, '${cls.name}.$fun');
-			};
-
-			cls.onExpressionError = function(error:Dynamic, field:String, ?expr):Void {
-				report(error, '${cls.name}.$field');
-			};
 		}
-	}
-
-	/**
-	 * Reports something a scripted class threw.
-	 *
-	 * `Dynamic` rather than an exception, because a script may `throw` any value at all, and the one
-	 * that reaches here is whatever it chose.
-	 *
-	 * @param error What was thrown.
-	 * @param where Which method it came out of.
-	 */
-	static function report(error:Dynamic, where:String):Void {
-		if (Std.isOfType(error, haxe.Exception))
-			hxscript.error.Sink.caught(cast error, PRun, where);
-		else
-			hxscript.error.Sink.note(PRun, '$where: ' + Std.string(error));
 	}
 
 	/** Drops the loaded world, so nothing of it survives into the next project. */
