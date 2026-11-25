@@ -357,6 +357,9 @@ class Backend {
 
 		var scopes:Map<String, hxscript.runtime.Interp> = new Map();
 
+		for (input in inputs)
+			emitter.announce(input.decls);
+
 		for (input in inputs) {
 			emitter.declare(input.decls, moduleId(input));
 
