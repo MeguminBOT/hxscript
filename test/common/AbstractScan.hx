@@ -23,7 +23,10 @@ class AbstractScan {
 		{src: 'private enum abstract HiddenEnum(Int) {}', want: 'HiddenEnum'},
 		{src: 'extern abstract Ext(Int) {}', want: 'Ext'},
 		{src: '@:build(X.y()) private enum abstract Both(Int) {}', want: 'Both'},
-		{src: '\tenum abstract Indented(Int) {}', want: 'Indented'}
+		{src: '\tenum abstract Indented(Int) {}', want: 'Indented'},
+		{src: '#if (haxe_ver >= 4.0) enum #else @:enum #end abstract Guarded(Null<Int>) {}', want: 'Guarded'},
+		{src: '@SuppressWarnings("checkstyle:FieldDocComment") #if (haxe_ver >= 4.0) enum #else @:enum #end abstract Warned(String) {}',
+			want: 'Warned'}
 	];
 
 	/**

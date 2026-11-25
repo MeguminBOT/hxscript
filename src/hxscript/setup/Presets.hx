@@ -76,14 +76,30 @@ class Presets {
 		 */
 		types: ['hxscript.lib.openfl.SoundTools', 'openfl.Lib'],
 		bases: ['openfl.display.Sprite'],
-		abstractPackages: [],
-		abstracts: [
-			'openfl.display.BlendMode',
-			'openfl.display.CapsStyle',
-			'openfl.display.JointStyle',
-			'openfl.text.TextFormatAlign'
+		/**
+		 * Every enum abstract of the roots, found as flixel's are: listed by hand, only four had a
+		 * runtime form, and a script naming any other, such as `TextFieldAutoSize.RIGHT`, failed
+		 * interpreted and could not link compiled. The roots' other abstracts are left as they were:
+		 * they are no enumerations but types much of the API takes and returns, `EventType` and
+		 * `Dictionary` among them.
+		 */
+		abstractPackages: [
+			'openfl.display',
+			'openfl.events',
+			'openfl.filters',
+			'openfl.geom',
+			'openfl.text',
+			'openfl.utils'
 		],
-		abstractExclude: [],
+		abstracts: [],
+		abstractExclude: [
+			'openfl.display.ChildAccess',
+			'openfl.display.ShaderData',
+			'openfl.events.EventType',
+			'openfl.utils.ByteArray',
+			'openfl.utils.Dictionary',
+			'openfl.utils.Object'
+		],
 		globals: []
 	};
 
