@@ -566,14 +566,25 @@ The interpreter decides per evaluation, so compiled code has to decide the same 
 `hxscript.runtime.Indexing` does it. `hxscript.runtime.Using` does the same for a static extension on
 a receiver whose type is not known where the call is written.
 
+`hxscript.runtime.Fields` reads and writes a field of a host or `Dynamic` object by name, which is
+also where `Config.strictNullAccess` is checked.
+
 How they are reached is worth stating, because getting it wrong is silent. The emitter writes the
-call as `FSTATIC` with the helper's path directly:
+call as `CALLSTATIC` with the helper's path directly and the number of arguments:
 
 ```haxe
-w.token('FSTATIC');
+w.token('CALLSTATIC');
 w.type('hxscript.runtime.Indexing');
 w.str('get');
+w.int(2);
 ```
+
+The loader links that once, through the static function table `-D scriptable` gives the class, and
+the call goes straight to it. Written as `CALL` over `FSTATIC`, every call looked the static up by
+name, made a function object of it and called that dynamically, which cost about a third of a
+compiled loop that only reads a host field. That form is still what a static a script names itself
+gets, since nothing at that point knows how many arguments it declares, and `Indexing.set` keeps it
+too.
 
 Building the path as a field chain and pushing it through the ordinary expression path does not work
 the same way, and the failure it produces does not look like a wrong path.

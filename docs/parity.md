@@ -199,8 +199,23 @@ and never reaches that stage.
 - **No `@:structInit` or `@:multiType`.** `Map` is the one special-cased multi-type
   (its implementation is picked from the key type). An `openfl.Vector` the host hands over can be
   indexed on hxcpp, since `hxscript.lib.openfl.VectorItems` gives its classes `__GetItem` and
-  `__SetItem`; one cannot be constructed. `@:op` and `@:arrayAccess` are honored on native
-  abstracts only; see section 3.
+  `__SetItem` (`-D hxscript_no_vector_items` leaves them out); one cannot be constructed. `@:op` and
+  `@:arrayAccess` are honored on native abstracts only; see section 3.
+- **A field of a null object reads as null.** `var h:Hero = null; h.hp` answers `null` where Haxe
+  throws on most targets, because scripts rely on it, often as a cheap existence test. Interpreted, a
+  write or a call through null raises `Null access to field f` (`ENullAccess`); compiled, the write
+  goes nowhere. `Config.strictNullAccess` makes reads and writes raise in every mode, and `?.` still
+  reads null with it on.
+- **A static in a `case` is compared when Haxe would compare it.** `case F8:` over a
+  `static inline final F8 = 119`, a `final` or a `(default, never)` static matches that value. A plain
+  lower-case `static var` is a capture, as in Haxe. An upper-case one that is neither is compared
+  too, where Haxe stops with `Unknown identifier`.
+- **Regular-expression literals read escapes as before, plus their own.** The escapes a regular
+  expression has of its own (`\d`, `\w`, `\s`, `\b`, `\.`, `\$`, back references, `\x`, `\U`) reach
+  the pattern as in Haxe. The escapes a string also has keep a string's reading, which Haxe's lexer
+  does not give them: `\\` is one backslash, so `~/a\\d/` is the pattern `a\d`, where Haxe's is a
+  literal backslash then `d`, and `\"` and `\'` are accepted as the quote where Haxe refuses them.
+  `\u` takes four hexadecimal digits and gives the character.
 - **`inline` / `final` have no optimization effect**, they parse, but everything is interpreted.
   There is no constant folding, inlining, or dead-code elimination; expect interpreter-level
   performance.

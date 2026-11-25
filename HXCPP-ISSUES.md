@@ -54,25 +54,26 @@ what "covered" means.
 **hxcpp compiles its runtime into each project** either way, so anything built before applying keeps
 the old behaviour until it is rebuilt. Delete the binary rather than trusting a rebuild to notice.
 
-Issues 1, 2, 3 and 7 are covered. The rest have no patch yet.
+Issues 1, 2, 3 and 7 are covered, by libhxcpp and by both routes on hxcpp. The rest have no patch
+yet.
 
 **Issue 1's fix is required, not optional.** This library declares a `Bool` field with its real type
 by default, which is what makes a boolean read back as `true` in every mode including jitted. Against
 a stock hxcpp that field gets an integer slot instead. `-D hxscript_cppia_bool_compat` is the way out
 for a build that cannot patch: it emits no type and marks the value, which is right interpreted and
 still wrong jitted, because the jitted store of a boolean into an object slot is a separate fault
-that is not understood. So the choice is a patched hxcpp and agreement everywhere, or a stock one and
-agreement only while interpreting.
+that is not understood. So the choice is libhxcpp or a patched hxcpp and agreement everywhere, or a
+stock hxcpp and agreement only while interpreting.
 
 | # | issue | status |
 | --- | --- | --- |
-| 1 | A member field declared `Bool` never gets `fsBool` storage | patched on the fork, not upstream |
-| 2 | `DataVal<T>` does not report itself as a boolean to the JIT | patched on the fork, not upstream |
-| 3 | `convert` moves registers without a width, and the JIT refuses | patched on the fork, not upstream |
+| 1 | A member field declared `Bool` never gets `fsBool` storage | fixed in libhxcpp 6.0.0, patched on the fork |
+| 2 | `DataVal<T>` does not report itself as a boolean to the JIT | fixed in libhxcpp 6.0.0, patched on the fork |
+| 3 | `convert` moves registers without a width, and the JIT refuses | fixed in libhxcpp 6.0.0, patched on the fork |
 | 4 | `CallMember` trusts a vtable slot it did not verify, and segfaults | open, no patch |
 | 5 | `Type.getEnumConstructs` on a non-enum ends the process | open, avoided rather than fixed |
 | 6 | An hxcpp binary writing to `NUL` on Windows ends there | open, avoided rather than fixed |
-| 7 | A jitted `throw` never leaves the context, so the caller reads null | patched on the fork, not upstream |
+| 7 | A jitted `throw` never leaves the context, so the caller reads null | fixed in libhxcpp 6.0.0, patched on the fork |
 | 8 | A `Bool` put in a `Map` from a script comes back an `Int` | open, and it is Haxe's std rather than hxcpp |
 
 Everything listed here has been reproduced. Something suspected and not yet pinned down does not go

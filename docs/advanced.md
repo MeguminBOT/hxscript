@@ -158,10 +158,16 @@ All four are data, and the record is
     bases: ['mylib.Sprite'],      // step 2
     abstractPackages: ['mylib'],  // step 3, by scanning
     abstracts: [],                // step 3, by name
-    abstractExclude: [],
+    abstractExclude: [],          // abstracts under abstractPackages to leave unwrapped, by path
+    abstractIgnore: ['mylib._internal'], // optional: packages the step 3 scan skips, with what they hold
     globals: ['mylib.Game']       // OFFERED as a bare name; Boot.importGlobals() takes it
 }
 ```
+
+`abstractIgnore` is not `ignore`. `ignore` keeps packages away from steps 1 and 2, and a library can
+have abstracts scripts use in a package it does not want bridged: flixel ignores
+`flixel.system.debug`, where `LogStyle` lives. Leave it out unless a scanned package holds abstracts
+of the library's own workings, as OpenFL's `_internal` packages do.
 
 Steps 1 to 3 are the whole of what a preset is for, and `globals` is not one of them: it is a name
 pre-imported into the global scope of every script in the process, which shadows anything the host

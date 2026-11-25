@@ -31,19 +31,6 @@ script.variables.get("greeted");   // 1
 That is a working embed. If the build also has lime, openfl, flixel, flixel-addons, flixel-ui or
 heaps in it, that same line wires the library for scripting as well.
 
-On hxcpp, hxScript asks for [libhxcpp](https://github.com/openfl/libhxcpp), the continuation of
-hxcpp, as its C++ runtime. Installed and set up once, it stands in for hxcpp everywhere, with no
-change to the project:
-
-```
-haxelib install libhxcpp
-haxelib run libhxcpp setup
-```
-
-A build that links hxcpp instead still builds. It gets one warning naming what it misses, and the
-banner's `runtime` line says `fallback`. The flags under [Compiling at runtime](#compiling-at-runtime)
-silence the warning or make it an error.
-
 The build says so, once, in one block:
 
 ```
@@ -65,6 +52,24 @@ names the backend.
 **A compiled backend is opt-in on both targets that have one**, and a build meaning to have one and
 not having it is a program running scripts at a fraction of the speed it was measured at, with
 nothing anywhere saying so. That line says which of the two you got.
+
+An hxcpp build has one more line, `runtime`, naming the C++ runtime it links. hxScript asks for
+[libhxcpp](https://github.com/openfl/libhxcpp), the continuation of hxcpp, which carries the cppia
+fixes compiled scripts rely on. Installed and set up once, it stands in for hxcpp everywhere, with no
+change to the project:
+
+```
+haxelib install libhxcpp
+haxelib run libhxcpp setup
+```
+
+```
+     runtime  libhxcpp 6.0.0
+```
+
+A build that links hxcpp instead still builds. It gets one warning naming what it misses, and the
+line reads `hxcpp 4.3.0, fallback`. The flags under [Compiling at runtime](#compiling-at-runtime)
+silence the warning or make it an error.
 
 `-D hxscript_no_banner`, or `HXSCRIPT_NO_BANNER=1` in the environment, prints nothing. `NO_COLOR`
 keeps the block and drops the escapes. `-D hxscript_verbose` is separate and still prints the

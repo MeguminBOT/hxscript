@@ -251,6 +251,9 @@ so a refusal costs speed rather than behaviour.
 | a property with no field behind it, named inside its own accessor | Haxe rejects it too; compiled it would call the accessor from inside itself forever. `@:isVar` gives it a field and it compiles |
 | a `for (k => v in ...)` whose key or value is not a plain name | the pair is bound to a temporary and read by name, and there is nothing to bind a pattern to |
 | a `case` pattern that neither `SWITCH` nor the if-else rewrite can take | value cases, enum constructors, arrays, objects and nested shapes all can, so what is left is narrow |
+| `new` on a host abstract nothing wraps | it has no class at runtime. The JIT used to take the process down on it |
+| `+=`, `-=`, `++` and the like on a map entry whose map or key is not a plain name or constant | the entry is written through `Indexing.set`, and the rewrite into a plain assignment reads the map and the key twice |
+| a local closure that calls itself by its own name | `var f = function(n) ... f(n - 1)` captures `f` before it is assigned. It fails interpreted too, so the module runs interpreted and fails the same way |
 
 The emitter carries a handful of further `Unsupported` throws for operators and accessor keywords
 outside the set the parser produces. They are guards against a future parser change rather than
@@ -276,6 +279,12 @@ parameter shape for a `super(...)`, rather than padded from the right into the w
 **a host name the module never imported**, whether a secondary type of an imported module, an enum
 constructor or an enum-abstract constant, is now looked up in the world's type table, which is where
 the interpreter had been finding it all along.
+
+2.1.0 took several more off the list: a map entry written by index (`m["a"] = 3`, `+=`, `++`), which
+the loader refused as `Bad Set expr`; a dotted path naming a type used as a value
+(`Std.isOfType(v, openfl.display.Sprite)`); a meta without arguments, such as
+`@:privateAccess new X()`, which ended the whole batch; and a module the emitter itself threw on,
+which now costs that module alone.
 
 The evidence is the shared conformance corpus: 332 constructs offered to six columns, one per way
 of running a script, with `sh test/all.sh` collecting them and
