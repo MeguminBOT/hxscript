@@ -1733,6 +1733,10 @@ class Emitter {
 				return;
 			}
 
+			var inherited:Null<Expr> = hostInherited(e1);
+			if (inherited != null)
+				e1 = inherited;
+
 			var member:Null<Expr> = memberSetterCall(e1, e2, pos);
 			if (member != null) {
 				expr(member);
@@ -2665,6 +2669,11 @@ class Emitter {
 			return;
 		}
 
+		if (hostInherited({e: EIdent(v), pos: pos}) != null) {
+			expr({e: EField({e: EIdent('this'), pos: pos}, v, false), pos: pos});
+			return;
+		}
+
 		if (inheritedMember(v)) {
 			w.pos(line);
 			w.token('FNAME');
@@ -2698,6 +2707,48 @@ class Emitter {
 		}
 
 		throw new Unsupported('unresolved identifier ' + v, pos);
+	}
+
+	/**
+	 * `this.name` for a bare name that only a host base answers, so it is read and written the way
+	 * `this.name` is.
+	 *
+	 * A host base's property may have no storage behind it, such as `visible` on an OpenFL `Sprite`:
+	 * stored to by name, it threw `Invalid field`, and read by name it was not its getter's value,
+	 * where `this.visible` called its accessors. Only a property is rewritten: a plain field of the
+	 * host base, and a name a script base declares, keep their direct access.
+	 *
+	 * @param e The expression read or assigned to.
+	 * @return `this.name`, or null when the name is anything else.
+	 */
+	function hostInherited(e:Expr):Null<Expr> {
+		switch (e.e) {
+			case EIdent(v):
+				if (v == 'this' || v == 'true' || v == 'false' || v == 'null' || lookupVar(v) != null || enumOwning(v) != null
+					|| members.exists(v) || statics.exists(v) || moduleFields.exists(v) || typePaths.exists(v)
+					|| ambientMembers.exists(v) || importedFields.exists(v) || scriptBaseDeclares(v) || !inheritedMember(v)
+					|| inherited == null || !(inherited.exists('get_$v') || inherited.exists('set_$v')))
+					return null;
+				return {e: EField({e: EIdent('this'), pos: e.pos}, v, false), pos: e.pos};
+			case _:
+				return null;
+		}
+	}
+
+	/** Whether a script class up the chain declares the name, or might: one whose members are unknown. */
+	function scriptBaseDeclares(name:String):Bool {
+		var base:String = currentSuper;
+		var own:Null<String> = declaredClass(base);
+		var depth:Int = 0;
+		while (own != null && depth++ < 64) {
+			var declared:Null<StringMap<Bool>> = batchMembers.get(own);
+			if (declared == null || declared.exists(name) || declared.exists('get_$name') || declared.exists('set_$name'))
+				return true;
+
+			base = batchSupers.get(own);
+			own = declaredClass(base);
+		}
+		return false;
 	}
 
 	/**
@@ -5057,9 +5108,10 @@ class Emitter {
 				/**
 				 * A host-bound name is repeatable, which is what routes `+=` and `++` through the
 				 * rewrite into a plain assignment. Written straight they would be a `+=` token over a
-				 * call, which is not something the loader will assign to.
+				 * call, which is not something the loader will assign to. So is a member of a host
+				 * base, read and written as `this.name`.
 				 */
-				return members.exists(name) || statics.exists(name) || globalTarget(e) != null;
+				return members.exists(name) || statics.exists(name) || globalTarget(e) != null || hostInherited(e) != null;
 
 			case _:
 				return false;
