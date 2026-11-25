@@ -41,6 +41,9 @@ class CppiaTest {
 	/** The abstract over a class, which is the shape every geometry type in a framework has. */
 	@:keep static var vec:HostVec = null;
 
+	/** The same shape with nothing wrapping it for scripts, which is most of a framework's abstracts. */
+	@:keep static var bare:HostBare = null;
+
 	public static function run():Void {
 		/**
 		 * On by default, because it is a different code path: an expression the JIT has no generator
@@ -116,6 +119,16 @@ class CppiaTest {
 			colour);
 		check('a method on a host abstract, chained', 'var c:OpColor = OpColor.RED; return Std.string(c.red + c.alpha);', '510',
 			'', colour);
+		/**
+		 * An abstract nothing wrapped has no class for a `NEW` to make. Its name is in the type table, so
+		 * the emitter wrote one anyway, and the JIT dereferenced the null it resolved to while loading the
+		 * module and ended the process, this suite included. Refused, the module runs interpreted and
+		 * fails there the way it always did. Here rather than in the corpus because eval cannot run it:
+		 * constructing it there is a fatal `Instance prototype not found`, not a catchable error.
+		 */
+		check('a host abstract nothing wraps, constructed',
+			'try { var b = new HostBare(3); return "made"; } catch (e:Dynamic) { return "refused"; }', 'refused', '',
+			'import HostBare;');
 		check('a host abstract over a class, its accessor', 'var v = new HostVec(3, 4); return Std.string(v.length);', '5', '',
 			'import HostVec;');
 		check('a host abstract over a class, its method',
