@@ -28,7 +28,7 @@ class Abstracts {
 		for (lib in libs) {
 			for (pack in lib.abstractPackages)
 				for (dir in Context.getClassPath())
-					scan(dir + pack.split('.').join('/'), pack, exclude, wrapped, lib.ignore);
+					scan(dir + pack.split('.').join('/'), pack, exclude, wrapped, lib.abstractIgnore == null ? [] : lib.abstractIgnore);
 
 			for (path in lib.abstracts)
 				wrap(path, exclude, wrapped);
@@ -50,8 +50,8 @@ class Abstracts {
 	 * @param pack The package it holds.
 	 * @param exclude Paths to leave alone.
 	 * @param wrapped Collects what was wrapped.
-	 * @param ignore Packages the library keeps out of scripts' reach, left out with what they hold, as
-	 *        the bridges leave them: OpenFL's `_internal` ones hold abstracts of its own workings.
+	 * @param ignore Packages left out with what they hold, the library's `abstractIgnore`: OpenFL's
+	 *        `_internal` ones hold abstracts of its own workings.
 	 */
 	static function scan(dir:String, pack:String, exclude:Array<String>, wrapped:Array<String>, ignore:Array<String>):Void {
 		if (!FileSystem.exists(dir) || !FileSystem.isDirectory(dir))

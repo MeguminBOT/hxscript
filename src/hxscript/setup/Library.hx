@@ -68,6 +68,14 @@ typedef Library = {
 	var abstractExclude:Array<String>;
 
 	/**
+	 * Packages under `abstractPackages` the scan leaves out with what they hold, matched as `ignore` is.
+	 *
+	 * Not `ignore` itself: a preset's `ignore` keeps packages away from the bridges, and a library such
+	 * as flixel has abstracts scripts use in packages it does not bridge (`flixel.system.debug.log.LogStyle`).
+	 */
+	@:optional var abstractIgnore:Array<String>;
+
+	/**
 	 * Types scripts may name without importing them, which every shipped preset leaves empty.
 	 *
 	 * A preset says what a script *can* import. What is already imported into every script is a

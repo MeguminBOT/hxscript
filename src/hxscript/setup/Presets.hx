@@ -100,6 +100,12 @@ class Presets {
 			'openfl.utils.Dictionary',
 			'openfl.utils.Object'
 		],
+		abstractIgnore: [
+			'openfl._internal',
+			'openfl.utils._internal',
+			'openfl.display._internal',
+			'openfl.text._internal'
+		],
 		globals: []
 	};
 
