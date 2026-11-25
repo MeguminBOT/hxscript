@@ -324,6 +324,9 @@ class Emitter {
 	/** Its static fields, read the same way. */
 	var statics:StringMap<Bool>;
 
+	/** The statics of the class being emitted that a pattern compares rather than binds: inline, final or never written. */
+	var constantStatics:StringMap<Bool> = new StringMap();
+
 	/** Declared types of its instance fields. */
 	var memberTypes:StringMap<String>;
 
@@ -856,6 +859,7 @@ class Emitter {
 		}
 		members = new StringMap();
 		statics = new StringMap();
+		constantStatics = new StringMap();
 		memberTypes = new StringMap();
 		staticTypes = new StringMap();
 
@@ -869,6 +873,8 @@ class Emitter {
 
 			if (hasAccess(f, AStatic)) {
 				statics.set(f.name, isMethod);
+				if (hxscript.types.ScriptedClass.isConstantField(f))
+					constantStatics.set(f.name, true);
 				if (declared != null)
 					staticTypes.set(f.name, declared);
 			} else {
@@ -2972,9 +2978,10 @@ class Emitter {
 	 * The name a case binds, when its pattern is a bare identifier rather than a value to match.
 	 *
 	 * hxscript treats any such identifier as a capture that always matches and rebinds, so it cannot
-	 * be emitted as an equality test. `true`, `false` and `null` are literals, not captures, and a
-	 * static of the class, a module field or an imported one is a value to compare, as Haxe matches
-	 * an inline or read-only static and the interpreter compares it.
+	 * be emitted as an equality test. `true`, `false` and `null` are literals, not captures, and so
+	 * are a module field and an imported one, which the interpreter compares. A static of the class is
+	 * a value to compare when Haxe matches it as one (inline, final, or never written) or when its
+	 * name is upper-case; a plain lower-case `static var` stays a capture, as in Haxe.
 	 *
 	 * @param c The case to inspect.
 	 * @return The bound name, or null when the case matches by value.
@@ -2988,7 +2995,7 @@ class Emitter {
 						&& name != 'null'
 						&& !typePaths.exists(name)
 						&& enumOwning(name) == null
-						&& !statics.exists(name)
+						&& !(statics.exists(name) && (hxscript.types.TypeTools.isTypeIdentifier(name) || constantStatics.exists(name)))
 						&& !moduleFields.exists(name)
 						&& !importedFields.exists(name))
 						return name;

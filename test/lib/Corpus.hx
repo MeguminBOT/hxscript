@@ -376,6 +376,12 @@ class Corpus {
 			'static final F10 = 121; static function which(k:Int):String { switch (k) { case F10: return "f10"; default: return "other"; } }');
 		check('case on a static constant, as a value', 'return which(5) + "," + which(119);', 'other,f8',
 			'static inline final F8 = 119; static function which(k:Int):String return switch (k) { case F8: "f8"; default: "other"; }');
+		// A plain lower-case `static var` is not a constant to Haxe, so a bare name there is still a
+		// capture that takes every value, and the case body reads the capture.
+		check('case on a plain static var captures', 'var out = []; for (v in [1, 3, 5]) switch (v) { case mode: out.push(mode); } return out.join(",");',
+			'1,3,5', 'static var mode:Int = 3;');
+		check('case on a lower-case static final compares', 'return which(1) + "," + which(3);', '-,fin',
+			'static final fin:Int = 3; static function which(k:Int):String { switch (k) { case fin: return "fin"; default: return "-"; } }');
 		check('typed catch selects clause',
 			'try { throw "boom"; } catch (e:Int) { return "int"; } catch (e:String) { return "str"; }', 'str');
 		check('typed catch first match wins',

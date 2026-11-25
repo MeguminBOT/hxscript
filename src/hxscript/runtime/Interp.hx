@@ -2602,7 +2602,7 @@ class Interp {
 					 * A static of the class running, which Haxe matches as a constant when it is inline
 					 * or read-only: compared, not captured, and not an unknown name either.
 					 */
-					if (ownerClass != null && ownerClass.reflectHasField(id))
+					if (ownerClass != null && ownerClass.reflectHasField(id) && (id.isTypeIdentifier() || ownerClass.isConstantStatic(id)))
 						return matchValues(ownerClass.reflectGetField(id), match);
 
 					/**
