@@ -159,6 +159,7 @@ class Printer {
 			case EInvalidIterator(v): "Invalid iterator: " + v;
 			case EInvalidOp(op): "Invalid operator: " + op;
 			case EInvalidAccess(f): "Invalid access to field " + f;
+			case ENullAccess(f): "Null access to field " + f;
 			case ECustom(msg): msg;
 		};
 	}
