@@ -174,6 +174,8 @@ class CppiaTest {
 
 		check('a dotted script class as a value', 'return Type.getClassName(p.Sub) + "," + Std.isOfType(new Sub(), p.Sub);',
 			'p.Sub,true', '', 'class Sub {\n\tpublic function new() {}\n}');
+		check('a local named like the package of a dotted script class', 'var p:Dynamic = {Sub: 5}; return p.Sub;', '5', '',
+			'class Sub {\n\tpublic function new() {}\n}');
 
 		TestCase.log('  refused by the emitter: ' + refused);
 	}

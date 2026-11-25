@@ -5121,7 +5121,18 @@ class Emitter {
 
 			case EField(_, _, _):
 				var path:Null<String> = dottedPath(e);
-				if (path != null && moduleClasses.exists(path))
+				if (path == null)
+					return null;
+
+				/**
+				 * A chain whose first name is a value is a field of that value, whatever class of the batch
+				 * the whole path also names: `var p = {Sub: 5}; p.Sub` beside a class `p.Sub`.
+				 */
+				var root:String = path.substr(0, path.indexOf('.'));
+				if (lookupVar(root) != null || members.exists(root) || statics.exists(root) || moduleFields.exists(root))
+					return null;
+
+				if (moduleClasses.exists(path))
 					return path;
 				return hostTypePath(path);
 
