@@ -403,6 +403,21 @@ class Corpus {
 			'var a = 1; switch (a) { case 1 if (false): return "no"; default: return "d"; }', 'd');
 		check('case guard with multi value',
 			'var a = 3; switch (a) { case 1, 3 if (a > 2): return "hit"; default: return "miss"; }', 'hit');
+		// A bare name that is a static of the class is its value, not a capture: Haxe matches an inline
+		// or read-only static as a constant, and the interpreter compares it.
+		check('case on a static inline constant', 'return which(5) + "," + which(119) + "," + which(120);', 'other,f8,f9',
+			'static inline final F8 = 119; static inline final F9 = 120; '
+			+ 'static function which(k:Int):String { switch (k) { case F8: return "f8"; case F9: return "f9"; default: return "other"; } }');
+		check('case on a static final', 'return which(5) + "," + which(121);', 'other,f10',
+			'static final F10 = 121; static function which(k:Int):String { switch (k) { case F10: return "f10"; default: return "other"; } }');
+		check('case on a static constant, as a value', 'return which(5) + "," + which(119);', 'other,f8',
+			'static inline final F8 = 119; static function which(k:Int):String return switch (k) { case F8: "f8"; default: "other"; }');
+		// A plain lower-case `static var` is not a constant to Haxe, so a bare name there is still a
+		// capture that takes every value, and the case body reads the capture.
+		check('case on a plain static var captures', 'var out = []; for (v in [1, 3, 5]) switch (v) { case mode: out.push(mode); } return out.join(",");',
+			'1,3,5', 'static var mode:Int = 3;');
+		check('case on a lower-case static final compares', 'return which(1) + "," + which(3);', '-,fin',
+			'static final fin:Int = 3; static function which(k:Int):String { switch (k) { case fin: return "fin"; default: return "-"; } }');
 		check('typed catch selects clause',
 			'try { throw "boom"; } catch (e:Int) { return "int"; } catch (e:String) { return "str"; }', 'str');
 		check('typed catch first match wins',

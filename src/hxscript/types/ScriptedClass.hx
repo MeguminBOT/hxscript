@@ -801,6 +801,34 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 	}
 
 	/**
+	 * Whether a static this class declares is one a pattern compares, see `isConstantField`.
+	 *
+	 * @param name The static's name.
+	 * @return False for anything else, inherited statics included.
+	 */
+	public function isConstantStatic(name:String):Bool {
+		for (f in decl.fields)
+			if (f.name == name && f.access.indexOf(AStatic) >= 0)
+				return isConstantField(f);
+		return false;
+	}
+
+	/**
+	 * Whether a pattern compares a field rather than binding a new name over it, as Haxe decides: an
+	 * `inline` or `final` variable, or one whose setter is `never`. A plain `static var` is a capture
+	 * there, lower-case at least.
+	 *
+	 * @param f The field's declaration.
+	 * @return Whether it is a constant to compare.
+	 */
+	public static function isConstantField(f:FieldDecl):Bool {
+		return switch (f.kind) {
+			case KVar(v): v.isFinal == true || v.set == 'never' || f.access.indexOf(AInline) >= 0;
+			case _: false;
+		}
+	}
+
+	/**
 	 * Reflection over statics: whether a static field exists.
 	 *
 	 * @param field The field name.
