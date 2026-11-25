@@ -175,11 +175,13 @@ and never reaches that stage.
 
 - **Access control is partial.** `private` is enforced in typed mode (or when `Config.strictAccess` is
   set), but only for members marked `private` *explicitly*. **Unmarked members are public**, unlike
-  Haxe, where the default is stricter. `@:privateAccess` waives the check at the call site, as in
-  Haxe. See `checkAccess` in
+  Haxe, where the default is stricter. `@:privateAccess` waives the check at the call site, and
+  `@:allow` on the class or the member for the classes it names, as in Haxe; both also let a `null`
+  accessor through. A target is matched by its path, a package holding it, or its bare name, and a
+  member target lets its whole class through. See `checkAccess` in
   [`src/hxscript/runtime/Interp.hx`](../src/hxscript/runtime/Interp.hx).
-- **Custom metadata is inert.** Six are honored on a script's own declarations: `@:privateAccess`,
-  `@:bypassAccessor`, `@:snapshot` (on a static or on the class, for all of them), `@:safe`,
+- **Custom metadata is inert.** Seven are honored on a script's own declarations: `@:privateAccess`,
+  `@:allow`, `@:bypassAccessor`, `@:snapshot` (on a static or on the class, for all of them), `@:safe`,
   `@:enumAbstract` and `@:enum`. Anything else parses and does nothing, `@:keep` and `@:coreType`
   included: those two are read off *compiled* types by the build macros and mean nothing written in a
   script.

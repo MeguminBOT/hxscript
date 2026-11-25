@@ -5,6 +5,7 @@ import hxscript.proxy.TypeProxy;
 import hxscript.runtime.Interp;
 import hxscript.runtime.Variable;
 import hxscript.syntax.Expr;
+import hxscript.syntax.ExprTools;
 import hxscript.Environment;
 import hxscript.Module;
 
@@ -83,6 +84,12 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 	/** Members declared `private`, or null when the class declares none. */
 	public var privateFields(default, null):Array<String> = null;
 
+	/**
+	 * What `@:allow` names, by the member it sits on, `''` for one on the class itself. Null when the
+	 * class has none.
+	 */
+	var allowances:Map<String, Array<String>> = null;
+
 	/** The parsed class declaration. */
 	var decl:ClassDecl;
 
@@ -144,6 +151,14 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 				privateFields = [];
 			privateFields.push(field.name);
 		}
+
+		allowances = null;
+		for (meta in decl.meta)
+			allow('', meta);
+		for (field in decl.fields)
+			if (field.meta != null)
+				for (meta in field.meta)
+					allow(field.name, meta);
 
 		interp.environment = env;
 		interp.ownerClass = this;
@@ -416,6 +431,72 @@ class ScriptedClass implements IScriptedType implements ICustomReflection implem
 			return cast(ext, ScriptedClass).privateOwnerOf(field);
 
 		return null;
+	}
+
+	/**
+	 * Whether `@:allow` lets `caller` reach `field` of this class as if it were declared here.
+	 *
+	 * A target matches the caller's own path, a package holding it, or one of its members, which
+	 * lets the whole class through rather than that member alone. A target written without a package
+	 * matches by name, the way the declaring module would have imported it.
+	 *
+	 * @param caller The class the access is written in.
+	 * @param field The member being reached.
+	 * @return True if a class-wide or member `@:allow` names the caller.
+	 */
+	public function allows(caller:ScriptedClass, field:String):Bool {
+		if (allowances == null || caller == null)
+			return false;
+
+		for (key in ['', field]) {
+			var targets:Null<Array<String>> = allowances.get(key);
+			if (targets == null)
+				continue;
+
+			for (target in targets) {
+				if (target == caller.path || StringTools.startsWith(caller.path, target + '.')
+					|| StringTools.startsWith(target, caller.path + '.') || (target.indexOf('.') < 0 && target == caller.name))
+					return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Records the targets of one `@:allow` meta.
+	 *
+	 * @param member The member it sits on, `''` for the class.
+	 * @param meta Any meta; only `@:allow` is kept.
+	 */
+	function allow(member:String, meta:MetadataEntry):Void {
+		if (meta.name != ':allow' || meta.params == null)
+			return;
+
+		for (param in meta.params) {
+			var target:Null<String> = dotted(param);
+			if (target == null)
+				continue;
+
+			if (allowances == null)
+				allowances = new Map();
+			if (!allowances.exists(member))
+				allowances.set(member, []);
+			allowances.get(member).push(target);
+		}
+	}
+
+	/** @return A dotted path written as an expression, `a.b.C`, or null for anything else. */
+	static function dotted(e:Expr):Null<String> {
+		return switch (ExprTools.expr(e)) {
+			case EIdent(name):
+				name;
+			case EField(owner, name, _):
+				var head:Null<String> = dotted(owner);
+				head == null ? null : head + '.' + name;
+			default:
+				null;
+		}
 	}
 
 	/**
