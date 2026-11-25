@@ -20,9 +20,13 @@ import hxscript.compile.Result;
  * skip path is proved against a construct the emitter definitely refuses.
  */
 class LoadFailureTest {
+	/** Read by a script's static initialiser, which throws once this is set. */
+	public static var armed:Bool = false;
+
 	public static function run():Void {
 		guarded();
 		skipping();
+		bootThrow();
 		clean();
 	}
 
@@ -98,6 +102,34 @@ class LoadFailureTest {
 			TestCase.bad('interpreted fallback', 'gave ' + answer + ', expected 1');
 		else
 			TestCase.ok('the refused module still runs interpreted   ' + answer, true);
+	}
+
+	/**
+	 * A static initialiser that throws only when the compiled module boots costs that module, not the
+	 * JIT.
+	 *
+	 * The loader's refusal is retried once without the JIT, in case the JIT is what it objects to.
+	 * When the retry is refused as well, the JIT was not the cause and has to be back on: it used to
+	 * stay off for the rest of the process. The flag is set after the world starts, so the
+	 * interpreted run of the initialiser passes and only the boot throws.
+	 */
+	static function bootThrow():Void {
+		var odd:String = 'package u;\nclass Odd {\n\tstatic var v:Int = LoadFailureTest.armed ? throw "boot" : 1;\n'
+			+ '\tpublic static function go():Int { return v; }\n}\n';
+		var fine:String = 'package u;\nclass Fine {\n\tpublic static function go():Int { return 5; }\n}\n';
+
+		var env:Environment = new Environment();
+		env.addModule(new Module(odd, 'Odd', ['u'], 'Odd.hx'));
+		env.addModule(new Module(fine, 'Fine', ['u'], 'Fine.hx'));
+		env.start();
+
+		armed = true;
+		var report:Report = Compiler.compile(env);
+		armed = false;
+
+		TestCase.ok('the module whose boot throws is refused', report.failed.length == 1 && report.failed[0].name == 'Odd');
+		TestCase.ok('the module beside it still compiled', report.compiled.indexOf('u.Fine') >= 0);
+		TestCase.ok('the JIT is still on', Compiler.jit);
 	}
 
 	/** A world with nothing wrong with it reports no failures at all. */
