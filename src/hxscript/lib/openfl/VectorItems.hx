@@ -29,6 +29,13 @@ class VectorItems {
 			var code:String = '\n\t::Dynamic __GetItem(int inIndex) const { return const_cast<' + cls + ' *>(this)->get(inIndex); }'
 				+ '\n\t::Dynamic __SetItem(int inIndex, ::Dynamic inValue) { return set(inIndex, inValue); }\n';
 			Compiler.addMetadata('@:headerClassCode(' + haxe.Json.stringify(code) + ')', 'openfl._Vector.' + kind + 'Vector');
+
+			/**
+			 * The header calls `get` and `set`, so they have to survive `-dce full` in a host that keeps
+			 * the class but never indexes one itself.
+			 */
+			Compiler.addMetadata('@:keep', 'openfl._Vector.' + kind + 'Vector', 'get');
+			Compiler.addMetadata('@:keep', 'openfl._Vector.' + kind + 'Vector', 'set');
 		}
 	}
 }
