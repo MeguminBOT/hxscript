@@ -124,14 +124,20 @@ class Scripted {
 		 * so an argument of it keeps its type with a default value. Untyped, the argument is Dynamic in
 		 * the rebuilt body, where `for (k in map.keys())` on an `IMap` does not compile.
 		 *
+		 * `String` is left to the rule that already keeps it for a literal default: typed here, every
+		 * bridge whose constructor has a `String` argument with another default (`EOFError`, `NetStream`,
+		 * `TouchEvent`) would take it as a string where it builds today taking a `Dynamic`.
+		 *
 		 * @param t The argument's type.
-		 * @return False for an abstract (`Int`, `Float`, `Bool`, `Null<Float>`...) and `Dynamic`.
+		 * @return False for an abstract (`Int`, `Float`, `Bool`, `Null<Float>`...), `String` and `Dynamic`.
 		 */
 		function isReference(t:Type):Bool {
 			if (t == null)
 				return false;
 
 			return switch (t) {
+				case TInst(_.get() => {pack: [], name: 'String'}, _):
+					false;
 				case TLazy(f):
 					isReference(f());
 				case TType(_, _):
