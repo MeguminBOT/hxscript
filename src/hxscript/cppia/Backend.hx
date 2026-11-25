@@ -258,6 +258,13 @@ class Backend {
 					origin: e.pos == null ? null : e.pos.origin,
 					line: e.pos == null ? 0 : e.pos.line
 				});
+			} catch (e:Dynamic) {
+				/**
+				 * Anything else is a fault in the emitter rather than a construct it declined, but the
+				 * module it was writing is just as runnable interpreted. Left to escape, it ended the
+				 * whole batch, every module that would have compiled included.
+				 */
+				skipped.push({name: input.name, reason: 'the compiler failed on it: ' + Std.string(e)});
 			}
 		}
 
