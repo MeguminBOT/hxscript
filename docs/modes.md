@@ -325,14 +325,18 @@ The emitter routes that shape through `Std.string` so a script cannot reach it, 
 `hx::CppiaJitCompiler::convert` and any cppia reaches it, including bytecode Haxe's own `-cppia`
 built. It has nothing to do with this library beyond avoiding it.
 
-It is issue 3 in [`HXCPP-ISSUES.md`](../HXCPP-ISSUES.md), which has the three lines that fix it, and
-it is already applied on
-[`MeguminBOT/hxcpp`, branch `patched-hxscript`](https://github.com/MeguminBOT/hxcpp/tree/patched-hxscript)
-along with the other three fixes that have one:
+It is issue 3 in [`HXCPP-ISSUES.md`](../HXCPP-ISSUES.md), which has the three lines that fix it.
+[libhxcpp](https://github.com/openfl/libhxcpp), the C++ runtime hxScript asks for, carries that fix
+and the other three that have one:
 
 ```sh
-haxelib git hxcpp https://github.com/MeguminBOT/hxcpp patched-hxscript
+haxelib install libhxcpp
+haxelib run libhxcpp setup
 ```
+
+On hxcpp, they are applied on
+[`MeguminBOT/hxcpp`, branch `patched-hxscript`](https://github.com/MeguminBOT/hxcpp/tree/patched-hxscript),
+and `python patches/apply-hxcpp.py` applies them to a checkout you already have.
 
 ## What is not known
 

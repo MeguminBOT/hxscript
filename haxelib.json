@@ -1,7 +1,7 @@
 {
     "name": "hxscript",
     "url": "https://github.com/MeguminBOT/hxscript",
-    "description": "An advanced Haxe interpreter. It parses Haxe-shaped source and evaluates it directly, with support of runtime translation into bytecode for extremely fast performance on hxcpp and hashlink.",
+    "description": "An advanced Haxe interpreter. It parses Haxe-shaped source and evaluates it directly, with support of runtime translation into bytecode for extremely fast performance on libhxcpp (falling back to hxcpp) and hashlink.",
     "license": "MIT",
     "tags": [
         "hscript",
@@ -14,6 +14,7 @@
         "cppia",
         "bytecode",
         "hxcpp",
+        "libhxcpp",
         "runtime",
         "game",
         "hashlink",

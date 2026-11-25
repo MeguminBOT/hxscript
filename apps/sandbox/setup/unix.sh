@@ -8,6 +8,10 @@
 #
 #     sh setup/unix.sh
 #     ./build.sh run
+#
+# The C++ runtime is libhxcpp. To build against stock hxcpp instead:
+#
+#     HXSCRIPT_RUNTIME=hxcpp sh setup/unix.sh
 cd ..
 
 set -e
@@ -29,9 +33,28 @@ install_git () {
 	haxelib git "$name" "$url" $ref --skip-dependencies
 }
 
+# The C++ runtime. hxScript is built and tested against libhxcpp, the continuation of hxcpp that
+# carries the cppia fixes compiled scripts rely on, and its setup points the name `hxcpp` at itself
+# inside this repository, so lime and the compiler use it unchanged. HXSCRIPT_RUNTIME=hxcpp installs
+# stock hxcpp instead, and so does a libhxcpp install that fails.
+runtime="${HXSCRIPT_RUNTIME:-libhxcpp}"
+
+install_hxcpp () {
+	echo "Installing hxcpp from git (so no haxelib release of hxcpp ever lands on disk)..."
+	install_git hxcpp https://github.com/HaxeFoundation/hxcpp v4.3.148
+}
+
 echo
-echo "Installing hxcpp from git first (so no haxelib release of hxcpp ever lands on disk)..."
-install_git hxcpp https://github.com/HaxeFoundation/hxcpp v4.3.148
+if [ "$runtime" = "libhxcpp" ]; then
+	echo "Installing libhxcpp from git..."
+	if ! install_git libhxcpp https://github.com/openfl/libhxcpp v6.0.0; then
+		echo "libhxcpp could not be installed; falling back to hxcpp."
+		runtime="hxcpp"
+		install_hxcpp
+	fi
+else
+	install_hxcpp
+fi
 
 echo
 echo "Installing haxelib dependencies (--skip-dependencies, all transitive deps are pinned below)..."
@@ -61,26 +84,45 @@ install_git smidr    https://github.com/MeguminBOT/SmidrUI
 #
 # build.sh does exactly that when it finds a checkout beside this one.
 
-echo
-echo "Re-asserting hxcpp = git and wiping any release version folders that snuck in..."
 repo_root="$(haxelib config 2>/dev/null | tr -d '\r')"
-if [ -n "$repo_root" ] && [ -d "$repo_root/hxcpp" ]; then
-	for v in "$repo_root/hxcpp"/*; do
-		[ -d "$v" ] || continue
-		name="$(basename "$v")"
-		if [ "$name" != "git" ]; then
-			echo "Removing stray hxcpp version $name ..."
-			chmod -R u+w "$v" 2>/dev/null || true
-			rm -rf "$v"
-		fi
-	done
-fi
-haxelib set hxcpp git --always
 
-echo
-echo "Building hxcpp command-line tool from source..."
-if [ -f "$repo_root/hxcpp/git/tools/hxcpp/compile.hxml" ]; then
-	(cd "$repo_root/hxcpp/git/tools/hxcpp" && haxe compile.hxml)
+if [ "$runtime" = "libhxcpp" ]; then
+	echo
+	echo "Building libhxcpp's command-line tool from source..."
+	if [ -f "$repo_root/libhxcpp/git/tools/hxcpp/compile.hxml" ]; then
+		(cd "$repo_root/libhxcpp/git/tools/hxcpp" && haxe compile.hxml)
+	fi
+
+	echo
+	echo "Pointing hxcpp at libhxcpp in this repository..."
+	if ! haxelib run libhxcpp setup; then
+		echo "libhxcpp setup failed; falling back to hxcpp."
+		runtime="hxcpp"
+		install_hxcpp
+	fi
+fi
+
+if [ "$runtime" = "hxcpp" ]; then
+	echo
+	echo "Re-asserting hxcpp = git and wiping any release version folders that snuck in..."
+	if [ -n "$repo_root" ] && [ -d "$repo_root/hxcpp" ]; then
+		for v in "$repo_root/hxcpp"/*; do
+			[ -d "$v" ] || continue
+			name="$(basename "$v")"
+			if [ "$name" != "git" ]; then
+				echo "Removing stray hxcpp version $name ..."
+				chmod -R u+w "$v" 2>/dev/null || true
+				rm -rf "$v"
+			fi
+		done
+	fi
+	haxelib set hxcpp git --always
+
+	echo
+	echo "Building hxcpp command-line tool from source..."
+	if [ -f "$repo_root/hxcpp/git/tools/hxcpp/compile.hxml" ]; then
+		(cd "$repo_root/hxcpp/git/tools/hxcpp" && haxe compile.hxml)
+	fi
 fi
 
 echo

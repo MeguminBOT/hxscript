@@ -81,6 +81,10 @@ class Banner {
 			say(paint(line, colourFor(target)));
 
 		line('hxscript', release() + '   ' + target + '   ' + backend());
+
+		var runtime:Null<String> = Runtime.describe();
+		if (runtime != null)
+			line('runtime', runtime);
 	}
 
 	/**

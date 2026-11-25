@@ -9,6 +9,11 @@ rem disturbs the libraries the rest of your machine builds against. Run it once,
 rem
 rem     setup\windows.bat
 rem     build.bat run
+rem
+rem The C++ runtime is libhxcpp. To build against stock hxcpp instead:
+rem
+rem     set HXSCRIPT_RUNTIME=hxcpp
+rem     setup\windows.bat
 cd ..
 setlocal enabledelayedexpansion
 
@@ -17,11 +22,25 @@ if not exist ".haxelib" (
 	call haxelib newrepo
 )
 
-echo.
-echo Installing hxcpp from git first (so no haxelib installs outdated versions)...
-echo.
+rem The C++ runtime. hxScript is built and tested against libhxcpp, the continuation of hxcpp that
+rem carries the cppia fixes compiled scripts rely on, and its setup points the name hxcpp at itself
+rem inside this repository, so lime and the compiler use it unchanged. HXSCRIPT_RUNTIME=hxcpp installs
+rem stock hxcpp instead, and so does a libhxcpp install that fails.
+set "RUNTIME=%HXSCRIPT_RUNTIME%"
+if "!RUNTIME!"=="" set "RUNTIME=libhxcpp"
 
-call :installGit hxcpp https://github.com/HaxeFoundation/hxcpp v4.3.148
+echo.
+if /i "!RUNTIME!"=="libhxcpp" (
+	echo Installing libhxcpp from git...
+	call :installGit libhxcpp https://github.com/openfl/libhxcpp v6.0.0
+	if errorlevel 1 (
+		echo libhxcpp could not be installed; falling back to hxcpp.
+		set "RUNTIME=hxcpp"
+		call :installHxcpp
+	)
+) else (
+	call :installHxcpp
+)
 
 echo.
 echo Installing haxelib dependencies (--skip-dependencies, all transitive deps are manually asserted)...
@@ -54,23 +73,44 @@ rem     haxelib dev smidr    C:\path\to\SmidrUI
 rem
 rem build.bat does exactly that when it finds a checkout beside this one.
 
-echo.
-echo Re-asserting hxcpp = 'git' just in case and wiping any release version that snuck in.
-for /d %%V in (".haxelib\hxcpp\*") do (
-	if /i not "%%~nxV"=="git" (
-		echo Removing stray hxcpp version %%~nxV ...
-		attrib -r -s -h "%%V\*.*" /s /d >nul 2>&1
-		rmdir /s /q "%%V"
+if /i "!RUNTIME!"=="libhxcpp" (
+	echo.
+	echo Building libhxcpp's command-line tool from source...
+	if exist ".haxelib\libhxcpp\git\tools\hxcpp\compile.hxml" (
+		pushd ".haxelib\libhxcpp\git\tools\hxcpp"
+		call haxe compile.hxml
+		popd
+	)
+
+	echo.
+	echo Pointing hxcpp at libhxcpp in this repository...
+	call haxelib run libhxcpp setup
+	if errorlevel 1 (
+		echo libhxcpp setup failed; falling back to hxcpp.
+		set "RUNTIME=hxcpp"
+		call :installHxcpp
 	)
 )
-call haxelib set hxcpp git --always
 
-echo.
-echo Building hxcpp command-line tool from source...
-if exist ".haxelib\hxcpp\git\tools\hxcpp\compile.hxml" (
-	pushd ".haxelib\hxcpp\git\tools\hxcpp"
-	call haxe compile.hxml
-	popd
+if /i "!RUNTIME!"=="hxcpp" (
+	echo.
+	echo Re-asserting hxcpp = 'git' just in case and wiping any release version that snuck in.
+	for /d %%V in (".haxelib\hxcpp\*") do (
+		if /i not "%%~nxV"=="git" (
+			echo Removing stray hxcpp version %%~nxV ...
+			attrib -r -s -h "%%V\*.*" /s /d >nul 2>&1
+			rmdir /s /q "%%V"
+		)
+	)
+	call haxelib set hxcpp git --always
+
+	echo.
+	echo Building hxcpp command-line tool from source...
+	if exist ".haxelib\hxcpp\git\tools\hxcpp\compile.hxml" (
+		pushd ".haxelib\hxcpp\git\tools\hxcpp"
+		call haxe compile.hxml
+		popd
+	)
 )
 
 echo.
@@ -81,6 +121,11 @@ echo.
 echo Finished! Build the sandbox with:  build.bat run
 endlocal
 pause
+exit /b 0
+
+:installHxcpp
+echo Installing hxcpp from git (so no haxelib installs outdated versions)...
+call :installGit hxcpp https://github.com/HaxeFoundation/hxcpp v4.3.148
 exit /b 0
 
 :installGit
@@ -95,4 +140,4 @@ if exist ".haxelib\!LIB_DIR!" (
 	rmdir /s /q ".haxelib\!LIB_DIR!"
 )
 call haxelib git %~1 %~2 %~3 --skip-dependencies
-exit /b 0
+exit /b %errorlevel%

@@ -22,6 +22,12 @@
 # -D hxscript_no_autowire turns this off.
 --macro hxscript.setup.Autowire.run()
 
+# On hxcpp builds, which runtime is linked. hxScript asks for libhxcpp, which carries the cppia fixes
+# compiled scripts rely on, and falls back to hxcpp with one warning saying so.
+#
+# -D hxscript_allow_hxcpp silences the warning. -D hxscript_require_libhxcpp makes it an error.
+--macro hxscript.macro.Runtime.check()
+
 # One block saying the library is in this build, what it wired, and whether scripts will be compiled
 # or interpreted. A library that wires itself in has to say what it wired.
 #

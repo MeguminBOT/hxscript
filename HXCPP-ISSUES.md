@@ -9,7 +9,21 @@ whatever `haxelib path hxcpp` reports, which is not always the one being read.
 
 ## Applying the fixes
 
-Two ways, and the first is less work.
+**libhxcpp, which hxScript asks for.** [libhxcpp](https://github.com/openfl/libhxcpp) is the
+continuation of hxcpp, and its 6.0.0 carries the fixes for issues 1, 2, 3 and 7, in code of its own
+rather than the texts below. Its setup points the name `hxcpp` at it, so the compiler, `-lib hxcpp`
+and every library that depends on hxcpp use it with no other change:
+
+```sh
+haxelib install libhxcpp
+haxelib run libhxcpp setup
+```
+
+A build against hxcpp is warned once and goes on; `-D hxscript_allow_hxcpp` silences that and
+`-D hxscript_require_libhxcpp` makes it an error. `python patches/apply-hxcpp.py` recognises a
+libhxcpp checkout and leaves it alone.
+
+**On hxcpp, two ways, and the first is less work.**
 
 **A prepatched hxcpp.** Every fix below that has one is already applied on
 [`MeguminBOT/hxcpp`, branch `patched-hxscript`](https://github.com/MeguminBOT/hxcpp/tree/patched-hxscript):

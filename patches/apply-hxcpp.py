@@ -11,9 +11,14 @@
 argument this list does not name is refused rather than ignored, since a mistyped `--revert` would
 apply and a mistyped `--check` would write.
 
-There is an easier route than this script. Every fix it carries is already applied on
-MeguminBOT/hxcpp, branch patched-hxscript, and nothing else about that branch diverges from
-upstream:
+There are easier routes than this script. libhxcpp, the C++ runtime hxScript asks for, carries
+every fix here already, and this script says so and changes nothing when pointed at it:
+
+    haxelib install libhxcpp
+    haxelib run libhxcpp setup
+
+On hxcpp, every fix it carries is already applied on MeguminBOT/hxcpp, branch patched-hxscript, and
+nothing else about that branch diverges from upstream:
 
     haxelib git hxcpp https://github.com/MeguminBOT/hxcpp patched-hxscript
 
@@ -190,6 +195,16 @@ def hxcpp_root(override):
     sys.exit('`haxelib path hxcpp` named no directory; pass --path instead')
 
 
+def library_name(root):
+    """The haxelib name the checkout at root declares, or None when it declares none."""
+    try:
+        import json
+        with open(os.path.join(root, 'haxelib.json'), 'rb') as f:
+            return json.loads(f.read().decode('utf-8', 'replace')).get('name')
+    except Exception:
+        return None
+
+
 def read(path):
     """The file as text, with its newline style remembered so writing back keeps it."""
     with open(path, 'rb') as f:
@@ -239,6 +254,14 @@ def main():
 
     root = hxcpp_root(override)
     print('hxcpp: %s' % root)
+
+    # libhxcpp, the runtime hxScript asks for, carries every one of these fixes in code of its own,
+    # so none of the texts below match it and there is nothing to do. That is the answer for
+    # --check, --revert and an apply alike.
+    if library_name(root) == 'libhxcpp':
+        print('that is libhxcpp, which already carries the fixes for issue(s) %s. Nothing to do.'
+              % ', '.join(str(n) for n in COVERS))
+        sys.exit(0)
     print('fixes: %d, closing HXCPP-ISSUES.md issue(s) %s'
           % (len(FIXES), ', '.join(str(n) for n in COVERS)))
 

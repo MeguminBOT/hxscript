@@ -31,6 +31,19 @@ script.variables.get("greeted");   // 1
 That is a working embed. If the build also has lime, openfl, flixel, flixel-addons, flixel-ui or
 heaps in it, that same line wires the library for scripting as well.
 
+On hxcpp, hxScript asks for [libhxcpp](https://github.com/openfl/libhxcpp), the continuation of
+hxcpp, as its C++ runtime. Installed and set up once, it stands in for hxcpp everywhere, with no
+change to the project:
+
+```
+haxelib install libhxcpp
+haxelib run libhxcpp setup
+```
+
+A build that links hxcpp instead still builds. It gets one warning naming what it misses, and the
+banner's `runtime` line says `fallback`. The flags under [Compiling at runtime](#compiling-at-runtime)
+silence the warning or make it an error.
+
 The build says so, once, in one block:
 
 ```
@@ -164,6 +177,14 @@ Two targets can run a script as their own bytecode, and each takes one flag.
 | `-D scriptable` | hxcpp's own flag, which makes your types reachable from bytecode |
 | `-D hxscript_hl` | on HashLink, the same, and build the native module the loader needs |
 | `-D hxscript_cppia_bool_compat` | declare a `Bool` field with no type, for a stock hxcpp. See [`HXCPP-ISSUES.md`](../HXCPP-ISSUES.md), issue 1: right interpreted, still wrong jitted |
+| `-D hxscript_allow_hxcpp` | build against hxcpp rather than libhxcpp without the warning saying so. The fallback happens either way |
+| `-D hxscript_require_libhxcpp` | stop the build when it links hxcpp rather than libhxcpp, for a CI that must not ship against hxcpp |
+
+hxScript is built and tested against [libhxcpp](https://github.com/openfl/libhxcpp), which carries
+the cppia fixes in [`HXCPP-ISSUES.md`](../HXCPP-ISSUES.md) that compiled scripts rely on. Which
+runtime a build links is read from its defines (`libhxcpp` is set by libhxcpp, `hxcpp` alone by
+hxcpp) or, when neither is set, from the library `haxelib libpath hxcpp` names, which is the one the
+compiler's build step runs. A build against hxcpp is warned once and goes on.
 
 On any other target the compiler does not exist and every script is interpreted.
 

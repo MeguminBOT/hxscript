@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **hxScript asks for libhxcpp on hxcpp, and falls back to hxcpp.** [libhxcpp](https://github.com/openfl/libhxcpp)
+  is the continuation of hxcpp, and its 6.0.0 carries the cppia fixes compiled scripts rely on
+  (issues 1, 2, 3 and 7 of `HXCPP-ISSUES.md`). `-lib hxscript` now checks which runtime an hxcpp build
+  links, from the `libhxcpp` and `hxcpp` defines or, without them, from what `haxelib libpath hxcpp`
+  names, and the banner has a `runtime` line saying which. A build against hxcpp gets one warning and
+  builds as before: `-D hxscript_allow_hxcpp` silences it, `-D hxscript_require_libhxcpp` makes it an
+  error. It is a check rather than a haxelib dependency, because a dependency could not fall back and
+  would reach HashLink and every other target too.
+
+  `apps/sandbox`'s setup installs libhxcpp 6.0.0 and runs its setup inside the sandbox's own haxelib
+  repository, falling back to hxcpp when that fails; `HXSCRIPT_RUNTIME=hxcpp` asks for hxcpp outright.
+  `patches/apply-hxcpp.py` recognises a libhxcpp checkout and changes nothing in it.
+
 ## 2.0.6
 
 ### Fixed

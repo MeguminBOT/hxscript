@@ -15,19 +15,22 @@ the ones your application already compiled. Declared types are enforced as value
 anywhere in sight: a module becomes cppia or HashLink bytecode and loads into the running process as a
 real class. That is what lets a script written after you shipped run at close to compiled speed.
 
-> **On hxcpp this needs a patched hxcpp for now.** Stock hxcpp miscompiles parts of the cppia it
-> loads, so a compiled script can disagree with the same script interpreted. The fixes are
-> upstreamable and none of them is specific to this library, but until they land the compiled path
-> wants
-> [`MeguminBOT/hxcpp`, branch `patched-hxscript`](https://github.com/MeguminBOT/hxcpp/tree/patched-hxscript):
+> **On hxcpp it asks for [libhxcpp](https://github.com/openfl/libhxcpp).** Stock hxcpp miscompiles
+> parts of the cppia it loads, so a compiled script can disagree with the same script interpreted.
+> libhxcpp, the continuation of hxcpp, carries the fixes, and its setup makes everything that asks
+> for hxcpp use it, so a project needs no other change:
 >
 > ```sh
-> haxelib git hxcpp https://github.com/MeguminBOT/hxcpp patched-hxscript
+> haxelib install libhxcpp
+> haxelib run libhxcpp setup
 > ```
 >
-> [HXCPP-ISSUES.md](HXCPP-ISSUES.md) lists every fault behind that, and
-> `python patches/apply-hxcpp.py` patches a checkout you already have instead. Interpreting is
-> unaffected, and so is HashLink.
+> **hxcpp still works.** A build against it gets one warning and goes on, interpreting exactly as
+> before. `-D hxscript_allow_hxcpp` says the fallback is meant and silences the warning, and
+> `-D hxscript_require_libhxcpp` makes it an error instead. On hxcpp, the compiled path wants the
+> fixes some other way: [`MeguminBOT/hxcpp`, branch `patched-hxscript`](https://github.com/MeguminBOT/hxcpp/tree/patched-hxscript),
+> or `python patches/apply-hxcpp.py` on a checkout you already have.
+> [HXCPP-ISSUES.md](HXCPP-ISSUES.md) lists every fault behind this. HashLink is unaffected.
 
 A script is an ordinary `.hx` file your program reads at runtime. `game.Entity` here is one of your
 own compiled classes, marked `@:scriptable` in a package `-D hxscript_host=game` names:
