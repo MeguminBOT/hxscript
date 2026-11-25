@@ -3,6 +3,8 @@ import hxscript.Module;
 import hxscript.cppia.Backend;
 import hxscript.compile.Unit;
 import hxscript.compile.Result;
+import hxscript.compile.Compiler;
+import hxscript.compile.Report;
 import hxscript.types.ScriptedClass;
 
 /**
@@ -47,6 +49,53 @@ class StaticInitTest {
 
 		chain();
 		assignTargets();
+		throwing();
+	}
+
+	/**
+	 * A module whose static initialiser threw when it started stays interpreted, and costs nothing
+	 * else.
+	 *
+	 * Compiled, the module ran the initialiser again as it booted, and the throw was the loader
+	 * refusing the whole batch: the batch was split until the module was alone, and the halves could
+	 * no longer name each other's classes, so modules that had nothing wrong with them were left
+	 * interpreted as `compiled elsewhere`. Several users of one library are what makes a split strand
+	 * some of them.
+	 */
+	static function throwing():Void {
+		var env:Environment = new Environment();
+		env.addModule(new Module('package sthrow;\nclass Lib {\n\tpublic static function two():Int { return 2; }\n}\n', 'Lib',
+			['sthrow'], 'Lib.hx'));
+		for (i in 0...6)
+			env.addModule(new Module('package sthrow;\nimport sthrow.Lib;\nclass User$i {\n\tpublic static function go():Int { return Lib.two(); }\n}\n',
+				'User$i', ['sthrow'], 'User$i.hx'));
+		env.addModule(new Module('package sthrow;\nclass Bad {\n\tstatic var v:Int = throw "start";\n'
+			+ '\tpublic static function go():Int { return 3; }\n}\n', 'Bad', ['sthrow'], 'Bad.hx'));
+		env.start();
+
+		var report:Report = Compiler.compile(env);
+
+		var skipped:Bool = false;
+		for (entry in report.skipped)
+			if (entry.name == 'Bad' && entry.reason.indexOf('static initialiser threw') >= 0)
+				skipped = true;
+		TestCase.ok('a module whose static initialiser threw is left interpreted, and says why', skipped);
+		TestCase.ok('the loader refused nothing', report.failed.length == 0);
+
+		var users:Int = 0;
+		for (i in 0...6)
+			if (report.compiled.indexOf('sthrow.User$i') >= 0)
+				users++;
+		if (users != 6)
+			TestCase.bad('static initialiser threw', users + ' of 6 users of the library compiled');
+		else
+			TestCase.ok('every user of the library beside it still compiled', true);
+
+		var answer:Dynamic = try Reflect.callMethod(null, (cast env.resolve('sthrow.Bad') : ScriptedClass).reflectGetField('go'), []) catch (e:Dynamic) 'threw: ' + e;
+		if (answer != 3)
+			TestCase.bad('static initialiser threw', 'the module gave ' + answer + ', expected 3');
+		else
+			TestCase.ok('the module still runs interpreted   ' + answer, true);
 	}
 
 	/**

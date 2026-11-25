@@ -43,6 +43,9 @@ class ClassProbe {
 		p("nested new", base, "{ var xs = [for (i in 0...3) new A()]; xs.length + ':' + xs[0].who(); }", "3:A");
 		p("this in closure", "class L { public var v=9; public function new() {} public function m() { var f = function() return v; return f(); } }\n",
 			"new L().m()", "9");
+		// The function that threw has to unwind its frame, or building the next static function crashes.
+		p("static function after an initialiser that threw through a function",
+			"class L2 { static var a:Int = (function():Int { throw 'x'; })(); public static function b():Int return 4; }\n", "L2.b()", "4");
 	}
 
 	static function main():Void {
