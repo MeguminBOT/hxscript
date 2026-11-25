@@ -6,10 +6,12 @@ import TestCase.eq;
 /**
  * The escapes of a regular-expression literal.
  *
- * A regular expression has escapes of its own, `\d`, `\.`, `\\`, which mean something to it and
- * nothing to a string. They were read as a string's: `~/\d+/` was refused with
- * `Invalid character: 'd'`, and `~/a\\b/` lost a backslash and looked for a word boundary. Haxe's
- * lexer decodes `\/`, `\n`, `\r` and `\t` and hands every other one to the pattern as written.
+ * A regular expression has escapes of its own, `\d`, `\.`, `\w`, which mean something to it and
+ * nothing to a string. They were read as a string's, so `~/\d+/` was refused with
+ * `Invalid character: 'd'`. They now reach the pattern as written, as Haxe's lexer hands them on.
+ * The escapes a string also has keep the string's reading they always had, so a script that loads
+ * today means what it meant: `~/^panel_\\d+$/`, the usual way around the refusal, is still the
+ * pattern `^panel_\d+$`, and `\"` is still the quote, where Haxe keeps `\\` whole and refuses `\"`.
  *
  * The patterns are compared as text, which says what the lexer did on every target, and a few are
  * run against the same literal compiled by Haxe.
@@ -52,10 +54,11 @@ class RegexTest {
 		eq("every class escape", pattern("~/\\w\\W\\b\\B\\s\\S\\d\\D/"), "\\w\\W\\b\\B\\s\\S\\d\\D");
 		eq("escaped metacharacters", pattern("~/\\$\\.\\*\\+\\^\\|\\{\\}\\[\\]\\(\\)\\?\\-/"),
 			"\\$\\.\\*\\+\\^\\|\\{\\}\\[\\]\\(\\)\\?\\-");
-		eq("escaped backslash", pattern("~/a\\\\b/"), "a\\\\b");
+		eq("escaped backslash keeps one backslash, as before", pattern("~/a\\\\b/"), "a\\b");
+		eq("escaped quotes are the quotes, as before", pattern("~/\\\"a\\'/"), "\"a'");
 		eq("back reference", pattern("~/(a)\\1/"), "(a)\\1");
 		eq("hexadecimal escape", pattern("~/\\x41/"), "\\x41");
-		eq("unicode escape", pattern("~/\\u00e9\\U00E9/"), "\\u00e9\\U00E9");
+		eq("unicode escape decoded as before, upper-case one kept", pattern("~/\\u00e9\\U00E9/"), "é\\U00E9");
 		eq("escaped slash", pattern("~/a\\/b/"), "a/b");
 		eq("newline, return and tab", pattern("~/a\\nb\\rc\\td/"), "a\nb\rc\td");
 
@@ -65,7 +68,8 @@ class RegexTest {
 		eq("digits match", ev("~/^panel_\\d+$/.match('panel_12')"), ~/^panel_\d+$/.match('panel_12'));
 		eq("digits do not match", ev("~/^panel_\\d+$/.match('panel_x')"), ~/^panel_\d+$/.match('panel_x'));
 		eq("dot is a dot", ev("~/^a\\.b$/.match('axb')"), ~/^a\.b$/.match('axb'));
-		eq("backslash is a backslash", ev("~/^a\\\\b$/.match('a\\\\b')"), ~/^a\\b$/.match('a\\b'));
+		eq("a doubled backslash before a class still makes the class", ev("~/^panel_\\\\d+$/.match('panel_12')"), true);
+		eq("a doubled backslash before a dot still escapes the dot", ev("~/^a\\\\.b$/.match('axb')"), false);
 		eq("slash is a slash", ev("~/^a\\/b$/.match('a/b')"), ~/^a\/b$/.match('a/b'));
 		eq("group after escapes",
 			ev("{ var r = ~/(\\w+)\\s*=\\s*(\\d+)/; r.match('hp = 12') ? r.matched(1) + r.matched(2) : 'no'; }"),

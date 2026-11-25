@@ -386,25 +386,27 @@ class Lexer {
 	}
 
 	/**
-	 * Writes an escape of a regular-expression literal to the pattern, as Haxe's lexer does.
+	 * Writes an escape of a regular-expression literal to the pattern.
 	 *
-	 * Only `\/`, `\n`, `\r` and `\t` are decoded. The others are the regular expression's own
-	 * (`\d`, `\.`, `\\`) and reach the pattern with their backslash.
+	 * An escape a string also has (`\n`, `\r`, `\t`, `\\`, `\"`, `\'`, and `\u` where JSON escapes
+	 * are allowed) is decoded as a string's, as it always was: scripts that load today keep their
+	 * meaning, `~/^panel_\\d+$/` included, which is the pattern `^panel_\d+$`. Haxe's lexer keeps
+	 * `\\` whole and refuses the quotes. `\/` gives the slash. The regular expression's own escapes
+	 * (`\d`, `\.`, `\w`...), refused before, reach the pattern with their backslash, as in Haxe.
 	 *
 	 * @param c The character following the backslash.
 	 * @param p The buffer holding the pattern.
+	 * @param old The line the literal started on, for an unterminated `\u`.
 	 */
-	inline function parseRegexEscape(c:Int, p:StringBuf) {
+	inline function parseRegexEscape(c:Int, p:StringBuf, old:Int) {
 		switch (c) {
+			case 'n'.code, 'r'.code, 't'.code, '\\'.code, '"'.code, "'".code:
+				parseEscape(c, p, old);
+			case 'u'.code if (allowJSON):
+				parseEscape(c, p, old);
 			case '/'.code:
 				p.addChar(c);
-			case 'n'.code:
-				p.addChar('\n'.code);
-			case 'r'.code:
-				p.addChar('\r'.code);
-			case 't'.code:
-				p.addChar('\t'.code);
-			case '\\'.code, '$'.code, '.'.code, '*'.code, '+'.code, '^'.code, '|'.code, '{'.code, '}'.code, '['.code,
+			case '$'.code, '.'.code, '*'.code, '+'.code, '^'.code, '|'.code, '{'.code, '}'.code, '['.code,
 				']'.code, '('.code, ')'.code, '?'.code, '-'.code, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 'w'.code,
 				'W'.code, 'b'.code, 'B'.code, 's'.code, 'S'.code, 'd'.code, 'D'.code, 'x'.code:
 				p.addChar('\\'.code);
@@ -448,7 +450,7 @@ class Lexer {
 
 			if (esc) {
 				esc = false;
-				parseRegexEscape(c, p);
+				parseRegexEscape(c, p, old);
 			} else if (c == '\\'.code) {
 				esc = true;
 			} else if (c == '/'.code) {
