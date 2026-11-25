@@ -130,6 +130,7 @@ class LoadFailureTest {
 		TestCase.ok('the module whose boot throws is refused', report.failed.length == 1 && report.failed[0].name == 'Odd');
 		TestCase.ok('the module beside it still compiled', report.compiled.indexOf('u.Fine') >= 0);
 		TestCase.ok('the JIT is still on', Compiler.jit);
+		TestCase.ok('the JIT retry is still there for a later batch', Reflect.field(hxscript.cppia.Backend, 'jitDropped') == false);
 	}
 
 	/** A world with nothing wrong with it reports no failures at all. */

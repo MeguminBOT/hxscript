@@ -600,6 +600,7 @@ class Backend {
 			 */
 			try {
 				cpp.cppia.Host.enableJit(true);
+				jitDropped = false;
 			} catch (e:haxe.Exception) {
 				jit = false;
 			}
