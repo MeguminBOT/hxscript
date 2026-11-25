@@ -386,6 +386,46 @@ class Lexer {
 	}
 
 	/**
+	 * Writes an escape of a regular-expression literal to the pattern.
+	 *
+	 * An escape a string also has (`\n`, `\r`, `\t`, `\\`, `\"`, `\'`, and `\u` where JSON escapes
+	 * are allowed) is decoded as a string's, as it always was: scripts that load today keep their
+	 * meaning, `~/^panel_\\d+$/` included, which is the pattern `^panel_\d+$`. Haxe's lexer keeps
+	 * `\\` whole and refuses the quotes. `\/` gives the slash. The regular expression's own escapes
+	 * (`\d`, `\.`, `\w`...), refused before, reach the pattern with their backslash, as in Haxe.
+	 *
+	 * @param c The character following the backslash.
+	 * @param p The buffer holding the pattern.
+	 * @param old The line the literal started on, for an unterminated `\u`.
+	 */
+	inline function parseRegexEscape(c:Int, p:StringBuf, old:Int) {
+		switch (c) {
+			case 'n'.code, 'r'.code, 't'.code, '\\'.code, '"'.code, "'".code:
+				parseEscape(c, p, old);
+			case 'u'.code if (allowJSON):
+				parseEscape(c, p, old);
+			case '/'.code:
+				p.addChar(c);
+			case '$'.code, '.'.code, '*'.code, '+'.code, '^'.code, '|'.code, '{'.code, '}'.code, '['.code,
+				']'.code, '('.code, ')'.code, '?'.code, '-'.code, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 'w'.code,
+				'W'.code, 'b'.code, 'B'.code, 's'.code, 'S'.code, 'd'.code, 'D'.code, 'x'.code:
+				p.addChar('\\'.code);
+				p.addChar(c);
+			case 'u'.code, 'U'.code:
+				p.addChar('\\'.code);
+				p.addChar(c);
+				for (i in 0...4) {
+					var digit = readChar();
+					if (!((digit >= 48 && digit <= 57) || (digit >= 65 && digit <= 70) || (digit >= 97 && digit <= 102)))
+						invalidChar(digit);
+					p.addChar(digit);
+				}
+			default:
+				invalidChar(c);
+		}
+	}
+
+	/**
 	 * Reads a `~/.../flags` regular-expression literal.
 	 *
 	 * @return The regex token.
@@ -410,7 +450,7 @@ class Lexer {
 
 			if (esc) {
 				esc = false;
-				parseEscape(c, p, old);
+				parseRegexEscape(c, p, old);
 			} else if (c == '\\'.code) {
 				esc = true;
 			} else if (c == '/'.code) {
