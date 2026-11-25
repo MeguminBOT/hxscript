@@ -540,6 +540,12 @@ class Corpus {
 		check('a local named after the instance method its initialiser calls', 'return new T().go();', '7',
 			'public function new() {}\n\tfunction value():Int return 7;\n\tpublic function go():Int { var value = value(); return value; }');
 		check('a local initialised from the outer local it shadows', 'var a = 1; { var a = a + 1; return a; }', '2');
+		// A `null` setter lets only its own class write, and the interpreter tells who is writing by
+		// tracking which one is running, which starts once some accessor is noted. An instance field's
+		// never was, so unless a static or a local declared one first, its own class was refused.
+		check('a null setter written by its own class', 'return new Box().bump();', '9', null,
+			'class Box { public function new() {} public var shown(default, null):Int = 0; '
+			+ 'public function bump():Int { shown = 9; return shown; } }');
 		check('untyped passthrough', 'return untyped 5;', '5');
 
 		// A meta written without parentheses has no argument list at all, and the compiler's closure
