@@ -531,6 +531,15 @@ class Corpus {
 		check('string interpolation', "var n = 5; return 'n is ${n}';", 'n is 5');
 		check('nested function', 'function inner(a:Int) return a + 1; return inner(4);', '5');
 		check('final local', 'final n = 4; return n * 2;', '8');
+
+		// An initialiser runs before its variable exists, so a name it shares with the variable is
+		// whatever that name meant before the declaration. Compiled code bound the new local first:
+		// the call read the local, still null, and the outer local read as its own default.
+		check('a local named after the method its initialiser calls', 'var value = value(); return value;', '7',
+			'static function value():Int return 7;');
+		check('a local named after the instance method its initialiser calls', 'return new T().go();', '7',
+			'public function new() {}\n\tfunction value():Int return 7;\n\tpublic function go():Int { var value = value(); return value; }');
+		check('a local initialised from the outer local it shadows', 'var a = 1; { var a = a + 1; return a; }', '2');
 		check('untyped passthrough', 'return untyped 5;', '5');
 
 		// A meta written without parentheses has no argument list at all, and the compiler's closure

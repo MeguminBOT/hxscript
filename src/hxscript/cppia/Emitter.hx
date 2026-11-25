@@ -1577,16 +1577,18 @@ class Emitter {
 					// holding one of this batch's abstracts has to be known as one: its methods are
 					// statics taking the boxed value, and a call it did not recognise was emitted as an
 					// instance call on the type the abstract wraps, which the loader resolves to nothing.
-					var id:Int = declareVar(n, t == null ? inferType(init) : typeName(t));
+					var known:Null<String> = t == null ? inferType(init) : typeName(t);
 					var stored:String = t != null ? typeName(t) : literalType(init);
 
 					if (init == null) {
+						var id:Int = declareVar(n, known);
 						w.token('VARDECL');
 						w.str(n);
 						w.int(id);
 						w.bool(false);
 						storableType(t == null ? '' : typeName(t));
 					} else {
+						var id:Int = nextVarId++;
 						w.token('VARDECLI');
 						w.str(n);
 						w.int(id);
@@ -1602,6 +1604,7 @@ class Emitter {
 
 						expectedArray = declared;
 						expr(init);
+						bindVar(n, id, known);
 					}
 					w.newline();
 
@@ -5291,6 +5294,20 @@ class Emitter {
 	 */
 	function declareVar(name:String, ?type:String, ?written:String):Int {
 		var id:Int = nextVarId++;
+		bindVar(name, id, type, written);
+		return id;
+	}
+
+	/**
+	 * Binds a name to a variable id taken earlier, for a local whose initialiser is written between
+	 * the two: Haxe evaluates it before the variable exists, so in `var value = value();` the call
+	 * reaches the method, not the local being declared.
+	 *
+	 * @param name The variable name.
+	 * @param id The variable id, from `nextVarId`.
+	 * @param type Its declared type, if annotated.
+	 */
+	function bindVar(name:String, id:Int, ?type:String, ?written:String):Void {
 		if (scopes.length == 0)
 			pushScope();
 		scopes[scopes.length - 1].set(name, id);
@@ -5300,8 +5317,6 @@ class Emitter {
 		var said:Null<String> = (written != null && written.length > 0) ? written : type;
 		if (said != null && said.length > 0)
 			scopeWritten[scopeWritten.length - 1].set(name, said);
-
-		return id;
 	}
 
 	/** The declared type of a local, or null when it had none. */
