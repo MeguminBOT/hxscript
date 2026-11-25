@@ -12,6 +12,9 @@ class HostBase {
 	/** A plain field, so a subclass can be seen to reach one. */
 	public var kept:Int = 0;
 
+	/** Set by the constructor, so a subclass can be seen to have run it. */
+	public var made:String = "host";
+
 	/**
 	 * A running total, declared `Float`, for accumulating past what an `Int` holds.
 	 *
