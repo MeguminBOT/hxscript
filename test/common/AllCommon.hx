@@ -23,6 +23,7 @@ class AllCommon {
 		{name: 'GapProbe', run: GapProbe.run},
 		{name: 'ImportTest', run: ImportTest.run},
 		{name: 'InstanceScopeTest', run: InstanceScopeTest.run},
+		{name: 'NullShadowTest', run: NullShadowTest.run},
 		{name: 'StdProbe', run: StdProbe.run},
 		{name: 'InterpStringTest', run: InterpStringTest.run},
 		{name: 'LoopTest', run: LoopTest.run},

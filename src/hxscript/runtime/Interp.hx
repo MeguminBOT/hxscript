@@ -3154,7 +3154,7 @@ class Interp {
 						unknown = field;
 					}
 
-					if (valued)
+					if (got != null || (valued && Config.strictNullAccess))
 						continue;
 				}
 
