@@ -175,11 +175,22 @@ class Backend {
 	}
 
 	/**
+	 * What tells a module apart inside a batch: its path when the host gave one, since two packages
+	 * may each have a `Main`, and its name otherwise. The name is still what a report shows.
+	 *
+	 * @param input The module.
+	 * @return Its identity in the batch.
+	 */
+	static inline function moduleId(input:Unit):String {
+		return input.key != null ? input.key : input.name;
+	}
+
+	/**
 	 * Drops modules that name a class which is not going to be there.
 	 *
 	 * @param accepted The modules that compiled on their own.
 	 * @param skipped Receives each module dropped here, with its reason.
-	 * @param uses What each module referenced, by module name.
+	 * @param uses What each module referenced, by `moduleId`.
 	 * @return The modules that can be emitted together.
 	 */
 	static function dropDanglingUsers(accepted:Array<Unit>, skipped:Array<Skip>,
@@ -195,7 +206,7 @@ class Backend {
 
 			for (input in accepted) {
 				var missing:String = null;
-				var referenced:Array<String> = uses.get(input.name);
+				var referenced:Array<String> = uses.get(moduleId(input));
 
 				if (referenced != null) {
 					for (path in referenced) {
@@ -252,9 +263,9 @@ class Backend {
 			var trial:Emitter = prepare(inputs, ambient, external, statics);
 
 			try {
-				trial.emit(input.decls, input.name);
+				trial.emit(input.decls, moduleId(input));
 				trial.finish();
-				uses.set(input.name, trial.references());
+				uses.set(moduleId(input), trial.references());
 				accepted.push(input);
 			} catch (e:Unsupported) {
 				skipped.push({
@@ -283,8 +294,8 @@ class Backend {
 
 		var compiled:Array<String> = [];
 		for (input in accepted) {
-			emitter.emit(input.decls, input.name);
-			compiled.push(input.name);
+			emitter.emit(input.decls, moduleId(input));
+			compiled.push(moduleId(input));
 		}
 
 		if (emitter.echoed != null)
@@ -347,13 +358,13 @@ class Backend {
 		var scopes:Map<String, hxscript.runtime.Interp> = new Map();
 
 		for (input in inputs) {
-			emitter.declare(input.decls, input.name);
+			emitter.declare(input.decls, moduleId(input));
 
 			if (input.scope == null || input.key == null)
 				continue;
 
-			scopes.set(input.name, input.scope);
-			emitter.globalScope(input.name, input.key);
+			scopes.set(moduleId(input), input.scope);
+			emitter.globalScope(moduleId(input), input.key);
 		}
 
 		emitter.settleImplicitConstructors();
@@ -636,7 +647,7 @@ class Backend {
 		 * held the module last, which for a reloaded module is the previous one.
 		 */
 		for (module in offered) {
-			if (result.compiled.indexOf(module.name) >= 0)
+			if (result.compiled.indexOf(module.path) >= 0)
 				bindGlobals(module, env);
 		}
 
@@ -649,7 +660,7 @@ class Backend {
 		}
 
 		for (module in offered) {
-			if (result.compiled.indexOf(module.name) < 0)
+			if (result.compiled.indexOf(module.path) < 0)
 				continue;
 
 			for (path in declaredPaths(module.decls)) {
